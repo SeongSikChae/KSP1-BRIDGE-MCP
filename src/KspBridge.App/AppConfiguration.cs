@@ -13,11 +13,5 @@ namespace KspBridge.App
 
         [Property(PropertyType.INT, required: true)]
         public int TimeoutSeconds { get; set; }
-
-        /// <summary>Optional broadcast recording (start_broadcast).</summary>
-        public Broadcast.BroadcastOptions? Broadcast { get; set; }
-
-        /// <summary>Required when Broadcast.Speech.ApiKey is set.</summary>
-        public Broadcast.OsKmsOptions? OsKms { get; set; }
     }
 }

@@ -34,7 +34,7 @@ namespace KspBridge
     /// <summary>Loads, swaps and drives the logic assembly. Main thread only.</summary>
     public static class LogicHost
     {
-        public const string LoaderVersion = "1.0.0";
+        public const string LoaderVersion = "0.0.1";
 
         private static ILogic _logic;
         private static LogicContext _context;

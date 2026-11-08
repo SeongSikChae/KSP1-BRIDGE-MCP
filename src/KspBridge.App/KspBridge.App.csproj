@@ -5,8 +5,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Biz.Bizadm.KMS" />
-    <PackageReference Include="Biz.Bizadm.KMS.Credentials" />
     <PackageReference Include="Biz.Bizadm.Serilog.Enrichers.Caller" />
     <PackageReference Include="Biz.Bizadm.Serilog.Sinks.File.Extensions" />
     <PackageReference Include="Biz.Bizadm.System.Configuration.Extensions" />
