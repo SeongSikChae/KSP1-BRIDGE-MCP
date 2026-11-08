@@ -115,14 +115,54 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Get, "api/stages", null, ct);
 
         [McpServerTool(Name = "set_attitude")]
-        [Description("Hold a surface-relative attitude until released. pitch: degrees above the horizon (90 = straight up), heading: compass degrees (90 = east), roll optional (omit = free). mode 'own' = KspBridge controller, 'sas' = stock SAS lock (needs SAS).")]
+        [Description("Hold an attitude until released. frame 'surface' (default): pitch = degrees above the horizon (90 = straight up), heading = compass degrees (90 = east), roll optional (omit = free). " +
+            "Other frames follow a moving reference instead (no pitch/heading/roll): prograde, retrograde, normal, antinormal, radial_in, radial_out (orbital velocity), " +
+            "surface_prograde, surface_retrograde (surface velocity; e.g. re-entry), node (first maneuver node burn direction); pitchOffset raises the nose from the reference toward local up, yawOffset turns it clockwise seen from above. " +
+            "maxAoaDeg keeps the nose within that angle of the surface velocity while dynamic pressure is >= 1 kPa (any frame). " +
+            "mode 'own' = KspBridge controller, 'sas' = stock SAS steering to the same target (needs SAS, works at any pilot level).")]
         public Task<string> SetAttitude(
-            double pitch,
-            double heading,
+            double? pitch = null,
+            double? heading = null,
             [Description("own or sas")] string mode = "own",
             double? roll = null,
+            [Description("surface (default), prograde, retrograde, normal, antinormal, radial_in, radial_out, surface_prograde, surface_retrograde, node")] string? frame = null,
+            [Description("Degrees, frames other than surface")] double? pitchOffset = null,
+            [Description("Degrees, frames other than surface")] double? yawOffset = null,
+            [Description("Max angle of attack (deg) while dynamic pressure >= 1 kPa")] double? maxAoaDeg = null,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/attitude", new { mode, pitch, heading, roll }, ct);
+        {
+            Dictionary<string, object?> body = new() { ["mode"] = mode };
+            if (frame is null or "surface")
+            {
+                body["pitch"] = pitch;
+                body["heading"] = heading;
+                body["roll"] = roll;
+            }
+            else if (pitch.HasValue || heading.HasValue || roll.HasValue)
+            {
+                // Pass them on so the mod rejects them instead of silently ignoring a requested roll.
+                body["pitch"] = pitch;
+                body["heading"] = heading;
+                body["roll"] = roll;
+            }
+            if (frame != null)
+            {
+                body["frame"] = frame;
+            }
+            if (pitchOffset.HasValue)
+            {
+                body["pitch_offset"] = pitchOffset.Value;
+            }
+            if (yawOffset.HasValue)
+            {
+                body["yaw_offset"] = yawOffset.Value;
+            }
+            if (maxAoaDeg.HasValue)
+            {
+                body["max_aoa_deg"] = maxAoaDeg.Value;
+            }
+            return client.SendAsync(HttpMethod.Post, "api/attitude", body, ct);
+        }
 
         [McpServerTool(Name = "release_attitude")]
         [Description("Stop holding the attitude target.")]
@@ -130,14 +170,32 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Post, "api/attitude/off", new { }, ct);
 
         [McpServerTool(Name = "wait_until")]
-        [Description("Wait until a condition holds (or timeout, max 120 s). Returns met, elapsed, value and a vessel snapshot; returns early if the vessel changes or the scene changes. Situation values e.g. LANDED, SPLASHED, FLYING, SUB_ORBITAL, ORBITING. " + TriggerTools.Fields + " For actions that must happen exactly when a condition is met, use add_trigger instead.")]
+        [Description("Wait until a condition holds (or timeout, max 120 s). Returns met, elapsed, value and a vessel snapshot; returns early if the vessel changes or the scene changes. Situation values e.g. LANDED, SPLASHED, FLYING, SUB_ORBITAL, ORBITING. " + TriggerTools.Fields + " " +
+            "Also returns early (met=false, reason='anomaly', anomaly={type, detail}) on abortOn anomalies: part_lost (a part of this vessel destroyed), " +
+            "control_lost (attitude hold or SAS on, pitch/yaw input at its limit for 2.5 s but the vessel does not turn that way: no steering, no power, or aero overpowering), " +
+            "flameout (an engine flamed out). Default abortOn = [part_lost, control_lost]; [] turns it off. For actions that must happen exactly when a condition is met, use add_trigger instead.")]
         public Task<string> WaitUntil(
-            string field,
-            [Description(">=, <= or ==")] string op,
-            [Description("Number, string (situation) or boolean (stage_flameout, any_flameout)")] System.Text.Json.JsonElement value,
+            string? field = null,
+            [Description(">=, <= or ==")] string? op = null,
+            [Description("Number, string (situation, node_exec) or boolean (stage_flameout, any_flameout)")] System.Text.Json.JsonElement? value = null,
             [Description("Seconds, 1..120")] double timeout = 60,
+            [Description(TriggerTools.ConditionHelp)] System.Text.Json.JsonElement? condition = null,
+            [Description("Anomalies that end the wait early: part_lost, control_lost, flameout. Omit = [part_lost, control_lost]; [] = none.")] string[]? abortOn = null,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/wait", new { field, op, value = TriggerTools.NormalizeValue(field, value), timeout }, ct,
-                TimeSpan.FromSeconds(Math.Clamp(timeout, 1, 120) + 15));
+        {
+            if (condition.HasValue == (field != null))
+            {
+                return Task.FromResult("error: bad_request: give either condition or field/op/value.");
+            }
+            Dictionary<string, object?> body = condition.HasValue
+                ? new() { ["condition"] = TriggerTools.NormalizeCondition(condition.Value) }
+                : new() { ["field"] = field, ["op"] = op, ["value"] = value.HasValue ? TriggerTools.NormalizeValue(field!, value.Value) : null };
+            body["timeout"] = timeout;
+            if (abortOn != null)
+            {
+                body["abort_on"] = abortOn;
+            }
+            return client.SendAsync(HttpMethod.Post, "api/wait", body, ct, TimeSpan.FromSeconds(Math.Clamp(timeout, 1, 120) + 15));
+        }
     }
 }

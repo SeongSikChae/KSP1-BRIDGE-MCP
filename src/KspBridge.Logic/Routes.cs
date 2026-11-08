@@ -6,7 +6,7 @@ namespace KspBridge
 {
     public static class Routes
     {
-        public const string Version = "0.12.0";
+        public const string Version = "0.13.0";
 
         public static List<Route> Build(MainThreadDispatcher dispatcher)
         {
@@ -22,6 +22,8 @@ namespace KspBridge
                 new Route("GET", "/api/nodes", (m, b, q) => NodeHandler.List()),
                 new Route("POST", "/api/nodes", (m, b, q) => NodeHandler.Add(b)),
                 new Route("DELETE", "/api/nodes/(?<index>[^/]+)", (m, b, q) => NodeHandler.Remove(m.Groups["index"].Value)),
+                new Route("POST", "/api/node/execute", (m, b, q) => NodeHandler.Execute(b)),
+                new Route("POST", "/api/node/cancel", (m, b, q) => NodeHandler.Cancel()),
                 new Route("GET", "/api/parts", (m, b, q) => PartsHandler.List(q)),
                 new Route("POST", "/api/craft/build", (m, b, q) => CraftHandler.Build(b)),
                 new Route("GET", "/api/craft", (m, b, q) => LaunchHandler.ListCraft(q)),

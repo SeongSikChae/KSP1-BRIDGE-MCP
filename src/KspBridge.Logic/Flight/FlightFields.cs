@@ -10,6 +10,7 @@ namespace KspBridge.Flight
         {
             "altitude_asl", "altitude_terrain", "apoapsis", "periapsis", "time_to_ap", "speed_surface", "speed_vertical", "met", "ut", "g_force", "g_load_max",
             "thrust_kn", "max_accel", "twr", "drag_accel", "stop_time", "stop_distance", "stop_dv", "time_to_impact", "burn_margin",
+            "node_dv_remaining", "attitude_error",
         };
 
         /// <summary>Builds the comparison; body must hold "value" (number, string for situation, bool for stage_flameout).</summary>
@@ -35,12 +36,17 @@ namespace KspBridge.Flight
                 string target = body.GetString("value").ToUpperInvariant();
                 return v => v is string s && s == target;
             }
+            if (field == "node_exec")
+            {
+                string target = body.GetString("value").ToLowerInvariant();
+                return v => v is string s && s == target;
+            }
             if (field == "stage_flameout" || field == "any_flameout")
             {
                 bool target = body.GetBool("value");
                 return v => v is bool b && b == target;
             }
-            throw ApiException.BadRequest("unknown field '" + field + "'. Valid: " + string.Join(", ", NumericFields) + ", situation, stage_flameout, any_flameout");
+            throw ApiException.BadRequest("unknown field '" + field + "'. Valid: " + string.Join(", ", NumericFields) + ", situation, node_exec, stage_flameout, any_flameout");
         }
 
         public static object Read(Vessel v, string field)
@@ -59,6 +65,9 @@ namespace KspBridge.Flight
                 case "g_force": return v.geeForce;
                 case "g_load_max": return Handlers.VesselHandler.MaxGLoad(v);
                 case "situation": return v.situation.ToString();
+                case "node_exec": return NodeExecutor.State;
+                case "node_dv_remaining": return NodeExecutor.Remaining(v);
+                case "attitude_error": return Attitude.AttitudeController.ErrorDeg(v);
                 case "stage_flameout": return StageFlameout(v);
                 case "any_flameout": return AnyFlameout(v);
                 case "thrust_kn": return Prediction.Get(v).ThrustKn;

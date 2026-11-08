@@ -73,6 +73,7 @@ namespace KspBridge.Flight
             public int FrN;
             public Brake Brake;
             public bool ImpactThisTick;
+            public bool WasPacked;
         }
 
         // ---- hooks ----
@@ -172,6 +173,19 @@ namespace KspBridge.Flight
             double mass = v.GetTotalMass();
             double thrust = 0;
             bool integrate = !v.packed && mass > 0;
+
+            // Rails warp freezes the attitude in inertial space: record how far off the held target the vessel is when it ends.
+            if (r.WasPacked && !v.packed && AttitudeController.Active(v))
+            {
+                double? err = AttitudeController.ErrorDeg(v);
+                Event(r, v, "attitude_after_warp", new Dictionary<string, object>
+                {
+                    ["frame"] = AttitudeController.Frame,
+                    ["error_deg"] = err.HasValue ? (object)R(err.Value, 1) : null,
+                    ["over_limit"] = err.HasValue && err.Value > 15, // record-only flag: far off the target after warp
+                });
+            }
+            r.WasPacked = v.packed;
             foreach (Part p in v.parts)
             {
                 foreach (ModuleEngines e in p.FindModulesImplementing<ModuleEngines>())
@@ -579,6 +593,24 @@ namespace KspBridge.Flight
                 copy["sas_event"] = copy["event"];
                 copy.Remove("event");
                 Event(_rec, v, "sas", copy);
+            }
+        }
+
+        /// <summary>An anomaly that ended a wait_until early.</summary>
+        internal static void AnomalyEvent(Vessel v, Dictionary<string, object> anomaly)
+        {
+            if (Mine(v))
+            {
+                Event(_rec, v, "anomaly", new Dictionary<string, object>(anomaly));
+            }
+        }
+
+        /// <summary>execute_node state changes.</summary>
+        internal static void NodeExecEvent(Vessel v, Dictionary<string, object> e)
+        {
+            if (Mine(v))
+            {
+                Event(_rec, v, "node_exec", new Dictionary<string, object>(e));
             }
         }
 

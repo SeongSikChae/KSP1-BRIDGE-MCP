@@ -56,6 +56,24 @@ namespace KspBridge.Handlers
             return new Dictionary<string, object> { ["removed"] = index, ["remaining"] = solver.maneuverNodes.Count };
         }
 
+        /// <summary>POST /api/node/execute {tolerance?, warp?, remove_when_done?}</summary>
+        public static object Execute(RequestBody body)
+        {
+            Vessel v = Guard.ActiveVessel();
+            Solver(v);
+            return Flight.NodeExecutor.Start(v,
+                body.GetDouble("tolerance", 0.1),
+                !body.Has("warp") || body.GetBool("warp"),
+                !body.Has("remove_when_done") || body.GetBool("remove_when_done"));
+        }
+
+        /// <summary>POST /api/node/cancel</summary>
+        public static object Cancel()
+        {
+            Flight.NodeExecutor.Cancel("cancelled");
+            return Flight.NodeExecutor.Describe();
+        }
+
         private static PatchedConicSolver Solver(Vessel v)
         {
             if (v.patchedConicSolver == null)

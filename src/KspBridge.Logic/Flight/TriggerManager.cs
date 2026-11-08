@@ -23,6 +23,8 @@ namespace KspBridge.Flight
             public Dictionary<string, object> When;
             public string Field;
             public Func<object, bool> Test;
+            /// <summary>Public triggers: single or combined condition. Internal triggers use Reader + Test.</summary>
+            public Condition Condition;
             public List<Dictionary<string, object>> Actions;
             public bool Repeat;
             public Guid VesselId;
@@ -77,9 +79,7 @@ namespace KspBridge.Flight
             Vessel v = Guard.ActiveVessel();
             Dictionary<string, object> when = body.GetObject("when");
             RequestBody w = new RequestBody(when);
-            string field = w.GetString("field");
-            string op = w.GetString("op");
-            Func<object, bool> test = FlightFields.BuildTest(field, op, w);
+            Condition condition = Condition.Parse(when);
 
             List<Dictionary<string, object>> actions = new List<Dictionary<string, object>>();
             foreach (object o in body.GetList("actions"))
@@ -103,14 +103,14 @@ namespace KspBridge.Flight
                 Id = _nextId++,
                 Name = body.Has("name") ? body.GetString("name") : null,
                 When = when,
-                Field = field,
-                Test = test,
+                Field = condition.SingleField,
+                Condition = condition,
                 Actions = actions,
                 Repeat = body.Has("repeat") && body.GetBool("repeat"),
                 VesselId = v.id,
             };
             // Already true at registration: a one-shot trigger fires on the next tick; a repeating one waits for false → true.
-            tr.LastTrue = tr.Repeat && test(FlightFields.Read(v, field));
+            tr.LastTrue = tr.Repeat && condition.Evaluate(v, new Dictionary<string, object>());
             _triggers.Add(tr);
             return Describe(tr);
         }
@@ -182,8 +182,17 @@ namespace KspBridge.Flight
                 bool now;
                 try
                 {
-                    value = t.Reader != null ? t.Reader(v) : FlightFields.Read(v, t.Field);
-                    now = t.Test(value);
+                    if (t.Condition != null)
+                    {
+                        Dictionary<string, object> values = new Dictionary<string, object>();
+                        now = t.Condition.Evaluate(v, values);
+                        value = t.Condition.Report(values);
+                    }
+                    else
+                    {
+                        value = t.Reader != null ? t.Reader(v) : FlightFields.Read(v, t.Field);
+                        now = t.Test(value);
+                    }
                 }
                 catch (Exception e)
                 {

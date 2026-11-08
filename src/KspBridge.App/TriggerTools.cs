@@ -12,7 +12,13 @@ namespace KspBridge.App
             "prediction fields thrust_kn, max_accel, twr, drag_accel, stop_time, stop_distance, stop_dv, time_to_impact, burn_margin " +
             "(numbers, op >= <= ==; prediction stop_*/time_to_impact/burn_margin are null unless descending), " +
             "situation (string, ==), stage_flameout (bool, ==; true only when EVERY ignited engine has flamed out), " +
-            "any_flameout (bool, ==; true when at least one ignited engine has flamed out, e.g. radial SRBs empty while the core engine still burns).";
+            "any_flameout (bool, ==; true when at least one ignited engine has flamed out, e.g. radial SRBs empty while the core engine still burns), " +
+            "node_exec (string, ==; execute_node state: idle, aligning, waiting, burning, done, aborted), node_dv_remaining (number, m/s), " +
+            "attitude_error (number, deg off the held attitude; null when no hold).";
+
+        internal const string ConditionHelp =
+            "Combined condition instead of field/op/value: {field,op,value} | {all:[...]} | {any:[...]}, nestable up to 4 levels, " +
+            "e.g. {all:[{field:'altitude_asl',op:'<=',value:4000},{field:'speed_surface',op:'<=',value:250}]}.";
 
         [McpServerTool(Name = "add_trigger", Destructive = true)]
         [Description("Register a condition → actions trigger on the active vessel. The game checks it every physics tick and runs the actions in the same tick the condition becomes true " +
@@ -21,14 +27,50 @@ namespace KspBridge.App
             "Actions (run in order): {type:'throttle', value:0..1}, {type:'stage'}, {type:'attitude', mode:'own'|'sas', pitch, heading, roll?}, {type:'release_attitude'}, " +
             "{type:'sas', on:bool}, {type:'action_group', group, on?} (on omitted = toggle).")]
         public Task<string> AddTrigger(
-            string field,
-            [Description(">=, <= or ==")] string op,
-            [Description("Number, string (situation) or boolean (stage_flameout, any_flameout)")] JsonElement value,
-            [Description("Array of action objects")] JsonElement actions,
+            string? field = null,
+            [Description(">=, <= or ==")] string? op = null,
+            [Description("Number, string (situation, node_exec) or boolean (stage_flameout, any_flameout)")] JsonElement? value = null,
+            [Description("Array of action objects (required)")] JsonElement? actions = null,
             [Description("Optional label")] string? name = null,
             [Description("true = run every time the condition turns from false to true")] bool repeat = false,
+            [Description(ConditionHelp)] JsonElement? condition = null,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/triggers", new { name, when = new { field, op, value = NormalizeValue(field, value) }, actions, repeat }, ct);
+        {
+            if (condition.HasValue == (field != null))
+            {
+                return Task.FromResult("error: bad_request: give either condition or field/op/value.");
+            }
+            if (!actions.HasValue)
+            {
+                return Task.FromResult("error: bad_request: actions is required.");
+            }
+            object? when = condition.HasValue
+                ? NormalizeCondition(condition.Value)
+                : new { field, op, value = value.HasValue ? NormalizeValue(field!, value.Value) : null };
+            return client.SendAsync(HttpMethod.Post, "api/triggers", new { name, when, actions = actions.Value, repeat }, ct);
+        }
+
+        /// <summary>Copies a condition tree, normalizing every single condition's value like <see cref="NormalizeValue"/>.</summary>
+        internal static object? NormalizeCondition(JsonElement node)
+        {
+            switch (node.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    string? field = node.TryGetProperty("field", out JsonElement f) && f.ValueKind == JsonValueKind.String ? f.GetString() : null;
+                    Dictionary<string, object?> copy = new();
+                    foreach (JsonProperty p in node.EnumerateObject())
+                    {
+                        copy[p.Name] = p.Name == "value" && field != null ? NormalizeValue(field, p.Value)
+                            : p.Name is "all" or "any" ? NormalizeCondition(p.Value)
+                            : p.Value;
+                    }
+                    return copy;
+                case JsonValueKind.Array:
+                    return node.EnumerateArray().Select(NormalizeCondition).ToList();
+                default:
+                    return node;
+            }
+        }
 
         /// <summary>
         /// The value parameter is untyped, so a client may send a number such as 378.0 as the string "378.0".
@@ -36,7 +78,7 @@ namespace KspBridge.App
         /// </summary>
         internal static object NormalizeValue(string field, JsonElement value)
         {
-            if (value.ValueKind != JsonValueKind.String || field == "situation")
+            if (value.ValueKind != JsonValueKind.String || field == "situation" || field == "node_exec")
             {
                 return value;
             }

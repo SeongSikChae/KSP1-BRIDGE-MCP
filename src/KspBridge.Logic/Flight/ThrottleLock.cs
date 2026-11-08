@@ -12,6 +12,9 @@ namespace KspBridge.Flight
 
         public static bool Active(Vessel v) => _vessel != null && _vessel == v;
 
+        /// <summary>The held value (meaningful only while active).</summary>
+        public static float Value => _value;
+
         public static void Set(Vessel v, float value)
         {
             if (_vessel != v)

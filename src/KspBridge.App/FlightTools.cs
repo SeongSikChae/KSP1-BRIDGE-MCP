@@ -92,6 +92,26 @@ namespace KspBridge.App
             return client.SendAsync(HttpMethod.Post, "api/nodes", body, ct);
         }
 
+        [McpServerTool(Name = "execute_node", Destructive = true)]
+        [Description("Execute the first maneuver node in-game: hold the node direction (own controller), wait until aligned (< 2 deg) and not rotating, " +
+            "optionally time-warp to 30 s before ignition, ignite at node time minus the time to burn half the delta-v, throttle down near the end and cut when the remaining delta-v < tolerance. " +
+            "Returns the plan at once (node_dv, burn_time, half_dv_time, ignite_ut, ignite_in, stage_dv, warnings); follow progress with wait_until field node_exec " +
+            "(aligning, waiting, burning, done, aborted) and node_dv_remaining. No auto staging: a stage with less delta-v than the node only warns, and the run aborts on flameout " +
+            "before any trigger can stage, so it cannot continue through staging; split such burns into nodes per stage. " +
+            "Call it at 1x (not during time warp). The throttle is held at 0 from the start until ignition. It never burns late: not aligned in time or ignition missed by > 1 s → aborted " +
+            "(not_aligned_in_time / missed_ignition). It also aborts when the node is removed or changed, the vessel changes, or another tool takes over the attitude or throttle (overridden).")]
+        public Task<string> ExecuteNode(
+            [Description("Cut-off remaining delta-v (m/s), default 0.1")] double tolerance = 0.1,
+            [Description("Time-warp while waiting for ignition (default true)")] bool warp = true,
+            [Description("Remove the node when done (default true)")] bool removeWhenDone = true,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/node/execute", new { tolerance, warp, remove_when_done = removeWhenDone }, ct);
+
+        [McpServerTool(Name = "cancel_node")]
+        [Description("Cancel a running execute_node: throttle to 0, release the node attitude hold. Returns the executor state.")]
+        public Task<string> CancelNode(CancellationToken ct)
+            => client.SendAsync(HttpMethod.Post, "api/node/cancel", new { }, ct);
+
         [McpServerTool(Name = "warp_to")]
         [Description("Time-warp (stock auto-warp, rails) until `lead` seconds before a target, then return to 1x. target: ut (give ut), ap, pe, node (first maneuver node), soi (next SOI change). Returns at once with target_ut/stop_ut; check arrival with wait_until field ut >= stop_ut. When the throttle is above 0 or rails warp is not allowed yet (atmosphere), it is scheduled instead (scheduled=true, waiting_for): it starts by itself as soon as both are clear, with the target time recomputed then (e.g. ap during the ascent burn); get_vessel_state warp.scheduled shows it, stop_warp cancels it. Armed triggers stop the warp when their condition becomes true.")]
         public Task<string> WarpTo(

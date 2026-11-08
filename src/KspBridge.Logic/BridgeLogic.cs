@@ -28,6 +28,7 @@ namespace KspBridge
             SasMonitor.Hook();
             FlightRecorder.Hook();
             BroadcastEvents.Hook();
+            AnomalyMonitor.Hook();
             return Routes.Build(context.Dispatcher);
         }
 
@@ -41,6 +42,23 @@ namespace KspBridge
             {
                 Debug.LogError("[KspBridge] attitude: " + e);
                 AttitudeController.Release();
+            }
+            try
+            {
+                NodeExecutor.FixedUpdate();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] node executor: " + e);
+                NodeExecutor.Cancel("error");
+            }
+            try
+            {
+                AnomalyMonitor.FixedUpdate();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] anomaly monitor: " + e);
             }
             try
             {
@@ -89,6 +107,11 @@ namespace KspBridge
         {
             Stopped = true;
             List<string> released = new List<string>();
+            if (NodeExecutor.Running)
+            {
+                released.Add("node execution");
+            }
+            NodeExecutor.Cancel("reloaded");
             int triggers = TriggerManager.Clear();
             if (triggers > 0)
             {
@@ -112,6 +135,7 @@ namespace KspBridge
             SasMonitor.Unhook();
             FlightRecorder.Stop();
             BroadcastEvents.Unhook();
+            AnomalyMonitor.Unhook();
             if (_onVesselChange != null)
             {
                 GameEvents.onVesselChange.Remove(_onVesselChange);
@@ -124,6 +148,7 @@ namespace KspBridge
 
         private static void ReleaseAll()
         {
+            NodeExecutor.Cancel("vessel_changed");
             TriggerManager.Clear();
             ThrottleLock.Clear();
             AttitudeController.Release();
