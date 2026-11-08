@@ -36,7 +36,7 @@ namespace KspBridge.Flight
                 string target = body.GetString("value").ToUpperInvariant();
                 return v => v is string s && s == target;
             }
-            if (field == "node_exec")
+            if (field == "node_exec" || field == "ascent_state")
             {
                 string target = body.GetString("value").ToLowerInvariant();
                 return v => v is string s && s == target;
@@ -46,7 +46,7 @@ namespace KspBridge.Flight
                 bool target = body.GetBool("value");
                 return v => v is bool b && b == target;
             }
-            throw ApiException.BadRequest("unknown field '" + field + "'. Valid: " + string.Join(", ", NumericFields) + ", situation, node_exec, stage_flameout, any_flameout");
+            throw ApiException.BadRequest("unknown field '" + field + "'. Valid: " + string.Join(", ", NumericFields) + ", situation, node_exec, ascent_state, stage_flameout, any_flameout");
         }
 
         public static object Read(Vessel v, string field)
@@ -66,6 +66,7 @@ namespace KspBridge.Flight
                 case "g_load_max": return Handlers.VesselHandler.MaxGLoad(v);
                 case "situation": return v.situation.ToString();
                 case "node_exec": return NodeExecutor.State;
+                case "ascent_state": return AscentGuidance.State;
                 case "node_dv_remaining": return NodeExecutor.Remaining(v);
                 case "attitude_error": return Attitude.AttitudeController.ErrorDeg(v);
                 case "stage_flameout": return StageFlameout(v);

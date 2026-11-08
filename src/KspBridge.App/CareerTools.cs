@@ -12,7 +12,9 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Get, "api/career", null, ct);
 
         [McpServerTool(Name = "list_contracts", ReadOnly = true)]
-        [Description("Contracts with id, title, state, rewards and objective parameters (nested). Default: offered + active.")]
+        [Description("Contracts with id, title, state, rewards and objective parameters (nested). Default: offered + active. " +
+            "waypoints (when the contract has survey/visit spots): name, body, latitude, longitude, altitude, on_surface, parameter (objective title); " +
+            "in flight on the same body also distance (m, great circle) and bearing (deg from the active vessel).")]
         public Task<string> ListContracts([Description("offered, active or completed (optional)")] string? state = null, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Get, string.IsNullOrWhiteSpace(state) ? "api/contracts" : "api/contracts?state=" + Uri.EscapeDataString(state), null, ct);
 
@@ -177,7 +179,7 @@ namespace KspBridge.App
         public Task<string> WaitUntil(
             string? field = null,
             [Description(">=, <= or ==")] string? op = null,
-            [Description("Number, string (situation, node_exec) or boolean (stage_flameout, any_flameout)")] System.Text.Json.JsonElement? value = null,
+            [Description("Number, string (situation, node_exec, ascent_state) or boolean (stage_flameout, any_flameout)")] System.Text.Json.JsonElement? value = null,
             [Description("Seconds, 1..120")] double timeout = 60,
             [Description(TriggerTools.ConditionHelp)] System.Text.Json.JsonElement? condition = null,
             [Description("Anomalies that end the wait early: part_lost, control_lost, flameout. Omit = [part_lost, control_lost]; [] = none.")] string[]? abortOn = null,

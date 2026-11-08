@@ -54,6 +54,15 @@ namespace KspBridge
             }
             try
             {
+                AscentGuidance.FixedUpdate();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] ascent guidance: " + e);
+                AscentGuidance.Cancel("error");
+            }
+            try
+            {
                 AnomalyMonitor.FixedUpdate();
             }
             catch (Exception e)
@@ -112,6 +121,11 @@ namespace KspBridge
                 released.Add("node execution");
             }
             NodeExecutor.Cancel("reloaded");
+            if (AscentGuidance.Running)
+            {
+                released.Add("ascent guidance");
+            }
+            AscentGuidance.Cancel("reloaded");
             int triggers = TriggerManager.Clear();
             if (triggers > 0)
             {
@@ -149,6 +163,7 @@ namespace KspBridge
         private static void ReleaseAll()
         {
             NodeExecutor.Cancel("vessel_changed");
+            AscentGuidance.Cancel("vessel_changed");
             TriggerManager.Clear();
             ThrottleLock.Clear();
             AttitudeController.Release();

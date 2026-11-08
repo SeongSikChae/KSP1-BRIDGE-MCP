@@ -49,6 +49,10 @@ namespace KspBridge.Flight
             {
                 throw ApiException.BadRequest("no maneuver node");
             }
+            if (AscentGuidance.Running)
+            {
+                throw ApiException.BadRequest("ascent_guidance is running (cancel_ascent first)");
+            }
             if (tolerance <= 0)
             {
                 throw ApiException.BadRequest("tolerance must be > 0");

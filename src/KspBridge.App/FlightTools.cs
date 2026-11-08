@@ -112,6 +112,44 @@ namespace KspBridge.App
         public Task<string> CancelNode(CancellationToken ct)
             => client.SendAsync(HttpMethod.Post, "api/node/cancel", new { }, ct);
 
+        [McpServerTool(Name = "ascent_guidance", Destructive = true)]
+        [Description("Fly a gravity-turn ascent in-game: on the pad it stages once to ignite, climbs vertically, kicks turnAngle deg (toward heading) at turnStartSpeed, " +
+            "then follows surface prograde within maxAoaDeg; it throttles down near the target and cuts at targetApoapsis, then holds prograde and coasts to the atmosphere edge, " +
+            "re-burning (correcting) if drag lowers the apoapsis by more than apTolerance. Also takes over an ascent already in atmospheric flight. " +
+            "Auto staging: fires the next stage when no engine thrusts or the boosters it drops are empty. A stage with get_stages warnings (protected part dropped, no steering) " +
+            "is not fired → aborted stage_warning; a stage that would deploy a parachute or leaves no fuelled engine is not fired → aborted out_of_fuel. " +
+            "Ignition and launch-clamp release in separate stages: the clamps are released as soon as the engines thrust. " +
+            "Other aborts: attitude_overridden / throttle_overridden (another tool took it; only the other one is kept), control_lost, part_lost, vessel_changed, " +
+            "flameout (autoStage=false and no engine thrusts; empty boosters are left to you). " +
+            "On abort the throttle goes to 0 (unless another tool owns it) and surface prograde is held (not for attitude_overridden, control_lost, vessel_changed). " +
+            "Returns the plan at once; follow with wait_until field ascent_state (launching, vertical, kick, gravity_turn, coasting, correcting, done, aborted). " +
+            "Do the preflight (get_stages delta-v) before calling: on the pad it ignites immediately. After done the throttle lock is released and the prograde hold stays on; " +
+            "circularize with add_maneuver_node at the apoapsis + execute_node. Refused during time warp or while execute_node runs.")]
+        public Task<string> AscentGuidance(
+            [Description("Target apoapsis (m above sea level), above the atmosphere")] double targetApoapsis,
+            [Description("Heading (deg), default 90 (east)")] double heading = 90,
+            [Description("Surface speed to start the turn (m/s), default 60")] double turnStartSpeed = 60,
+            [Description("Kick angle from vertical (deg), default 10; larger = flatter ascent")] double turnAngle = 10,
+            [Description("Angle-of-attack limit after the kick (deg), default 5")] double maxAoaDeg = 5,
+            [Description("Auto staging, default true")] bool autoStage = true,
+            [Description("Re-burn when the apoapsis falls this much below the target while coasting (m), default 200")] double apTolerance = 200,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/ascent/start", new
+            {
+                target_apoapsis = targetApoapsis,
+                heading,
+                turn_start_speed = turnStartSpeed,
+                turn_angle = turnAngle,
+                max_aoa_deg = maxAoaDeg,
+                auto_stage = autoStage,
+                ap_tolerance = apTolerance,
+            }, ct);
+
+        [McpServerTool(Name = "cancel_ascent")]
+        [Description("Cancel a running ascent_guidance: throttle to 0, hold surface prograde. Returns the state.")]
+        public Task<string> CancelAscent(CancellationToken ct)
+            => client.SendAsync(HttpMethod.Post, "api/ascent/cancel", new { }, ct);
+
         [McpServerTool(Name = "warp_to")]
         [Description("Time-warp (stock auto-warp, rails) until `lead` seconds before a target, then return to 1x. target: ut (give ut), ap, pe, node (first maneuver node), soi (next SOI change). Returns at once with target_ut/stop_ut; check arrival with wait_until field ut >= stop_ut. When the throttle is above 0 or rails warp is not allowed yet (atmosphere), it is scheduled instead (scheduled=true, waiting_for): it starts by itself as soon as both are clear, with the target time recomputed then (e.g. ap during the ascent burn); get_vessel_state warp.scheduled shows it, stop_warp cancels it. Armed triggers stop the warp when their condition becomes true.")]
         public Task<string> WarpTo(

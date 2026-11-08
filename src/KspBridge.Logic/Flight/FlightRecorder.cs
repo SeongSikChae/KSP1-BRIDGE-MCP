@@ -605,6 +605,15 @@ namespace KspBridge.Flight
             }
         }
 
+        /// <summary>ascent_guidance state changes and automatic staging.</summary>
+        internal static void AscentEvent(Vessel v, Dictionary<string, object> e)
+        {
+            if (Mine(v))
+            {
+                Event(_rec, v, "ascent", new Dictionary<string, object>(e));
+            }
+        }
+
         /// <summary>execute_node state changes.</summary>
         internal static void NodeExecEvent(Vessel v, Dictionary<string, object> e)
         {

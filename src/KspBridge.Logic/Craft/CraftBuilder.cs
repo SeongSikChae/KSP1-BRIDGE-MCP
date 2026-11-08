@@ -364,7 +364,7 @@ namespace KspBridge.Craft
             }
         }
 
-        private static Bounds LocalBounds(Part prefab)
+        internal static Bounds LocalBounds(Part prefab)
         {
             bool any = false;
             Bounds mesh = new Bounds();

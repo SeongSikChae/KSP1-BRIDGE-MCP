@@ -110,7 +110,7 @@ namespace KspBridge.Handlers
 
         private static Dictionary<string, object> Describe(Contract c)
         {
-            return new Dictionary<string, object>
+            Dictionary<string, object> d = new Dictionary<string, object>
             {
                 ["id"] = c.ContractID,
                 ["title"] = c.Title,
@@ -126,6 +126,75 @@ namespace KspBridge.Handlers
                 },
                 ["parameters"] = Params(Enumerable.Range(0, c.ParameterCount).Select(c.GetParameter)), // AllParameters is recursive: top level = direct children only
             };
+            List<object> waypoints = Waypoints(c);
+            if (waypoints.Count > 0)
+            {
+                d["waypoints"] = waypoints;
+            }
+            return d;
+        }
+
+        /// <summary>Waypoints this contract placed (survey/observation spots): body, latitude, longitude, altitude; distance/bearing from the active vessel on the same body.</summary>
+        private static List<object> Waypoints(Contract c)
+        {
+            List<object> list = new List<object>();
+            // The waypoint manager is not loaded in every scene: take the waypoints from the contract parameters
+            // (survey/visit parameters hold a FinePrint.Waypoint field) and add any others the manager knows.
+            List<KeyValuePair<FinePrint.Waypoint, string>> found = new List<KeyValuePair<FinePrint.Waypoint, string>>();
+            foreach (ContractParameter p in c.AllParameters)
+            {
+                foreach (System.Reflection.FieldInfo f in p.GetType().GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+                {
+                    if (f.FieldType == typeof(FinePrint.Waypoint) && f.GetValue(p) is FinePrint.Waypoint w && found.All(k => k.Key != w))
+                    {
+                        found.Add(new KeyValuePair<FinePrint.Waypoint, string>(w, p.Title));
+                    }
+                }
+            }
+            FinePrint.WaypointManager m = FinePrint.WaypointManager.Instance();
+            if (m != null)
+            {
+                foreach (FinePrint.Waypoint w in m.Waypoints.Where(w => w.contractReference == c && found.All(k => k.Key != w)))
+                {
+                    found.Add(new KeyValuePair<FinePrint.Waypoint, string>(w, null));
+                }
+            }
+            Vessel v = HighLogic.LoadedSceneIsFlight ? FlightGlobals.ActiveVessel : null;
+            foreach (KeyValuePair<FinePrint.Waypoint, string> k in found)
+            {
+                FinePrint.Waypoint w = k.Key;
+                Dictionary<string, object> e = new Dictionary<string, object>
+                {
+                    ["name"] = w.name,
+                    ["body"] = w.celestialName,
+                    ["latitude"] = w.latitude,
+                    ["longitude"] = w.longitude,
+                    ["altitude"] = w.altitude,
+                    ["on_surface"] = w.isOnSurface,
+                };
+                if (k.Value != null)
+                {
+                    e["parameter"] = k.Value;
+                }
+                if (v != null && v.mainBody != null && v.mainBody.bodyName == w.celestialName)
+                {
+                    e["distance"] = GreatCircle(v.mainBody.Radius, v.latitude, v.longitude, w.latitude, w.longitude, out double bearing);
+                    e["bearing"] = bearing;
+                }
+                list.Add(e);
+            }
+            return list;
+        }
+
+        /// <summary>Haversine distance (m) and initial bearing (deg, 0..360) from point 1 to point 2.</summary>
+        internal static double GreatCircle(double radius, double lat1, double lon1, double lat2, double lon2, out double bearing)
+        {
+            double p1 = lat1 * Math.PI / 180, p2 = lat2 * Math.PI / 180, dl = (lon2 - lon1) * Math.PI / 180;
+            double a = Math.Sin((p2 - p1) / 2) * Math.Sin((p2 - p1) / 2) + Math.Cos(p1) * Math.Cos(p2) * Math.Sin(dl / 2) * Math.Sin(dl / 2);
+            double y = Math.Sin(dl) * Math.Cos(p2);
+            double x = Math.Cos(p1) * Math.Sin(p2) - Math.Sin(p1) * Math.Cos(p2) * Math.Cos(dl);
+            bearing = (Math.Atan2(y, x) * 180 / Math.PI + 360) % 360;
+            return radius * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
         }
 
         private static List<object> Params(IEnumerable<ContractParameter> ps)

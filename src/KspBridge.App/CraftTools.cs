@@ -28,6 +28,17 @@ namespace KspBridge.App
             return client.SendAsync(HttpMethod.Get, path, null, ct);
         }
 
+        [McpServerTool(Name = "read_craft", ReadOnly = true)]
+        [Description("Read a saved craft (the save's Ships, then stock Ships) back as a build_craft design tree: parts, attach nodes, radial symmetry/angle/height, " +
+            "srf children, stage (staged parts keep the file's stage), thrust_limit and resources below full. To modify a craft, edit this design and pass it to " +
+            "build_craft (dryRun first). The tree is rebuilt and compared with the file: warnings list parts whose rebuilt position (> 0.05 m) or rotation (> 2 deg) differs " +
+            "(offset/rotate edits, unsupported placements) and rebuild errors such as locked parts; with warnings the rebuilt craft is not identical to the original.")]
+        public Task<string> ReadCraft(
+            [Description("Craft name (from list_craft)")] string name,
+            [Description("VAB or SPH")] string facility = "VAB",
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/craft/read?name=" + Uri.EscapeDataString(name) + "&facility=" + Uri.EscapeDataString(facility), null, ct);
+
         [McpServerTool(Name = "build_craft", Destructive = true)]
         [Description("""
             Build a craft from a design tree and save it to the save's Ships/VAB (or SPH). Use dryRun=true first to see errors, warnings, cost, mass and per-stage delta-v/TWR estimates.

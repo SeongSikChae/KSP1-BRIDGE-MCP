@@ -33,6 +33,9 @@ namespace KspBridge.Attitude
         /// <summary>Current frame of the active hold (null when none).</summary>
         public static string Frame => _vessel == null ? null : _frame;
 
+        /// <summary>Incremented by every Set: a caller that stored it can tell whether its hold was replaced (even with the same frame).</summary>
+        public static int Generation { get; private set; }
+
         public static void Set(Vessel v, string mode, double pitch, double heading, double? roll)
             => Set(v, mode, "surface", pitch, heading, roll, 0, 0, null);
 
@@ -70,6 +73,7 @@ namespace KspBridge.Attitude
             _maxAoa = maxAoa;
             _lastDirection = v.GetTransform().up;
             _frameInvalid = null;
+            Generation++;
             _aoaLimited = false;
 
             if (mode == "own")

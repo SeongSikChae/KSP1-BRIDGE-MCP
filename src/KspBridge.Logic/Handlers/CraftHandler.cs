@@ -93,6 +93,53 @@ namespace KspBridge.Handlers
             return result;
         }
 
+        /// <summary>GET /api/craft/read?name=&amp;facility= — the save's Ships first, then the stock Ships folder.</summary>
+        public static object Read(System.Collections.Specialized.NameValueCollection query)
+        {
+            if (HighLogic.CurrentGame == null || PartLoader.Instance == null)
+            {
+                throw new ApiException(409, "scene_not_allowed", "no game is loaded");
+            }
+            string name = query["name"];
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw ApiException.BadRequest("name is required");
+            }
+            name = Fmt.SafeName(name); // no path separators: only files in the Ships folders
+            if (name == "." || name == "..")
+            {
+                throw ApiException.BadRequest("invalid craft name");
+            }
+            string facility = (query["facility"] ?? "VAB").ToUpperInvariant();
+            if (facility != "VAB" && facility != "SPH")
+            {
+                throw ApiException.BadRequest("facility must be VAB or SPH");
+            }
+            string path = ShipPath(facility, name);
+            bool stock = false;
+            if (!File.Exists(path))
+            {
+                path = Path.Combine(Path.Combine(Path.Combine(KSPUtil.ApplicationRootPath, "Ships"), facility), name + ".craft");
+                stock = true;
+                if (!File.Exists(path))
+                {
+                    throw ApiException.NotFound("craft '" + name + "' not found in " + facility + " (save or stock)");
+                }
+            }
+            List<string> warnings = new List<string>();
+            Dictionary<string, object> r = CraftReader.Read(path, warnings);
+            return new Dictionary<string, object>
+            {
+                ["name"] = name,
+                ["facility"] = facility,
+                ["stock"] = stock,
+                ["path"] = path,
+                ["part_count"] = r["part_count"],
+                ["design"] = r["design"],
+                ["warnings"] = warnings,
+            };
+        }
+
         public static string ShipPath(string facility, string name)
         {
             return Path.Combine(Path.Combine(Path.Combine(Path.Combine(KSPUtil.ApplicationRootPath, "saves"), HighLogic.SaveFolder), "Ships"),

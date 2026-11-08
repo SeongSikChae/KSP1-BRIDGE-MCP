@@ -14,7 +14,8 @@ namespace KspBridge.App
             "situation (string, ==), stage_flameout (bool, ==; true only when EVERY ignited engine has flamed out), " +
             "any_flameout (bool, ==; true when at least one ignited engine has flamed out, e.g. radial SRBs empty while the core engine still burns), " +
             "node_exec (string, ==; execute_node state: idle, aligning, waiting, burning, done, aborted), node_dv_remaining (number, m/s), " +
-            "attitude_error (number, deg off the held attitude; null when no hold).";
+            "attitude_error (number, deg off the held attitude; null when no hold), " +
+            "ascent_state (string, ==; ascent_guidance state: idle, launching, vertical, kick, gravity_turn, coasting, correcting, done, aborted).";
 
         internal const string ConditionHelp =
             "Combined condition instead of field/op/value: {field,op,value} | {all:[...]} | {any:[...]}, nestable up to 4 levels, " +
@@ -29,7 +30,7 @@ namespace KspBridge.App
         public Task<string> AddTrigger(
             string? field = null,
             [Description(">=, <= or ==")] string? op = null,
-            [Description("Number, string (situation, node_exec) or boolean (stage_flameout, any_flameout)")] JsonElement? value = null,
+            [Description("Number, string (situation, node_exec, ascent_state) or boolean (stage_flameout, any_flameout)")] JsonElement? value = null,
             [Description("Array of action objects (required)")] JsonElement? actions = null,
             [Description("Optional label")] string? name = null,
             [Description("true = run every time the condition turns from false to true")] bool repeat = false,
@@ -78,7 +79,7 @@ namespace KspBridge.App
         /// </summary>
         internal static object NormalizeValue(string field, JsonElement value)
         {
-            if (value.ValueKind != JsonValueKind.String || field == "situation" || field == "node_exec")
+            if (value.ValueKind != JsonValueKind.String || field == "situation" || field == "node_exec" || field == "ascent_state")
             {
                 return value;
             }
