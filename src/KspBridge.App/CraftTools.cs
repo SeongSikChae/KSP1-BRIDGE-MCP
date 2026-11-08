@@ -8,7 +8,7 @@ namespace KspBridge.App
     public sealed class CraftTools(KspBridgeClient client)
     {
         [McpServerTool(Name = "list_parts", ReadOnly = true)]
-        [Description("Part catalog. Summary by default (name, title, category, cost, mass t, size, unlocked). detail=true adds attach nodes, surface attach, resources, engine thrust/Isp/propellants, decoupler/parachute flags — combine with category or name to keep the result small. In career, only unlocked parts by default.")]
+        [Description("Part catalog. Summary by default (name, title, category, cost, mass t, size, unlocked). detail=true adds attach nodes, surface attach, resources, engine thrust/Isp/propellants, control (gimbal range, reaction wheel torque, control surface, RCS), decoupler/parachute flags — combine with category or name to keep the result small. In career, only unlocked parts by default.")]
         public Task<string> ListParts(
             [Description("Category filter, e.g. Pods, FuelTank, Engine, Coupling, Utility, Science, Aero, Structural")] string? category = null,
             [Description("Only unlocked parts (career). Default true.")] bool unlockedOnly = true,
@@ -31,6 +31,9 @@ namespace KspBridge.App
         [McpServerTool(Name = "build_craft", Destructive = true)]
         [Description("""
             Build a craft from a design tree and save it to the save's Ships/VAB (or SPH). Use dryRun=true first to see errors, warnings, cost, mass and per-stage delta-v/TWR estimates.
+            Each stage also lists drops (every part that leaves when it fires, by the decoupler's explosive node) and control (gimbal engines/range, reaction wheel torque, control surfaces, RCS, steerable).
+            analysis gives com/col (root frame, +Y = craft up), col_minus_com (negative = stable), lowest_part/lowest_y and lowest_engine_y.
+            warnings also flag unsteerable engine stages, protected parts dropped (heat shield, parachute, command), CoL ahead of CoM and parts below the engines.
             design = { "part": <root part name>, "children": [ { "node": <parent attach node, e.g. "bottom">, "part": ..., "children": [...], "radial": [...] } ],
                        "radial": [ { "part": ..., "symmetry": 1..8, "angle": deg, "height": m, "children": [ { "node": "srf", "part": ... } ] } ], "stage": optional int }
             Stack children hang below/above through attach nodes (child uses its opposite top/bottom node). Radial entries are surface-attached around the parent with symmetry

@@ -110,7 +110,7 @@ namespace KspBridge.App
     public sealed class AscentTools(KspBridgeClient client)
     {
         [McpServerTool(Name = "get_stages", ReadOnly = true)]
-        [Description("Game-computed per-stage delta-v (vac/ASL/actual), TWR, burn time, masses and the parts each stage activates.")]
+        [Description("Game-computed per-stage delta-v (vac/ASL/actual), TWR, burn time, masses and the parts each stage activates. staging lists every stage still to fire (decouple-only stages included) with drops (parts that leave the vessel) and control (gimbal, reaction wheel torque, control surfaces, RCS, steerable). analysis gives com/col (root frame, +Y = craft up), stability and the lowest point; warnings flag unsteerable stages, protected parts dropped, CoL ahead of CoM and parts below the engines.")]
         public Task<string> GetStages(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/stages", null, ct);
 

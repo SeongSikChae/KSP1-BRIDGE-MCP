@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using KspBridge.Craft;
 
 namespace KspBridge.Handlers
 {
@@ -34,6 +35,9 @@ namespace KspBridge.Handlers
                         .Select(p => (object)p.partInfo.title).ToList(),
                 });
             }
+            List<string> warnings = new List<string>();
+            List<object> staging = Staging(v, warnings);
+            Dictionary<string, object> analysis = CraftAnalysis.Analyze(CraftAnalysis.FromVessel(v), warnings);
             return new Dictionary<string, object>
             {
                 ["current_stage"] = v.currentStage,
@@ -41,7 +45,32 @@ namespace KspBridge.Handlers
                 ["total_dv_asl"] = dv.TotalDeltaVASL,
                 ["total_dv_actual"] = dv.TotalDeltaVActual,
                 ["stages"] = stages,
+                ["staging"] = staging,
+                ["analysis"] = analysis,
+                ["warnings"] = warnings,
             };
+        }
+
+        /// <summary>Every stage still to fire (including decouple-only stages): parts dropped and steering left.</summary>
+        private static List<object> Staging(Vessel v, List<string> warnings)
+        {
+            List<object> staging = new List<object>();
+            HashSet<Part> attached = new HashSet<Part>(v.parts);
+            for (int s = v.currentStage - 1; s >= 0; s--)
+            {
+                List<Part> dropped = CraftAnalysis.Drops(v, s, attached);
+                attached.ExceptWith(dropped);
+                List<Part> burning = attached.Where(p => p.inverseStage >= s && p.FindModuleImplementing<ModuleEngines>() != null).ToList();
+                Dictionary<string, object> control = CraftAnalysis.Control(attached, burning);
+                CraftAnalysis.StageWarnings(s, dropped, burning.Count > 0, (bool)control["steerable"], warnings);
+                staging.Add(new Dictionary<string, object>
+                {
+                    ["stage"] = s,
+                    ["drops"] = dropped.Select(p => (object)p.partInfo.title).ToList(),
+                    ["control"] = control,
+                });
+            }
+            return staging;
         }
     }
 }

@@ -62,7 +62,7 @@ namespace KspBridge.Handlers
                     warnings.Add("no command part (pod or probe core)");
                 }
 
-                List<object> stages = CraftEstimator.Stages(parts);
+                List<object> stages = CraftEstimator.Stages(parts, warnings);
                 if (stages.Count > 0 && stages[0] is Dictionary<string, object> first
                     && first.TryGetValue("twr_asl", out object twr) && twr is double t && t < 1.2)
                 {
@@ -74,6 +74,7 @@ namespace KspBridge.Handlers
                 result["mass"] = mass;
                 result["limits"] = new Dictionary<string, object> { ["max_parts"] = maxParts, ["max_mass"] = (double)maxMass };
                 result["stages"] = stages;
+                result["analysis"] = CraftAnalysis.Analyze(CraftAnalysis.FromBuilt(parts), warnings);
 
                 if (File.Exists(path) && !overwrite)
                 {

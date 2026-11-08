@@ -82,6 +82,8 @@ namespace KspBridge.Handlers
             }
 
             ModuleEngines engine = p.FindModuleImplementing<ModuleEngines>();
+            ModuleGimbal gimbal = p.FindModuleImplementing<ModuleGimbal>();
+            ModuleReactionWheel wheel = p.FindModuleImplementing<ModuleReactionWheel>();
             bool decoupler = p.FindModuleImplementing<ModuleDecouple>() != null
                 || p.FindModuleImplementing<ModuleAnchoredDecoupler>() != null;
 
@@ -105,6 +107,13 @@ namespace KspBridge.Handlers
                     ["isp_vac"] = (double)engine.atmosphereCurve.Evaluate(0f),
                     ["isp_asl"] = (double)engine.atmosphereCurve.Evaluate(1f),
                     ["propellants"] = Propellants(engine),
+                },
+                ["control"] = new Dictionary<string, object>
+                {
+                    ["gimbal_range_deg"] = gimbal == null ? 0.0 : (double)gimbal.gimbalRange,
+                    ["reaction_wheel_torque"] = wheel == null ? 0.0 : (double)wheel.PitchTorque,
+                    ["control_surface"] = p.FindModuleImplementing<ModuleControlSurface>() != null,
+                    ["rcs"] = p.FindModuleImplementing<ModuleRCS>() != null,
                 },
                 ["decoupler"] = decoupler,
                 ["parachute"] = p.FindModuleImplementing<ModuleParachute>() != null,

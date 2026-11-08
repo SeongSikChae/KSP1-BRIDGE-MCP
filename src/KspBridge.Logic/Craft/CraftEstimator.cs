@@ -38,7 +38,65 @@ namespace KspBridge.Craft
             return m;
         }
 
-        public static List<object> Stages(List<BuiltPart> parts)
+        /// <summary>
+        /// Attached parts that leave when the staged decouplers of <paramref name="stage"/> fire: each cuts the link at its
+        /// explosive node (all links if omni, the parent link if radial) and everything no longer connected to the root drops.
+        /// A heat shield (explosive node "bottom") therefore stays and only the parts below it drop.
+        /// </summary>
+        private static List<BuiltPart> Drops(List<BuiltPart> parts, HashSet<BuiltPart> attached, int stage)
+        {
+            HashSet<(BuiltPart, BuiltPart)> cut = new HashSet<(BuiltPart, BuiltPart)>();
+            foreach (BuiltPart d in parts.Where(p => p.Istg == stage && p.Sidx >= 0 && p.IsDecoupler && attached.Contains(p)))
+            {
+                ModuleDecouple md = d.Prefab.FindModuleImplementing<ModuleDecouple>();
+                IEnumerable<BuiltPart> others;
+                if (d.IsRadialDecoupler)
+                {
+                    others = d.Parent == null ? Enumerable.Empty<BuiltPart>() : new[] { d.Parent };
+                }
+                else if (md.isOmniDecoupler)
+                {
+                    others = Neighbors(d);
+                }
+                else
+                {
+                    string id = md.explosiveNodeID;
+                    others = d.OwnNode != null && d.OwnNode.id == id && d.Parent != null
+                        ? new[] { d.Parent }
+                        : d.Children.Where(c => !c.Surface && c.ParentNode != null && c.ParentNode.id == id);
+                }
+                foreach (BuiltPart o in others)
+                {
+                    cut.Add((d, o));
+                    cut.Add((o, d));
+                }
+            }
+            if (cut.Count == 0)
+            {
+                return new List<BuiltPart>();
+            }
+
+            BuiltPart root = parts.First(p => p.Parent == null);
+            HashSet<BuiltPart> kept = new HashSet<BuiltPart> { root };
+            Queue<BuiltPart> queue = new Queue<BuiltPart>(kept);
+            while (queue.Count > 0)
+            {
+                BuiltPart p = queue.Dequeue();
+                foreach (BuiltPart n in Neighbors(p))
+                {
+                    if (attached.Contains(n) && !cut.Contains((p, n)) && kept.Add(n))
+                    {
+                        queue.Enqueue(n);
+                    }
+                }
+            }
+            return parts.Where(p => attached.Contains(p) && !kept.Contains(p)).ToList();
+        }
+
+        private static IEnumerable<BuiltPart> Neighbors(BuiltPart p) =>
+            p.Parent == null ? (IEnumerable<BuiltPart>)p.Children : p.Children.Concat(new[] { p.Parent });
+
+        public static List<object> Stages(List<BuiltPart> parts, List<string> warnings)
         {
             List<object> result = new List<object>();
             int top = parts.Max(p => p.Istg);
@@ -47,20 +105,18 @@ namespace KspBridge.Craft
 
             for (int s = top; s >= 0; s--)
             {
-                // Fire stage s: decouplers drop their subtree, engines ignite.
-                foreach (BuiltPart d in parts.Where(p => p.Istg == s && p.Sidx >= 0 && p.IsDecoupler).ToList())
-                {
-                    foreach (BuiltPart x in d.Subtree())
-                    {
-                        attached.Remove(x);
-                    }
-                }
+                // Fire stage s: decouplers cut their explosive node, the side away from the root drops, engines ignite.
+                List<BuiltPart> dropped = Drops(parts, attached, s);
+                attached.ExceptWith(dropped);
                 foreach (BuiltPart e in parts.Where(p => p.Istg == s && p.Sidx >= 0 && p.IsEngine && attached.Contains(p)))
                 {
                     ignited.Add(e);
                 }
 
                 List<BuiltPart> enginesParts = ignited.Where(attached.Contains).ToList();
+                Dictionary<string, object> control = CraftAnalysis.Control(
+                    attached.Select(p => p.Prefab), enginesParts.Select(p => p.Prefab));
+                CraftAnalysis.StageWarnings(s, dropped.Select(p => p.Prefab), enginesParts.Count > 0, (bool)control["steerable"], warnings);
                 List<ModuleEngines> engines = enginesParts.Select(p => p.Prefab.FindModuleImplementing<ModuleEngines>()).ToList();
                 // Thrust limiter scales thrust (and flow) but not Isp: delta-v is unchanged, TWR drops.
                 double LimitedThrust(int i) => engines[i].maxThrust * (enginesParts[i].Spec.ThrustLimit ?? 100f) / 100.0;
@@ -70,6 +126,8 @@ namespace KspBridge.Craft
                     ["stage"] = s,
                     ["parts"] = parts.Where(p => p.Istg == s && p.Sidx >= 0).Select(p => (object)p.Info.title).ToList(),
                     ["start_mass"] = m0,
+                    ["drops"] = dropped.Select(p => (object)p.Info.title).ToList(),
+                    ["control"] = control,
                 };
 
                 if (engines.Count == 0)
@@ -86,7 +144,7 @@ namespace KspBridge.Craft
                 int nextDrop = parts.Where(p => p.Istg < s && p.Sidx >= 0 && p.IsDecoupler && attached.Contains(p))
                     .Select(p => p.Istg).DefaultIfEmpty(-1).Max();
                 IEnumerable<BuiltPart> burnSet = nextDrop >= 0
-                    ? parts.Where(p => p.Istg == nextDrop && p.Sidx >= 0 && p.IsDecoupler && attached.Contains(p)).SelectMany(d => d.Subtree())
+                    ? Drops(parts, attached, nextDrop)
                     : attached;
                 double fuel = burnSet.Distinct().Sum(p => ResourceMass(p, props));
 
