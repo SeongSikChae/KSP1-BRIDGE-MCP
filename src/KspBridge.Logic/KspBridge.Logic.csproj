@@ -10,7 +10,6 @@
     <!-- KSP's Mono returns the already-loaded assembly when an assembly with the same simple name is loaded again
          from bytes (the version is ignored), so every build gets a unique simple name. The deployed file name stays fixed. -->
     <AssemblyName>KspBridge.Logic.$([System.DateTime]::Now.ToString('yyyyMMddHHmmss'))</AssemblyName>
-    <KspDir Condition="'$(KspDir)'==''">F:\SteamLibrary\steamapps\common\Kerbal Space Program</KspDir>
     <KspManaged>$(KspDir)\KSP_x64_Data\Managed</KspManaged>
   </PropertyGroup>
 
@@ -48,6 +47,10 @@
   <ItemGroup>
     <ProjectReference Include="..\KspBridge.Mod\KspBridge.Mod.csproj" Private="false" />
   </ItemGroup>
+
+  <Target Name="CheckKspDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(KspDir)'=='' Or !Exists('$(KspManaged)')" Text="KSP install path not found (KspDir='$(KspDir)'). Set KspDir in KspBridge.user.props at the repository root or pass -p:KspDir=&quot;&lt;KSP folder&gt;&quot;." />
+  </Target>
 
   <!-- Loaded by the loader (KspBridge.Mod) from PluginData so KSP does not auto-load it; replaced at runtime with reload_mod. -->
   <Target Name="DeployToKsp" AfterTargets="Build" Condition="Exists('$(KspDir)\GameData')">

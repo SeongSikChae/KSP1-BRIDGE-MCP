@@ -8,7 +8,6 @@
     <Nullable>disable</Nullable>
     <RootNamespace>KspBridge</RootNamespace>
     <AssemblyName>KspBridge.Mod</AssemblyName>
-    <KspDir Condition="'$(KspDir)'==''">F:\SteamLibrary\steamapps\common\Kerbal Space Program</KspDir>
     <KspManaged>$(KspDir)\KSP_x64_Data\Managed</KspManaged>
   </PropertyGroup>
 
@@ -38,6 +37,10 @@
   <ItemGroup>
     <None Include="settings.cfg" />
   </ItemGroup>
+
+  <Target Name="CheckKspDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(KspDir)'=='' Or !Exists('$(KspManaged)')" Text="KSP install path not found (KspDir='$(KspDir)'). Set KspDir in KspBridge.user.props at the repository root or pass -p:KspDir=&quot;&lt;KSP folder&gt;&quot;." />
+  </Target>
 
   <Target Name="DeployToKsp" AfterTargets="Build" Condition="Exists('$(KspDir)\GameData')">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(KspDir)\GameData\KspBridge\Plugins" />

@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <PublishDir Condition="'$(AppDir)'!=''">$(AppDir)\</PublishDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,7 +19,27 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\KspBridge.App.Core\KspBridge.App.Core.csproj" />
+    <!-- Build order only: the tools DLL is loaded at runtime from Tools\ (see ToolHost), never referenced at compile time. -->
+    <ProjectReference Include="..\KspBridge.App.Tools\KspBridge.App.Tools.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="KspBridge.App.Tests" />
   </ItemGroup>
+
+  <Target Name="ResolveToolsAssembly">
+    <MSBuild Projects="..\KspBridge.App.Tools\KspBridge.App.Tools.csproj" Targets="GetTargetPath" RemoveProperties="RuntimeIdentifier;SelfContained">
+      <Output TaskParameter="TargetOutputs" ItemName="ToolsAssembly" />
+    </MSBuild>
+  </Target>
+
+  <Target Name="CopyToolsToOutput" AfterTargets="Build" DependsOnTargets="ResolveToolsAssembly">
+    <Copy SourceFiles="@(ToolsAssembly)" DestinationFolder="$(OutDir)Tools" />
+  </Target>
+
+  <Target Name="CopyToolsToPublish" AfterTargets="Publish" DependsOnTargets="ResolveToolsAssembly">
+    <Copy SourceFiles="@(ToolsAssembly)" DestinationFolder="$(PublishDir)Tools" />
+  </Target>
 
 </Project>

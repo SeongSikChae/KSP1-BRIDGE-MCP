@@ -6,4 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- Local machine paths (KspDir, AppDir); not committed. -p:Name=value on the command line still wins. -->
+  <Import Project="$(MSBuildThisFileDirectory)KspBridge.user.props" Condition="Exists('$(MSBuildThisFileDirectory)KspBridge.user.props')" />
+
 </Project>

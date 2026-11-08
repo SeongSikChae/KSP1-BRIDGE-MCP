@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/KspBridge.App/KspBridge.App.csproj" />
+    <Project Path="src/KspBridge.App.Core/KspBridge.App.Core.csproj" />
+    <Project Path="src/KspBridge.App.Tools/KspBridge.App.Tools.csproj" />
     <Project Path="src/KspBridge.Logic/KspBridge.Logic.csproj" />
     <Project Path="src/KspBridge.Mod/KspBridge.Mod.csproj" />
   </Folder>

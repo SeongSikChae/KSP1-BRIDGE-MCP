@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\KspBridge.App\KspBridge.App.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.App.Core\KspBridge.App.Core.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.App.Tools\KspBridge.App.Tools.csproj" />
   </ItemGroup>
 
 </Project>

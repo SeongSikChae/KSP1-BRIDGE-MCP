@@ -1,40 +1,59 @@
 # KspBridge
 
-Kerbal Space Program 1(KSP 1.12.5)과 MCP(Model Context Protocol) 클라이언트를 잇는 브리지의 빈 골격입니다.
-지금은 Logic DLL을 KSP 재시작 없이 교체하는 기능만 있고, 게임 기능(읽기·조작·발사 중계)은 모두 [backup](backup)으로 옮겼습니다.
+Kerbal Space Program 1(KSP 1.12.5)과 MCP(Model Context Protocol) 클라이언트를 잇는 브리지의 골격입니다.
+KSP 쪽 로직(Logic)과 MCP 서버 쪽 도구(Tools)를 각각 KSP·MCP 클라이언트 재시작 없이 교체할 수 있습니다. 게임 기능(읽기·조작·발사 중계)은 아직 없습니다.
 
 ## 구성
 
 ```
-MCP 클라이언트 ──stdio──▶ KspBridge.App ──HTTP──▶ KspBridge.Mod (KSP 플러그인) ──▶ KspBridge.Logic
-                         (MCP 서버, net10.0)   127.0.0.1:8085   (로더·HTTP 서버, net472)     (핸들러, net472)
+MCP 클라이언트 ──stdio──▶ KspBridge.App (셸) ──HTTP──▶ KspBridge.Mod (KSP 플러그인) ──▶ KspBridge.Logic
+                              │   127.0.0.1:8085
+                              └─▶ KspBridge.App.Tools (reload_app으로 교체)
 ```
 
-| 프로젝트 | 대상 | 역할 |
-| --- | --- | --- |
-| `src/KspBridge.App` | net10.0 | MCP stdio 서버. 도구 호출을 Mod의 HTTP API로 전달 |
-| `src/KspBridge.Mod` | net472 | KSP 애드온. HTTP 서버, 메인 스레드 디스패처, Logic DLL 로더 |
-| `src/KspBridge.Logic` | net472 | 교체 가능한 로직(현재 라우트 없음). `reload_mod`로 KSP 재시작 없이 교체 |
-| `tests/KspBridge.App.Tests` | net10.0 | App 도구 → HTTP 매핑 단위 테스트(MSTest) |
+| 프로젝트 | 대상 | 역할 | 변경 반영 |
+| --- | --- | --- | --- |
+| `src/KspBridge.App` | net10.0 | MCP stdio 서버 셸. 설정·로그, 도구 DLL 로더, `reload_app` | MCP 서버 재시작 |
+| `src/KspBridge.App.Core` | net10.0 | 셸·도구 공유 코드(Mod HTTP 클라이언트) | MCP 서버 재시작 |
+| `src/KspBridge.App.Tools` | net10.0 | MCP 도구(`get_status`, `reload_mod`). 도구 호출을 Mod의 HTTP API로 전달 | `reload_app` |
+| `src/KspBridge.Mod` | net472 | KSP 애드온. HTTP 서버, 메인 스레드 디스패처, Logic DLL 로더 | KSP 재시작 |
+| `src/KspBridge.Logic` | net472 | KSP 쪽 로직(현재 라우트 없음) | `reload_mod` |
+| `tests/KspBridge.App.Tests` | net10.0 | App 단위·stdio 통합 테스트(MSTest) | |
 
 KSP는 Unity 2019.4 Mono에서 동작하므로 Mod·Logic은 .NET Framework 4.7.2를 대상으로 합니다.
-Logic은 같은 이름의 어셈블리를 다시 로드하지 못하는 Mono 특성 때문에 빌드마다 고유한 어셈블리 이름(`KspBridge.Logic.yyyyMMddHHmmss`)을 쓰고, 배포 파일명은 `KspBridge.Logic.dll`로 고정합니다.
+Mono는 같은 이름의 어셈블리를 다시 로드하지 못하므로 Logic은 빌드마다 고유한 어셈블리 이름(`KspBridge.Logic.yyyyMMddHHmmss`)을 쓰고, 배포 파일명은 `KspBridge.Logic.dll`로 고정합니다.
+Tools는 .NET의 collectible `AssemblyLoadContext`로 로드하므로 이름을 바꾸지 않습니다.
 
 ## 요구 사항
 
-- KSP 1.12.5 (기본 경로: `F:\SteamLibrary\steamapps\common\Kerbal Space Program`)
+- KSP 1.12.5
 - .NET 10 SDK
 
-## 빌드와 배포
+## 로컬 경로 설정
+
+PC마다 다른 경로는 저장소 루트의 `KspBridge.user.props`에 적습니다. 이 파일은 커밋하지 않습니다(`.gitignore`).
+
+```xml
+<Project>
+  <PropertyGroup>
+    <KspDir><KSP 설치 경로></KspDir>
+    <AppDir><MCP 서버 배포 경로></AppDir>
+  </PropertyGroup>
+</Project>
+```
+
+| 속성 | 필수 | 용도 |
+| --- | --- | --- |
+| `KspDir` | Mod·Logic 빌드 시 | KSP 참조 DLL(`KSP_x64_Data\Managed`) 위치이자 `GameData` 배포 위치 |
+| `AppDir` | MCP 서버 배포 시 | MCP 서버 고정 배포 경로. `dotnet publish src/KspBridge.App`의 출력 위치이자, Tools 빌드 후 `<AppDir>\Tools` 복사 위치. 없으면 publish는 기본 위치, Tools 복사는 생략 |
+
+명령줄 `-p:KspDir="..."`, `-p:AppDir="..."`가 파일보다 우선합니다.
+`KspDir`가 없으면 Mod·Logic 빌드는 오류로 멈춥니다(솔루션 전체 빌드 포함). App·테스트만 필요하면 해당 프로젝트를 직접 빌드합니다.
+
+## KSP 쪽 빌드와 배포
 
 ```bash
 dotnet build KspBridge.slnx
-```
-
-KSP 경로가 기본값과 다르면 `KspDir`를 지정합니다.
-
-```bash
-dotnet build KspBridge.slnx -p:KspDir="D:\Games\Kerbal Space Program"
 ```
 
 `KspDir\GameData`가 있으면 빌드 후 자동으로 배포됩니다.
@@ -43,9 +62,10 @@ dotnet build KspBridge.slnx -p:KspDir="D:\Games\Kerbal Space Program"
 | --- | --- | --- |
 | `KspBridge.Mod.dll` | `GameData\KspBridge\Plugins` | KSP 재시작 |
 | `settings.cfg` | `GameData\KspBridge` | KSP 재시작 |
-| `KspBridge.Logic.dll` | `GameData\KspBridge\PluginData` | `reload_mod` 도구 호출(KSP 재시작 불필요) |
+| `KspBridge.Logic.dll` | `GameData\KspBridge\PluginData` | `reload_mod` 도구 호출 |
 
 `PluginData`에 두기 때문에 KSP가 Logic을 자동 로드하지 않고, Mod의 로더가 로드합니다.
+KSP 실행 중에는 `Plugins\KspBridge.Mod.dll`이 잠겨 있을 수 있습니다. 그때 Mod를 바꾸려면 KSP를 끄고 빌드합니다.
 
 ### Mod 설정 (`settings.cfg`)
 
@@ -58,12 +78,22 @@ KSPBRIDGE
 
 - `port`: HTTP 서버 포트
 
-## MCP 서버 실행
+## MCP 서버
+
+### 배포
+
+```bash
+dotnet publish src/KspBridge.App
+```
+
+`AppDir`에 `KspBridge.App.exe`와 `Tools\KspBridge.App.Tools.dll`이 배포됩니다. MCP 클라이언트(Cursor, Claude Code)는 모두 이 고정 경로의 exe를 실행합니다.
+설정 파일과 로그 디렉터리도 `AppDir` 아래에 둡니다(예: `<AppDir>\kspbridge.yaml`, `<AppDir>\logs`).
+실행 중인 서버가 exe를 잠그므로, 셸(App·Core)을 바꿨다면 MCP 클라이언트에서 서버를 끄고 publish한 뒤 다시 켭니다.
 
 ### 설정 파일 (YAML)
 
 ```yaml
-ContentRootPath: D:\Local\KSP\KSP1
+ContentRootPath: <콘텐츠 루트 경로>
 BaseUrl: http://127.0.0.1:8085
 TimeoutSeconds: 30
 ```
@@ -71,10 +101,25 @@ TimeoutSeconds: 30
 | 키 | 설명 |
 | --- | --- |
 | `ContentRootPath` | 호스트 콘텐츠 루트 경로 |
-| `BaseUrl` | KspBridge Mod HTTP 주소 |
+| `BaseUrl` | KspBridge Mod HTTP 주소(`settings.cfg`의 `port`와 맞춤) |
 | `TimeoutSeconds` | 요청 기본 제한 시간(초) |
 
 ### 실행
+
+MCP 클라이언트가 실행합니다. Cursor는 `~/.cursor/mcp.json`, Claude Code는 `~/.claude.json`의 `mcpServers`에 등록합니다.
+
+```json
+{
+  "mcpServers": {
+    "kspbridge": {
+      "command": "<AppDir>\\KspBridge.App.exe",
+      "args": ["--config", "<AppDir>\\kspbridge.yaml", "--log", "<AppDir>\\logs"]
+    }
+  }
+}
+```
+
+직접 실행할 때:
 
 ```bash
 KspBridge.App.exe --config <설정 파일> --log <로그 디렉터리>
@@ -89,38 +134,26 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 2 | 설정 오류 |
 | 3 | 실행 오류 |
 
-### Claude Code 연결
+### 도구 교체 (`reload_app`)
 
-`tools/start-mcp.cmd`가 `.mcp-bin\KspBridge.App.exe`를 실행합니다. 실행 중인 서버가 파일을 잠그므로, 새 빌드는 `.mcp-bin-next`에 publish하고 다음 서버 시작 때 스크립트가 `.mcp-bin`과 교체합니다(이전 빌드는 `.mcp-bin-old`).
+1. `dotnet build src/KspBridge.App.Tools`를 실행합니다. 빌드 후 `<AppDir>\Tools`로 복사됩니다.
+2. MCP 도구 `reload_app`을 호출합니다.
 
-```bash
-dotnet publish src/KspBridge.App -o .mcp-bin-next
-```
+셸은 `Tools\KspBridge.App.Tools.dll`을 파일을 잠그지 않고 읽어 들여 도구를 교체하고, 클라이언트에 `notifications/tools/list_changed`를 한 번 보냅니다.
+`initialize` 핸드셰이크를 쓰는 클라이언트(프로토콜 2025-11-25 이하)는 이 알림을 그대로 받고, 2026-07-28 이후 클라이언트는 `subscriptions/listen`으로 구독했을 때만 받습니다.
+클라이언트가 알림을 반영하지 않으면 기존 도구의 구현 교체는 바로 적용되지만, 도구 추가·스키마 변경은 클라이언트를 재시작해야 보입니다.
 
-`.mcp.json` 예시(로컬 경로는 환경에 맞게 변경, 저장소에는 커밋하지 않음):
-
-```json
-{
-  "mcpServers": {
-    "kspbridge": {
-      "command": "<저장소>\\tools\\start-mcp.cmd",
-      "args": ["--config", "<설정 파일>", "--log", "<로그 디렉터리>"]
-    }
-  }
-}
-```
+새 DLL을 로드하지 못하면 이전 도구를 유지합니다. 시작할 때 도구 DLL이 없거나 깨졌으면 `reload_app`만 노출됩니다.
+실행 중인 셸보다 새 Core API나 셸에 등록되지 않은 의존성을 쓰는 Tools는 로드는 되지만 도구 호출 때 실패합니다. 그때는 셸을 publish하고 MCP 서버를 재시작합니다.
+교체할 때마다 이전 도구 어셈블리가 메모리에 조금씩 남을 수 있으므로, 오래 실행했다면 MCP 서버를 재시작합니다.
 
 ## MCP 도구
 
-런타임 교체 도구만 있습니다. 게임 기능 도구는 모두 제거했고, 소스는 [backup](backup)에 남겨 두었습니다.
-
-| 분류 | 도구 |
-| --- | --- |
-| 상태·리로드 | `get_status`, `reload_mod` |
-
-## 백업
-
-[backup](backup)에는 기능을 제거하기 직전의 `src`, `tests`, `ReadMe.md` 전체가 원래 경로 구조 그대로 들어 있습니다(발사 중계는 자동 점화가 있던 원래 버전). 솔루션(`KspBridge.slnx`)에 포함되지 않으므로 빌드되지 않습니다.
+| 분류 | 도구 | 위치 |
+| --- | --- | --- |
+| 상태 | `get_status` | Tools |
+| 리로드 | `reload_mod` | Tools |
+| 리로드 | `reload_app` | 셸 |
 
 ## 테스트
 
@@ -128,6 +161,7 @@ dotnet publish src/KspBridge.App -o .mcp-bin-next
 dotnet test tests/KspBridge.App.Tests
 ```
 
+KSP 경로가 필요 없습니다. stdio 통합 테스트는 빌드된 App 실행 파일을 임시 폴더에 복사해 실행합니다.
 게임 동작은 KSP를 실행한 상태에서 MCP 도구로 검증합니다.
 
 ## 문서

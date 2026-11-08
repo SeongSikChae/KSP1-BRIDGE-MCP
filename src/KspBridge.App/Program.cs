@@ -2,6 +2,8 @@ using CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.Server;
 using Serilog;
 using Serilog.Configuration;
 using System.Configuration;
@@ -60,6 +62,8 @@ namespace KspBridge.App
                 ILogger<Program> logger = host.Services.GetRequiredService<ILogger<Program>>();
                 try
                 {
+                    // A tools load failure is logged and leaves only reload_app; the server still starts.
+                    host.Services.GetRequiredService<ToolHost>().Reload();
                     await host.StartAsync();
                     await host.WaitForShutdownAsync();
                     return ExitCode.Success;
@@ -109,10 +113,17 @@ namespace KspBridge.App
                 client.Timeout = Timeout.InfiniteTimeSpan; // per-request timeouts in KspBridgeClient
             });
 
+            builder.Services.AddSingleton(sp => new ToolHost(
+                ToolHost.DefaultPath,
+                sp,
+                sp.GetRequiredService<IOptions<McpServerOptions>>().Value.ToolCollection
+                    ?? throw new InvalidOperationException("MCP tool collection is not configured"),
+                sp.GetRequiredService<ILogger<ToolHost>>()));
+
             builder.Services
                 .AddMcpServer()
                 .WithStdioServerTransport()
-                .WithTools<FlightTools>();
+                .WithTools<AppTools>();
 
             return builder.Build();
         }

@@ -1,12 +1,5 @@
-.cursor/
-.mcp-bin/
-.mcp-bin-next/
-.mcp-bin-old/
 .vs/
 bin/
-config/
-logs/
 obj/
-secrets/
 
-.mcp.json
+KspBridge.user.props
