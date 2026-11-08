@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KspBridge.App/KspBridge.App.csproj" />
+    <Project Path="src/KspBridge.Logic/KspBridge.Logic.csproj" />
+    <Project Path="src/KspBridge.Mod/KspBridge.Mod.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KspBridge.App.Tests/KspBridge.App.Tests.csproj" />
+  </Folder>
+</Solution>

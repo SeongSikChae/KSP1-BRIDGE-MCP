@@ -1,0 +1,9 @@
+.mcp-bin/
+.mcp-bin-old/
+.vs/
+bin/
+config/
+logs/
+obj/
+
+.mcp.json

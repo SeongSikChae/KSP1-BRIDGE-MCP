@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Logic assembly. KSP 1.12.5 runs on Unity 2019.4 Mono: the plugin must target .NET Framework 4.7.2 (exception to the net10.0 default). -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <RootNamespace>KspBridge</RootNamespace>
+    <!-- KSP's Mono returns the already-loaded assembly when an assembly with the same simple name is loaded again
+         from bytes (the version is ignored), so every build gets a unique simple name. The deployed file name stays fixed. -->
+    <AssemblyName>KspBridge.Logic.$([System.DateTime]::Now.ToString('yyyyMMddHHmmss'))</AssemblyName>
+    <KspDir Condition="'$(KspDir)'==''">F:\SteamLibrary\steamapps\common\Kerbal Space Program</KspDir>
+    <KspManaged>$(KspDir)\KSP_x64_Data\Managed</KspManaged>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(KspManaged)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp-firstpass">
+      <HintPath>$(KspManaged)\Assembly-CSharp-firstpass.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(KspManaged)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(KspManaged)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KspBridge.Mod\KspBridge.Mod.csproj" Private="false" />
+  </ItemGroup>
+
+  <!-- Loaded by the loader (KspBridge.Mod) from PluginData so KSP does not auto-load it; replaced at runtime with reload_mod. -->
+  <Target Name="DeployToKsp" AfterTargets="Build" Condition="Exists('$(KspDir)\GameData')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(KspDir)\GameData\KspBridge\PluginData\KspBridge.Logic.dll" />
+  </Target>
+
+</Project>
