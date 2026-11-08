@@ -27,6 +27,7 @@ namespace KspBridge
             GameEvents.onGameSceneLoadRequested.Add(_onSceneLoad);
             SasMonitor.Hook();
             FlightRecorder.Hook();
+            BroadcastEvents.Hook();
             return Routes.Build(context.Dispatcher);
         }
 
@@ -68,6 +69,14 @@ namespace KspBridge
             }
             try
             {
+                BroadcastEvents.FixedUpdate();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] broadcast events: " + e);
+            }
+            try
+            {
                 Handlers.WarpHandler.Tick();
             }
             catch (Exception e)
@@ -102,6 +111,7 @@ namespace KspBridge
             SasMonitor.Clear();
             SasMonitor.Unhook();
             FlightRecorder.Stop();
+            BroadcastEvents.Unhook();
             if (_onVesselChange != null)
             {
                 GameEvents.onVesselChange.Remove(_onVesselChange);

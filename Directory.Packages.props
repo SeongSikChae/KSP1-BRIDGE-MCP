@@ -5,6 +5,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageVersion Include="Biz.Bizadm.KMS" Version="1.0.6" />
+    <PackageVersion Include="Biz.Bizadm.KMS.Credentials" Version="1.0.2" />
     <PackageVersion Include="Biz.Bizadm.Serilog.Enrichers.Caller" Version="1.0.0" />
     <PackageVersion Include="Biz.Bizadm.Serilog.Sinks.File.Extensions" Version="1.0.0" />
     <PackageVersion Include="Biz.Bizadm.System.Configuration.Extensions" Version="1.0.1" />

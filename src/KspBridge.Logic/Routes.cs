@@ -6,7 +6,7 @@ namespace KspBridge
 {
     public static class Routes
     {
-        public const string Version = "0.9.7";
+        public const string Version = "0.10.0";
 
         public static List<Route> Build(MainThreadDispatcher dispatcher)
         {
@@ -59,6 +59,9 @@ namespace KspBridge
                 new Route("GET", "/api/flights", (m, b, q) => FlightLogHandler.List(q)),
                 new Route("GET", "/api/flights/(?<id>[^/]+)/log", (m, b, q) => FlightLogHandler.Log(m.Groups["id"].Value, q)),
                 new Route("POST", "/api/tech/(?<id>[^/]+)/research", (m, b, q) => TechHandler.Research(m.Groups["id"].Value)),
+                new Route("POST", "/api/broadcast/arm", (m, b, q) => BroadcastHandler.Arm(b)),
+                new Route("GET", "/api/broadcast/events", (m, b, q) => BroadcastHandler.Events(q)),
+                new Route("POST", "/api/broadcast/disarm", (m, b, q) => BroadcastHandler.Disarm()),
             };
             return routes.Select(Guarded).ToList();
         }
