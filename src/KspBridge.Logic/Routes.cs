@@ -6,7 +6,7 @@ namespace KspBridge
 {
     public static class Routes
     {
-        public const string Version = "0.10.0";
+        public const string Version = "0.11.0";
 
         public static List<Route> Build(MainThreadDispatcher dispatcher)
         {
@@ -62,6 +62,7 @@ namespace KspBridge
                 new Route("POST", "/api/broadcast/arm", (m, b, q) => BroadcastHandler.Arm(b)),
                 new Route("GET", "/api/broadcast/events", (m, b, q) => BroadcastHandler.Events(q)),
                 new Route("POST", "/api/broadcast/disarm", (m, b, q) => BroadcastHandler.Disarm()),
+                new Route("POST", "/api/ui/launch", (m, b, q) => UiHandler.SetupLaunch()),
             };
             return routes.Select(Guarded).ToList();
         }

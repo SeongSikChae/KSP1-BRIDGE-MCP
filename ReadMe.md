@@ -180,7 +180,7 @@ dotnet publish src/KspBridge.App -o .mcp-bin-next
 | 상태·리로드 | `get_status`, `reload_mod` |
 | 커리어·계약·시설 | `get_career`, `list_contracts`, `accept_contract`, `decline_contract`, `list_facilities`, `upgrade_facility` |
 | 과학·기술 | `get_science`, `run_experiment`, `discard_science`, `list_tech`, `research_tech` |
-| 기체·발사 | `list_parts`, `build_craft`, `list_craft`, `list_crew`, `launch_craft`, `get_stages`, `recover_vessel`, `revert_to_launch` |
+| 기체·발사 | `list_parts`, `build_craft`, `list_craft`, `list_crew`, `launch_craft`, `get_stages`, `setup_launch_ui`, `recover_vessel`, `revert_to_launch` |
 | 비행 제어 | `get_vessel_state`, `set_throttle`, `activate_next_stage`, `set_sas`, `set_sas_mode`, `set_rcs`, `set_action_group`, `set_attitude`, `release_attitude`, `wait_until` |
 | 기동 노드 | `list_maneuver_nodes`, `add_maneuver_node`, `remove_maneuver_node` |
 | 시간 가속 | `warp_to`, `set_warp`, `stop_warp` |

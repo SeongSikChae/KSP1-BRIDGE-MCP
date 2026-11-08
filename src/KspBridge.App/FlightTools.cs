@@ -34,6 +34,11 @@ namespace KspBridge.App
         public Task<string> ActivateNextStage(CancellationToken ct)
             => client.SendAsync(HttpMethod.Post, "api/stage", new { }, ct);
 
+        [McpServerTool(Name = "setup_launch_ui")]
+        [Description("Set up the flight screen for launch prep: maneuver mode (Ap/Pe bottom-left), staging stack with total and per-stage delta-v/TWR/ISP/burn time info (left), and the resources app (top-right). Flight scene only. Reports ok/error per item.")]
+        public Task<string> SetupLaunchUi(CancellationToken ct)
+            => client.SendAsync(HttpMethod.Post, "api/ui/launch", new { }, ct);
+
         [McpServerTool(Name = "set_sas")]
         [Description("Turn SAS on or off.")]
         public Task<string> SetSas(bool enabled, CancellationToken ct)

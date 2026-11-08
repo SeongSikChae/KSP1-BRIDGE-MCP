@@ -73,9 +73,10 @@ namespace KspBridge.App.Tests
             await tools.AddManeuverNode(ut: 1000, prograde: 100, ct: ct);
             await tools.AddManeuverNode(inSeconds: 300, normal: -5, radial: 2, ct: ct);
             await tools.RemoveManeuverNode(1, ct);
+            await tools.SetupLaunchUi(ct);
 
             var r = handler.Requests;
-            Assert.HasCount(12, r);
+            Assert.HasCount(13, r);
             Assert.AreEqual((HttpMethod.Get, "/api/status", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessel", (string?)null), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/throttle"), (r[2].Method, r[2].Path));
@@ -95,6 +96,8 @@ namespace KspBridge.App.Tests
             Assert.AreEqual((HttpMethod.Post, "/api/nodes"), (r[9].Method, r[9].Path));
             AssertBody(r[10].Body, """{"in_seconds":300,"prograde":0,"normal":-5,"radial":2}""");
             Assert.AreEqual((HttpMethod.Delete, "/api/nodes/1", (string?)null), r[11]);
+            Assert.AreEqual((HttpMethod.Post, "/api/ui/launch"), (r[12].Method, r[12].Path));
+            AssertBody(r[12].Body, "{}");
         }
 
         [TestMethod]
