@@ -23,6 +23,9 @@ namespace KspBridge
 
         /// <summary>Main thread. Release triggers, locks, attitude holds and event hooks; return what was released.</summary>
         IList<string> Stop();
+
+        /// <summary>Main thread. Extra fields merged into /api/status; null adds nothing.</summary>
+        IDictionary<string, object> Status();
     }
 
     public sealed class LogicContext
@@ -34,7 +37,7 @@ namespace KspBridge
     /// <summary>Loads, swaps and drives the logic assembly. Main thread only.</summary>
     public static class LogicHost
     {
-        public const string LoaderVersion = "0.0.1";
+        public const string LoaderVersion = "0.0.2";
 
         private static ILogic _logic;
         private static LogicContext _context;
@@ -105,7 +108,7 @@ namespace KspBridge
         private static object Status()
         {
             bool inFlight = HighLogic.LoadedScene == GameScenes.FLIGHT;
-            return new Dictionary<string, object>
+            Dictionary<string, object> status = new Dictionary<string, object>
             {
                 ["scene"] = HighLogic.LoadedScene.ToString(),
                 ["has_active_vessel"] = inFlight && FlightGlobals.ActiveVessel != null,
@@ -114,6 +117,25 @@ namespace KspBridge
                 ["load_count"] = _loadCount,
                 ["logic_error"] = _logic == null ? _lastError : null,
             };
+            if (_logic != null)
+            {
+                try
+                {
+                    IDictionary<string, object> extra = _logic.Status();
+                    if (extra != null)
+                    {
+                        foreach (KeyValuePair<string, object> kv in extra)
+                        {
+                            status[kv.Key] = kv.Value;
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    status["logic_status_error"] = Describe(e);
+                }
+            }
+            return status;
         }
 
         private static object Reload()

@@ -7,7 +7,7 @@ namespace KspBridge.App
     public sealed class FlightTools(KspBridgeClient client)
     {
         [McpServerTool(Name = "get_status", ReadOnly = true)]
-        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start) and logic_error when the logic failed to load.")]
+        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor).")]
         public Task<string> GetStatus(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/status", null, ct);
 

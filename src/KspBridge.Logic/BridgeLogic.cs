@@ -1,3 +1,4 @@
+using KspBridge.Editor;
 using System.Collections.Generic;
 
 namespace KspBridge
@@ -26,5 +27,7 @@ namespace KspBridge
             Stopped = true;
             return new List<string>();
         }
+
+        public IDictionary<string, object> Status() => new Dictionary<string, object> { ["editor"] = EditorScene.Status() };
     }
 }
