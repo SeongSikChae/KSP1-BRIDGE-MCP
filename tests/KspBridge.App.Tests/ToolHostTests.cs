@@ -62,10 +62,10 @@ namespace KspBridge.App.Tests
 
             using JsonDocument result = JsonDocument.Parse(host.Reload());
 
-            CollectionAssert.AreEqual(new[] { "get_status", "reload_app", "reload_mod" }, Names(collection));
+            CollectionAssert.AreEqual(ExpectedTools.WithShell, Names(collection));
             Assert.AreEqual(1, result.RootElement.GetProperty("load_count").GetInt32());
             Assert.AreEqual(JsonValueKind.Null, result.RootElement.GetProperty("version_before").ValueKind);
-            CollectionAssert.AreEquivalent(new[] { "get_status", "reload_mod" },
+            CollectionAssert.AreEquivalent(ExpectedTools.Loaded,
                 result.RootElement.GetProperty("tools").EnumerateArray().Select(e => e.GetString()).ToArray());
         }
 
@@ -81,7 +81,7 @@ namespace KspBridge.App.Tests
             using JsonDocument result = JsonDocument.Parse(host.Reload());
 
             Assert.AreEqual(1, changed);
-            CollectionAssert.AreEqual(new[] { "get_status", "reload_app", "reload_mod" }, Names(collection));
+            CollectionAssert.AreEqual(ExpectedTools.WithShell, Names(collection));
             Assert.AreNotSame(firstStatus, collection.Single(t => t.ProtocolTool.Name == "get_status"));
             Assert.AreEqual(2, result.RootElement.GetProperty("load_count").GetInt32());
             Assert.AreEqual(JsonValueKind.String, result.RootElement.GetProperty("version_before").ValueKind);
@@ -99,7 +99,7 @@ namespace KspBridge.App.Tests
 
             StringAssert.StartsWith(result, "error: reload_failed: FileNotFoundException");
             StringAssert.EndsWith(result, "(previous tools kept)");
-            CollectionAssert.AreEqual(new[] { "get_status", "reload_app", "reload_mod" }, Names(collection));
+            CollectionAssert.AreEqual(ExpectedTools.WithShell, Names(collection));
         }
 
         [TestMethod]
@@ -113,7 +113,7 @@ namespace KspBridge.App.Tests
             string result = host.Reload();
 
             StringAssert.StartsWith(result, "error: reload_failed: BadImageFormatException");
-            CollectionAssert.AreEqual(new[] { "get_status", "reload_app", "reload_mod" }, Names(collection));
+            CollectionAssert.AreEqual(ExpectedTools.WithShell, Names(collection));
         }
 
         [TestMethod]

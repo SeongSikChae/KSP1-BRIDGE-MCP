@@ -1,15 +1,17 @@
-﻿using System.Collections.Generic;
+﻿using KspBridge.Handlers;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace KspBridge
 {
     public static class Routes
     {
-        public const string Version = "0.0.1";
+        public const string Version = "0.0.3";
 
         public static List<Route> Build(MainThreadDispatcher dispatcher)
         {
             List<Route> routes = new List<Route>();
+            routes.AddRange(EditorHandler.Routes());
             return routes.Select(Guarded).ToList();
         }
 

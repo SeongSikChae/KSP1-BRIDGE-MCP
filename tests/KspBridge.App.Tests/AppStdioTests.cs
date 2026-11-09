@@ -73,7 +73,7 @@ namespace KspBridge.App.Tests
         {
             await using McpClient client = await StartAsync();
 
-            CollectionAssert.AreEqual(new[] { "get_status", "reload_app", "reload_mod" }, await ToolNamesAsync(client));
+            CollectionAssert.AreEqual(ExpectedTools.WithShell, await ToolNamesAsync(client));
             Assert.AreEqual(KspBridgeClient.NotRunningMessage, Text(await client.CallToolAsync("get_status")));
         }
 
@@ -90,7 +90,7 @@ namespace KspBridge.App.Tests
             Assert.AreEqual(2, result.RootElement.GetProperty("load_count").GetInt32());
             Assert.AreEqual(JsonValueKind.String, result.RootElement.GetProperty("version_before").ValueKind);
             await listChanged.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            CollectionAssert.AreEqual(new[] { "get_status", "reload_app", "reload_mod" }, await ToolNamesAsync(client));
+            CollectionAssert.AreEqual(ExpectedTools.WithShell, await ToolNamesAsync(client));
             Assert.AreEqual(KspBridgeClient.NotRunningMessage, Text(await client.CallToolAsync("get_status")));
         }
 
