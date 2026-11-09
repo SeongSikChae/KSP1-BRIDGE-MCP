@@ -9,7 +9,7 @@ namespace KspBridge.App
         [property: JsonPropertyName("child"), Description("Child node id; default the opposite top/bottom")] string? Child = null);
 
     public sealed record SurfaceSpec(
-        [property: JsonPropertyName("azimuth"), Description("Degrees around the parent +Y axis, 0 = parent +Z")] double Azimuth,
+        [property: JsonPropertyName("azimuth"), Description("Degrees around the parent's +Y axis through its colliders' centre, 0 = parent +Z, 90 = parent +X")] double Azimuth,
         [property: JsonPropertyName("height"), Description("0..1 from the parent's bottom to top")] double Height,
         [property: JsonPropertyName("angle"), Description("Degrees about the surface normal")] double Angle = 0);
 
@@ -48,8 +48,10 @@ namespace KspBridge.App
         [McpServerTool(Name = "add_part", Destructive = false)]
         [Description("Add a part to the editor craft. Empty craft: give only part (it becomes the root). Otherwise give parent (id from get_craft) and " +
             "either node {parent: parent node id from get_part, child: child node id, default the opposite top/bottom} for a stack attach, " +
-            "or surface {azimuth deg around parent +Y with 0 = +Z, height 0..1 bottom to top of the parent, angle deg about the surface normal} " +
-            "with optional symmetry {mode radial|mirror, count}. All or nothing: on error the craft is unchanged. " +
+            "or surface {azimuth deg in the parent's own frame around its +Y axis through the centre of its colliders (0 = parent +Z, 90 = parent +X; " +
+            "use get_craft rotation to find which parent direction faces outward), height 0..1 bottom to top of the parent, angle deg about the surface normal} " +
+            "with optional symmetry {mode radial (count 1..8, copies turned about the parent's +Y) | mirror (count 2, reflected through the root part's up/forward plane)}. " +
+            "All or nothing: on error the craft is unchanged. " +
             "Returns added parts (with ids) and structure warnings; one editor Undo step per call.")]
         public Task<string> AddPart(
             [Description("Part name from list_parts")] string part,

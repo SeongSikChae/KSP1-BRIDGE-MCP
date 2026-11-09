@@ -7,13 +7,31 @@ using UnityEngine;
 
 namespace KspBridge.Editor
 {
-    /// <summary>add_part request. Node is the parent node id plus optional child node id.</summary>
+    /// <summary>add_part request: stack attach (node) or surface attach (surface, optional symmetry).</summary>
     public sealed class AddRequest
     {
         public string Part;
         public uint? Parent;
         public string ParentNode;
         public string ChildNode;
+        public SurfaceSpec Surface;
+        public SymmetrySpec Symmetry;
+    }
+
+    public sealed class SurfaceSpec
+    {
+        /// <summary>Degrees around the parent +Y axis, 0 = parent +Z, 90 = parent +X.</summary>
+        public float Azimuth;
+        /// <summary>0..1 from the bottom to the top of the parent's colliders.</summary>
+        public float Height;
+        /// <summary>Degrees about the surface normal.</summary>
+        public float Angle;
+    }
+
+    public sealed class SymmetrySpec
+    {
+        public SymmetryMethod Mode;
+        public int Count;
     }
 
     /// <summary>Adds, removes and moves editor parts. Every public call changes nothing when it fails.</summary>
@@ -24,26 +42,38 @@ namespace KspBridge.Editor
 
         private static string TempDir => KSPUtil.ApplicationRootPath + "GameData/KspBridge/PluginData/tmp";
 
-        /// <summary>A spawned part waiting for Part.Start before it is attached.</summary>
-        private sealed class PendingStack
+        /// <summary>Spawned parts waiting for Part.Start before they are attached. Poses are kept relative to the parent.</summary>
+        private sealed class Pending
         {
-            public Part Child;
+            public readonly List<Part> Children = new List<Part>();
+            public readonly List<Vector3> LocalPositions = new List<Vector3>();
+            public readonly List<Quaternion> LocalRotations = new List<Quaternion>();
             public int SpawnFrame;
             public uint ParentId;
+            public bool Surface;
             public string ParentNode;
             public string ChildNode;
+            public string SurfaceMeshName;
+            public SymmetryMethod SymmetryMode;
+
+            public void Add(Part parent, Part child)
+            {
+                Children.Add(child);
+                LocalPositions.Add(parent.transform.InverseTransformPoint(child.transform.position));
+                LocalRotations.Add(Quaternion.Inverse(parent.transform.rotation) * child.transform.rotation);
+            }
         }
 
         /// <summary>
         /// HTTP thread. A part's staging icon is created by Part.Start (stackIcon.CreateIcon, with no yield before it in the
         /// editor), and StageManager only stages icons that exist when the part is picked and placed. Unity runs Start for an
-        /// object created during Update on the next frame, before any Update. So a stack attach spawns the part, waits until the
-        /// frame count has moved on, then attaches it on the main thread. (Part.started is only set in flight, not in the editor.)
+        /// object created during Update on the next frame, before any Update. So an attach spawns the parts, waits until the
+        /// frame count has moved on, then attaches them on the main thread. (Part.started is only set in flight, not in the editor.)
         /// </summary>
         public static object Add(MainThreadDispatcher dispatcher, AddRequest r)
         {
             object begun = dispatcher.Invoke(() => Begin(r), MainThreadTimeout);
-            if (!(begun is PendingStack pending))
+            if (!(begun is Pending pending))
             {
                 return begun;
             }
@@ -53,15 +83,15 @@ namespace KspBridge.Editor
             {
                 if (DateTime.UtcNow > deadline)
                 {
-                    dispatcher.Invoke(() => { Discard(EditorLogic.fetch?.ship, pending.Child); return null; }, MainThreadTimeout);
-                    throw new ApiException(504, "part_start_timeout", pending.Child.partInfo.name + " did not finish starting within " + PartStartTimeout.TotalSeconds + "s");
+                    dispatcher.Invoke(() => { DiscardAll(EditorLogic.fetch?.ship, pending.Children); return null; }, MainThreadTimeout);
+                    throw new ApiException(504, "part_start_timeout", pending.Children[0].partInfo.name + " did not finish starting within " + PartStartTimeout.TotalSeconds + "s");
                 }
                 System.Threading.Thread.Sleep(20);
             }
             return dispatcher.Invoke(() => Finish(pending), MainThreadTimeout);
         }
 
-        /// <summary>Main thread. Checks the request; places the root at once, or spawns a stack child and returns it pending.</summary>
+        /// <summary>Main thread. Checks the request; places the root at once, or spawns the parts to attach and returns them pending.</summary>
         private static object Begin(AddRequest r)
         {
             ShipConstruct ship = EditorScene.Require();
@@ -78,13 +108,13 @@ namespace KspBridge.Editor
             {
                 throw ApiException.BadRequest("parent is required: the craft already has a root part");
             }
-            if (r.ParentNode == null)
-            {
-                throw ApiException.BadRequest("node.parent is required");
-            }
-
-            // Check everything before creating anything.
             Part parent = PartIndex.Find(ship, r.Parent.Value);
+            return r.Surface != null ? BeginSurface(parent, ap, r.Surface, r.Symmetry) : BeginStack(parent, ap, r);
+        }
+
+        private static Pending BeginStack(Part parent, AvailablePart ap, AddRequest r)
+        {
+            // Check everything before creating anything.
             AttachNode pn = FreeNode(parent, r.ParentNode);
             if (!ap.partPrefab.attachRules.stack)
             {
@@ -98,35 +128,141 @@ namespace KspBridge.Editor
 
             Part child = Spawn(ap);
             PlaceAtNode(parent, pn, child, child.FindAttachNode(childNodeId));
-            return new PendingStack { Child = child, SpawnFrame = Time.frameCount, ParentId = parent.persistentId, ParentNode = pn.id, ChildNode = childNodeId };
+            Pending p = new Pending { SpawnFrame = Time.frameCount, ParentId = parent.persistentId, ParentNode = pn.id, ChildNode = childNodeId };
+            p.Add(parent, child);
+            return p;
         }
 
-        /// <summary>Main thread, after Part.Start. Re-checks the parent node (the craft may have changed meanwhile) and attaches.</summary>
-        private static object Finish(PendingStack p)
+        private static Pending BeginSurface(Part parent, AvailablePart ap, SurfaceSpec s, SymmetrySpec sym)
+        {
+            // Check everything before creating anything.
+            if (!parent.attachRules.allowSrfAttach)
+            {
+                throw AttachFailed(parent.partInfo.name + " does not accept surface-attached parts");
+            }
+            if (!ap.partPrefab.attachRules.srfAttach)
+            {
+                throw AttachFailed(ap.name + " cannot be surface-attached");
+            }
+            if (!SurfaceHit(parent, s.Azimuth, s.Height, out RaycastHit hit))
+            {
+                Collider[] all = parent.GetComponentsInChildren<Collider>(true);
+                Collider[] own = all.Where(c => c.GetComponentInParent<Part>() == parent).ToArray();
+                throw AttachFailed("no surface of " + parent.partInfo.name + " at azimuth " + s.Azimuth + ", height " + s.Height
+                    + " (colliders: " + all.Length + " in hierarchy, " + own.Length + " own, "
+                    + own.Count(c => c.enabled && c.gameObject.activeInHierarchy) + " own usable; own: "
+                    + string.Join(", ", own.Select(c => c.GetType().Name + " " + c.name + " active=" + c.gameObject.activeInHierarchy + " enabled=" + c.enabled + " trigger=" + c.isTrigger + " layer=" + c.gameObject.layer).ToArray()) + ")");
+            }
+            int count = sym?.Count ?? 1;
+
+            Pending p = new Pending
+            {
+                SpawnFrame = Time.frameCount,
+                ParentId = parent.persistentId,
+                Surface = true,
+                SurfaceMeshName = hit.collider.name,
+                SymmetryMode = sym?.Mode ?? SymmetryMethod.Radial,
+            };
+            try
+            {
+                Part first = Spawn(ap);
+                PlaceOnSurface(parent, first, hit, s.Angle);
+                p.Add(parent, first);
+                for (int k = 1; k < count; k++)
+                {
+                    Part copy = Spawn(ap);
+                    if (p.SymmetryMode == SymmetryMethod.Mirror)
+                    {
+                        PlaceMirrored(parent, first, copy);
+                    }
+                    else
+                    {
+                        PlaceRadial(parent, first, copy, k, count);
+                    }
+                    p.Add(parent, copy);
+                }
+            }
+            catch
+            {
+                DiscardAll(null, p.Children);
+                throw;
+            }
+            return p;
+        }
+
+        /// <summary>Main thread, after Part.Start. Re-checks the parent (the craft may have changed meanwhile) and attaches.</summary>
+        private static object Finish(Pending p)
         {
             ShipConstruct ship = null;
             try
             {
                 ship = EditorScene.Require();
-                if (p.Child.hasStagingIcon && p.Child.stackIcon.StageIcon == null)
+                foreach (Part c in p.Children)
                 {
-                    throw new ApiException(500, "staging_icon_missing", p.Child.partInfo.name + " has no staging icon after Part.Start");
+                    if (c.hasStagingIcon && c.stackIcon.StageIcon == null)
+                    {
+                        throw new ApiException(500, "staging_icon_missing", c.partInfo.name + " has no staging icon after Part.Start");
+                    }
                 }
                 Part parent = PartIndex.Find(ship, p.ParentId);
-                AttachNode pn = FreeNode(parent, p.ParentNode);
-                AttachStack(ship, parent, pn, p.Child, p.Child.FindAttachNode(p.ChildNode));
+                AttachNode pn = p.Surface ? null : FreeNode(parent, p.ParentNode);
+                for (int i = 0; i < p.Children.Count; i++)
+                {
+                    p.Children[i].transform.SetPositionAndRotation(
+                        parent.transform.TransformPoint(p.LocalPositions[i]), parent.transform.rotation * p.LocalRotations[i]);
+                }
+                if (p.Children.Count > 1)
+                {
+                    foreach (Part c in p.Children)
+                    {
+                        c.symMethod = p.SymmetryMode;
+                        c.symmetryCounterparts = p.Children.Where(o => o != c).ToList();
+                    }
+                }
+
+                // Editor order: picked -> attachPart (each symmetry part) -> placed. Placing after all are linked lets
+                // StageManager group the held icons of symmetry counterparts.
+                foreach (Part c in p.Children)
+                {
+                    GameEvents.onEditorPartPicked.Fire(c);
+                }
+                foreach (Part c in p.Children)
+                {
+                    if (p.Surface)
+                    {
+                        c.attachMode = AttachModes.SRF_ATTACH;
+                        c.srfAttachNode.attachedPart = parent;
+                        c.srfAttachNode.srfAttachMeshName = p.SurfaceMeshName;
+                    }
+                    else
+                    {
+                        AttachNode cn = c.FindAttachNode(p.ChildNode);
+                        c.attachMode = AttachModes.STACK;
+                        pn.attachedPart = c;
+                        cn.attachedPart = parent;
+                    }
+                    Link(ship, parent, c);
+                }
+                foreach (Part c in p.Children)
+                {
+                    GameEvents.onEditorPartPlaced.Fire(c);
+                }
             }
             catch
             {
-                Discard(ship, p.Child);
+                DiscardAll(ship, p.Children);
                 throw;
             }
             EditorScene.Commit(ship);
-            return EditResult.Added(ship, new[] { p.Child });
+            return EditResult.Added(ship, p.Children);
         }
 
         private static AttachNode FreeNode(Part parent, string nodeId)
         {
+            if (nodeId == null)
+            {
+                throw ApiException.BadRequest("give node {parent} for a stack attach or surface {azimuth, height} for a surface attach");
+            }
             AttachNode pn = parent.FindAttachNode(nodeId)
                 ?? throw AttachFailed(parent.partInfo.name + " has no node '" + nodeId + "' (nodes: " + NodeIds(parent.attachNodes) + ")");
             if (pn.attachedPart != null)
@@ -180,27 +316,103 @@ namespace KspBridge.Editor
             return p;
         }
 
-        /// <summary>
-        /// Turns the child so its node faces the parent node, puts the two nodes together and links them in the editor's order
-        /// (EditorLogic: part picked -> attachPart -> part placed). StageManager holds a part's staging icons when it is picked
-        /// and puts the held icons into stages when it is placed, so both events are needed for staged parts.
-        /// </summary>
-        private static void AttachStack(ShipConstruct ship, Part parent, AttachNode pn, Part child, AttachNode cn)
-        {
-            GameEvents.onEditorPartPicked.Fire(child);
-            PlaceAtNode(parent, pn, child, cn);
-            child.attachMode = AttachModes.STACK;
-            pn.attachedPart = child;
-            cn.attachedPart = parent;
-            Link(ship, parent, child);
-        }
-
         /// <summary>Turns the child so its node faces the parent node and puts the two nodes together.</summary>
         private static void PlaceAtNode(Part parent, AttachNode pn, Part child, AttachNode cn)
         {
             Quaternion rot = parent.transform.rotation * Quaternion.FromToRotation(cn.orientation, -pn.orientation);
             Vector3 pos = parent.transform.TransformPoint(pn.position) - rot * cn.position;
             child.transform.SetPositionAndRotation(pos, rot);
+        }
+
+        /// <summary>
+        /// The parent's collider surface at an azimuth (around the parent's +Y through its colliders' centre, 0 = +Z) and a height
+        /// (0..1 of the colliders' extent): a ray from outside toward that line, tested against the parent's own colliders only.
+        /// </summary>
+        private static bool SurfaceHit(Part parent, float azimuthDeg, float height01, out RaycastHit best)
+        {
+            best = default;
+            Transform t = parent.transform;
+            // Attached parts are transform children of their parent, so keep only the colliders of this part itself.
+            // In the editor part colliders are triggers; Collider.Raycast still hits them.
+            List<Collider> colliders = parent.GetComponentsInChildren<Collider>()
+                .Where(c => c.enabled && c.gameObject.activeInHierarchy && c.GetComponentInParent<Part>() == parent).ToList();
+            if (colliders.Count == 0)
+            {
+                return false;
+            }
+
+            Bounds local = new Bounds(t.InverseTransformPoint(colliders[0].bounds.center), Vector3.zero);
+            foreach (Collider c in colliders)
+            {
+                Bounds w = c.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector3 corner = new Vector3((i & 1) == 0 ? w.min.x : w.max.x, (i & 2) == 0 ? w.min.y : w.max.y, (i & 4) == 0 ? w.min.z : w.max.z);
+                    local.Encapsulate(t.InverseTransformPoint(corner));
+                }
+            }
+
+            float y = Mathf.Lerp(local.min.y, local.max.y, height01);
+            Vector3 dir = new Vector3(Mathf.Sin(azimuthDeg * Mathf.Deg2Rad), 0f, Mathf.Cos(azimuthDeg * Mathf.Deg2Rad));
+            float reach = local.extents.magnitude * 2f + 1f;
+            // Aim at the vertical line through the colliders' centre (not the part origin, which may sit off the body).
+            Ray ray = new Ray(t.TransformPoint(new Vector3(local.center.x, y, local.center.z) + dir * reach), -t.TransformDirection(dir));
+            float nearest = float.MaxValue;
+            foreach (Collider c in colliders)
+            {
+                if (c.Raycast(ray, out RaycastHit hit, reach * 2f) && hit.distance < nearest)
+                {
+                    nearest = hit.distance;
+                    best = hit;
+                }
+            }
+            return nearest < float.MaxValue;
+        }
+
+        /// <summary>EditorLogic.checkAttach surface placement, plus a turn of angle degrees about the surface normal.</summary>
+        private static void PlaceOnSurface(Part parent, Part child, RaycastHit hit, float angleDeg)
+        {
+            AttachNode sn = child.srfAttachNode;
+            Quaternion rot = Quaternion.AngleAxis(angleDeg, hit.normal)
+                * Quaternion.LookRotation(hit.normal, parent.transform.rotation * Vector3.up)
+                * Quaternion.LookRotation(sn.orientation, Vector3.up);
+            Vector3 pos = hit.point - rot * child.attRotation * sn.position;
+            child.transform.SetPositionAndRotation(pos, rot);
+        }
+
+        /// <summary>EditorLogic.UpdateSymmetry radial copy k of count: the first part turned about the parent's up axis.</summary>
+        private static void PlaceRadial(Part parent, Part first, Part copy, int k, int count)
+        {
+            Quaternion q = Quaternion.AngleAxis(k * 360f / count, parent.transform.up);
+            copy.transform.SetPositionAndRotation(
+                q * (first.transform.position - parent.transform.position) + parent.transform.position, q * first.transform.rotation);
+        }
+
+        /// <summary>
+        /// EditorLogic.UpdateSymmetry mirror copy: reflected through the plane of the root part's up and forward axes,
+        /// with the part modules' OnWillBeMirrored hook and the editor's 180 degree turn for sideways surface nodes.
+        /// </summary>
+        private static void PlaceMirrored(Part parent, Part first, Part copy)
+        {
+            Transform root = EditorLogic.RootPart.transform;
+            Transform reference = first.GetReferenceTransform();
+            Vector3 offset = reference.position - parent.transform.position;
+            Vector3 flat = Vector3.ProjectOnPlane(offset, root.up);
+            Vector3 position = parent.transform.position + (offset - flat) + Quaternion.AngleAxis(180f, -root.forward) * flat;
+
+            Vector3 up = root.InverseTransformDirection(reference.up);
+            Vector3 forward = root.InverseTransformDirection(reference.forward);
+            up.x *= -1f;
+            forward.x *= -1f;
+            up = root.TransformDirection(up);
+            forward = root.TransformDirection(forward);
+            Quaternion rotation = Quaternion.LookRotation(forward, up);
+            bool handled = copy.OnWillBeMirrored(ref rotation, copy.srfAttachNode, parent);
+            if (!handled && copy.srfAttachNode.orientation.x != 0f)
+            {
+                rotation = Quaternion.AngleAxis(180f, up) * rotation;
+            }
+            copy.transform.SetPositionAndRotation(position, rotation);
         }
 
         /// <summary>What EditorLogic.attachPart does after the nodes are set: attached flag, ship membership, part and transform parents.</summary>
@@ -212,19 +424,25 @@ namespace KspBridge.Editor
             child.transform.parent = parent.transform;
             child.onAttach(parent, true);
             GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartAttached, child);
-            GameEvents.onEditorPartPlaced.Fire(child);
         }
 
-        /// <summary>Undoes a half-made placement: the part is removed from the craft if it got that far, then destroyed.</summary>
-        private static void Discard(ShipConstruct ship, Part p)
+        /// <summary>Undoes a half-made placement: parts are removed from the craft if they got that far, then destroyed.</summary>
+        private static void DiscardAll(ShipConstruct ship, IEnumerable<Part> parts)
         {
-            if (ship != null && ship.parts.Contains(p))
+            foreach (Part p in parts.ToList())
             {
-                EditorLogic.DeletePart(p);
-            }
-            else if (p != null)
-            {
-                UnityEngine.Object.Destroy(p.gameObject);
+                if (p == null)
+                {
+                    continue;
+                }
+                if (ship != null && ship.parts.Contains(p))
+                {
+                    EditorLogic.DeletePart(p);
+                }
+                else
+                {
+                    UnityEngine.Object.Destroy(p.gameObject);
+                }
             }
         }
 
