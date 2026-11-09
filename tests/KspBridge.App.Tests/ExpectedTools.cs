@@ -4,7 +4,7 @@ namespace KspBridge.App.Tests
     internal static class ExpectedTools
     {
         /// <summary>Tools defined in KspBridge.App.Tools.dll, sorted.</summary>
-        public static readonly string[] Loaded = ["get_part", "get_status", "list_parts", "new_craft", "open_editor", "reload_mod"];
+        public static readonly string[] Loaded = ["get_craft", "get_part", "get_status", "list_parts", "new_craft", "open_editor", "reload_mod"];
 
         /// <summary>Loaded tools plus the shell's reload_app, sorted.</summary>
         public static readonly string[] WithShell = [.. Loaded.Append("reload_app").Order()];

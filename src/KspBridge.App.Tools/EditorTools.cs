@@ -24,6 +24,13 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/new", new { name }, ct);
 
+        [McpServerTool(Name = "get_craft", ReadOnly = true)]
+        [Description("The craft in the VAB/SPH editor: editor state and every part with id (persistentId, use it in other editor tools), part name, " +
+            "parent id, attach (root | node{parent_node, child_node} | surface), symmetry {mode, group ids}, stage, and position [x,y,z] m / " +
+            "rotation [x,y,z] deg in root-part space (+Y = rocket up / plane nose, same in VAB and SPH). Requires a ready editor.")]
+        public Task<string> GetCraft(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/editor/craft", null, ct);
+
         [McpServerTool(Name = "list_parts", ReadOnly = true)]
         [Description("Part catalog summary: name (use it in add_part), title, category, cost, mass (t), size (bulkhead profiles) and unlocked. " +
             "Career/science list only unlocked, purchased parts unless unlocked=false. Works in any scene with a loaded save.")]

@@ -81,6 +81,16 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task GetCraftGetsEditorCraft()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.GetCraft(CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Get, "/api/editor/craft", (string?)null), (handler.Requests[0].Method, handler.Requests[0].Path, handler.Requests[0].Body));
+        }
+
+        [TestMethod]
         public async Task GetPartEscapesName()
         {
             (EditorTools tools, RecordingHandler handler) = Create();
