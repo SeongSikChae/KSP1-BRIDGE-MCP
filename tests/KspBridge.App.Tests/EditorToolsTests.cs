@@ -9,12 +9,12 @@ namespace KspBridge.App.Tests
     {
         private sealed class RecordingHandler : HttpMessageHandler
         {
-            public List<(HttpMethod Method, string Path, string? Body)> Requests { get; } = [];
+            public List<(HttpMethod Method, string Path, string? Body, string Query)> Requests { get; } = [];
 
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-                Requests.Add((request.Method, request.RequestUri!.AbsolutePath, body));
+                Requests.Add((request.Method, request.RequestUri!.AbsolutePath, body, request.RequestUri.Query));
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("""{"ok":true,"data":{"accepted":true}}""", Encoding.UTF8, "application/json"),
@@ -64,6 +64,30 @@ namespace KspBridge.App.Tests
 
             Assert.AreEqual((HttpMethod.Post, "/api/editor/new"), (handler.Requests[0].Method, handler.Requests[0].Path));
             Assert.AreEqual("Rocket1", Body(handler.Requests[0].Body).GetProperty("name").GetString());
+        }
+
+        [TestMethod]
+        public async Task ListPartsBuildsQuery()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.ListParts("Engine", "swivel tank", false, CancellationToken.None);
+            await tools.ListParts(ct: CancellationToken.None);
+
+            Assert.AreEqual(HttpMethod.Get, handler.Requests[0].Method);
+            Assert.AreEqual("/api/parts", handler.Requests[0].Path);
+            Assert.AreEqual("?category=Engine&q=swivel%20tank&unlocked=false", handler.Requests[0].Query);
+            Assert.AreEqual("", handler.Requests[1].Query);
+        }
+
+        [TestMethod]
+        public async Task GetPartEscapesName()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.GetPart("mk1pod.v2", CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Get, "/api/parts/mk1pod.v2"), (handler.Requests[0].Method, handler.Requests[0].Path));
         }
     }
 }

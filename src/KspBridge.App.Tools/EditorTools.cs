@@ -23,5 +23,39 @@ namespace KspBridge.App
             [Description("Craft name; omit to keep the game's default name")] string? name = null,
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/new", new { name }, ct);
+
+        [McpServerTool(Name = "list_parts", ReadOnly = true)]
+        [Description("Part catalog summary: name (use it in add_part), title, category, cost, mass (t), size (bulkhead profiles) and unlocked. " +
+            "Career/science list only unlocked, purchased parts unless unlocked=false. Works in any scene with a loaded save.")]
+        public Task<string> ListParts(
+            [Description("Category filter: Pods, FuelTank, Engine, Control, Structural, Coupling, Payload, Aero, Ground, Thermal, Electrical, Communication, Science, Cargo, Robotics, Utility")] string? category = null,
+            [Description("Case-insensitive substring of the part name or title")] string? q = null,
+            [Description("Only parts usable in this save (default true)")] bool unlocked = true,
+            CancellationToken ct = default)
+        {
+            List<string> query = [];
+            if (!string.IsNullOrWhiteSpace(category))
+            {
+                query.Add("category=" + Uri.EscapeDataString(category));
+            }
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                query.Add("q=" + Uri.EscapeDataString(q));
+            }
+            if (!unlocked)
+            {
+                query.Add("unlocked=false");
+            }
+            return client.SendAsync(HttpMethod.Get, "api/parts" + (query.Count > 0 ? "?" + string.Join("&", query) : ""), null, ct);
+        }
+
+        [McpServerTool(Name = "get_part", ReadOnly = true)]
+        [Description("Part details: summary plus attach nodes (id, size, position, orientation in part space; use the ids in add_part node), " +
+            "allow_stack, surface_attach (can be surface-attached), allow_surface_children, resources (amount/max) and " +
+            "editor fields (module, field, value, min/max) that set_part_field can change.")]
+        public Task<string> GetPart(
+            [Description("Exact part name from list_parts, e.g. mk1pod.v2")] string name,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/parts/" + Uri.EscapeDataString(name), null, ct);
     }
 }
