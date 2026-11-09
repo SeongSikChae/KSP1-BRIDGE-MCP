@@ -6,12 +6,12 @@ namespace KspBridge
 {
     public static class Routes
     {
-        public const string Version = "0.0.5";
+        public const string Version = "0.1.2";
 
         public static List<Route> Build(MainThreadDispatcher dispatcher)
         {
             List<Route> routes = new List<Route>();
-            routes.AddRange(EditorHandler.Routes());
+            routes.AddRange(EditorHandler.Routes(dispatcher));
             return routes.Select(Guarded).ToList();
         }
 

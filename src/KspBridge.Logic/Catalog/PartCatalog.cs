@@ -58,6 +58,17 @@ namespace KspBridge.Catalog
             PartLoader.getPartInfoByName(name)
             ?? throw new ApiException(404, "part_not_found", "no part named '" + name + "' (use list_parts for names)");
 
+        /// <summary>The part by exact name if this save may use it; 404 part_not_found or 409 part_locked.</summary>
+        public static AvailablePart RequireUsable(string name)
+        {
+            AvailablePart ap = Find(name);
+            if (!IsUsable(ap))
+            {
+                throw new ApiException(409, "part_locked", ap.name + " is not unlocked or purchased in this save");
+            }
+            return ap;
+        }
+
         /// <summary>Unlocked and purchased in career/science; always true in sandbox.</summary>
         public static bool IsUsable(AvailablePart ap)
         {

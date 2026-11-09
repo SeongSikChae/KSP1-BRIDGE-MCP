@@ -81,6 +81,37 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task AddPartPostsStackAttach()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.AddPart("fuelTank", 4041040345u, new NodeSpec("bottom"), ct: CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/parts"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual("fuelTank", body.GetProperty("part").GetString());
+            Assert.AreEqual(4041040345u, body.GetProperty("parent").GetUInt32());
+            Assert.AreEqual("bottom", body.GetProperty("node").GetProperty("parent").GetString());
+            Assert.AreEqual(JsonValueKind.Null, body.GetProperty("node").GetProperty("child").ValueKind);
+            Assert.AreEqual(JsonValueKind.Null, body.GetProperty("surface").ValueKind);
+        }
+
+        [TestMethod]
+        public async Task AddPartPostsSurfaceAndSymmetry()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.AddPart("radialDecoupler", 1u, surface: new SurfaceSpec(90, 0.5), symmetry: new SymmetrySpec("radial", 3), ct: CancellationToken.None);
+
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual(90, body.GetProperty("surface").GetProperty("azimuth").GetDouble());
+            Assert.AreEqual(0.5, body.GetProperty("surface").GetProperty("height").GetDouble());
+            Assert.AreEqual(0, body.GetProperty("surface").GetProperty("angle").GetDouble());
+            Assert.AreEqual("radial", body.GetProperty("symmetry").GetProperty("mode").GetString());
+            Assert.AreEqual(3, body.GetProperty("symmetry").GetProperty("count").GetInt32());
+        }
+
+        [TestMethod]
         public async Task GetCraftGetsEditorCraft()
         {
             (EditorTools tools, RecordingHandler handler) = Create();

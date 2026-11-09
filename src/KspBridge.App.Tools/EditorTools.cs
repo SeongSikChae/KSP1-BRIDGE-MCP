@@ -1,8 +1,22 @@
 using ModelContextProtocol.Server;
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 
 namespace KspBridge.App
 {
+    public sealed record NodeSpec(
+        [property: JsonPropertyName("parent"), Description("Parent node id, e.g. bottom")] string Parent,
+        [property: JsonPropertyName("child"), Description("Child node id; default the opposite top/bottom")] string? Child = null);
+
+    public sealed record SurfaceSpec(
+        [property: JsonPropertyName("azimuth"), Description("Degrees around the parent +Y axis, 0 = parent +Z")] double Azimuth,
+        [property: JsonPropertyName("height"), Description("0..1 from the parent's bottom to top")] double Height,
+        [property: JsonPropertyName("angle"), Description("Degrees about the surface normal")] double Angle = 0);
+
+    public sealed record SymmetrySpec(
+        [property: JsonPropertyName("mode"), Description("radial or mirror")] string Mode,
+        [property: JsonPropertyName("count"), Description("1..8 copies in total (mirror: 2)")] int Count);
+
     /// <summary>VAB/SPH craft design tools. Each call is forwarded to the mod's /api/editor routes.</summary>
     [McpServerToolType]
     public sealed class EditorTools(KspBridgeClient client)
@@ -30,6 +44,21 @@ namespace KspBridge.App
             "rotation [x,y,z] deg in root-part space (+Y = rocket up / plane nose, same in VAB and SPH). Requires a ready editor.")]
         public Task<string> GetCraft(CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Get, "api/editor/craft", null, ct);
+
+        [McpServerTool(Name = "add_part", Destructive = false)]
+        [Description("Add a part to the editor craft. Empty craft: give only part (it becomes the root). Otherwise give parent (id from get_craft) and " +
+            "either node {parent: parent node id from get_part, child: child node id, default the opposite top/bottom} for a stack attach, " +
+            "or surface {azimuth deg around parent +Y with 0 = +Z, height 0..1 bottom to top of the parent, angle deg about the surface normal} " +
+            "with optional symmetry {mode radial|mirror, count}. All or nothing: on error the craft is unchanged. " +
+            "Returns added parts (with ids) and structure warnings; one editor Undo step per call.")]
+        public Task<string> AddPart(
+            [Description("Part name from list_parts")] string part,
+            [Description("Parent part id from get_craft; omit for the root of an empty craft")] uint? parent = null,
+            [Description("Stack attach: parent node id and optional child node id")] NodeSpec? node = null,
+            [Description("Surface attach position on the parent")] SurfaceSpec? surface = null,
+            [Description("Symmetry for surface attach; VAB default radial, SPH default mirror")] SymmetrySpec? symmetry = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/parts", new { part, parent, node, surface, symmetry }, ct);
 
         [McpServerTool(Name = "list_parts", ReadOnly = true)]
         [Description("Part catalog summary: name (use it in add_part), title, category, cost, mass (t), size (bulkhead profiles) and unlocked. " +

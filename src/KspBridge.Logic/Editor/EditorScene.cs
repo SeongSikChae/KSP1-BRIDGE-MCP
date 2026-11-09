@@ -78,6 +78,13 @@ namespace KspBridge.Editor
             };
         }
 
+        /// <summary>After a successful edit: refresh the editor (cost, DeltaV, staging) and record one Undo step.</summary>
+        public static void Commit(ShipConstruct ship)
+        {
+            GameEvents.onEditorShipModified.Fire(ship);
+            EditorLogic.fetch.SetBackup();
+        }
+
         /// <summary>Sets the craft name shown in the editor and used by the ship.</summary>
         public static void SetName(string name)
         {
