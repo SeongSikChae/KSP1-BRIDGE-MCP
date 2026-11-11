@@ -199,7 +199,10 @@ namespace KspBridge.Editor
                 ship = EditorScene.Require();
                 foreach (Part c in p.Children)
                 {
-                    if (c.hasStagingIcon && c.stackIcon.StageIcon == null)
+                    // Part.Start creates the icon only when staging is on; a part whose staging is off by default
+                    // (a docking port) has a staging icon name but no icon. stagingOn starts true and stays true for parts
+                    // without a staging icon (UpdateStageability returns early), so both are checked.
+                    if (c.hasStagingIcon && c.stagingOn && c.stackIcon.StageIcon == null)
                     {
                         throw new ApiException(500, "staging_icon_missing", c.partInfo.name + " has no staging icon after Part.Start");
                     }
