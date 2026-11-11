@@ -1,6 +1,7 @@
 using KspBridge.Catalog;
 using KspBridge.Check;
 using KspBridge.Editor;
+using KspBridge.Render;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,6 +20,7 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/editor/new", (m, b, q) =>
                 CraftFiles.New(b.Has("name") ? b.GetString("name") : null));
             yield return new Route("GET", "/api/editor/craft", (m, b, q) => GetCraft());
+            yield return new Route("POST", "/api/editor/render", (m, b, q) => Render(b));
             yield return new Route("GET", "/api/editor/check", (m, b, q) => Check(Empty(q["body"]), Empty(q["altitude"]), q["vacuum"] == "true"));
             // HTTP thread: add_part waits across frames for Part.Start (see PartPlacer.Add).
             yield return new Route("POST", "/api/editor/parts", (m, b, q) => PartPlacer.Add(dispatcher, ParseAdd(b)), onHttpThread: true);
@@ -148,6 +150,28 @@ namespace KspBridge.Handlers
                 throw ApiException.BadRequest(name + " must be a part id from get_craft");
             }
             return (uint)value;
+        }
+
+        private static object Render(RequestBody b)
+        {
+            List<CraftRenderer.View> views = b.Has("views")
+                ? b.GetList("views").Select(v => CraftRenderer.ParseView(v as string ?? Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture))).ToList()
+                : new[] { "side", "front", "iso" }.Select(CraftRenderer.ParseView).ToList();
+            if (views.Count == 0 || views.Count > CraftRenderer.MaxViews)
+            {
+                throw ApiException.BadRequest("views must have 1.." + CraftRenderer.MaxViews + " entries");
+            }
+            double resolution = b.GetDouble("resolution", 512);
+            if (resolution != Math.Floor(resolution) || resolution < CraftRenderer.MinResolution || resolution > CraftRenderer.MaxResolution)
+            {
+                throw ApiException.BadRequest("resolution must be a whole number " + CraftRenderer.MinResolution + ".." + CraftRenderer.MaxResolution);
+            }
+            ShipConstruct ship = EditorScene.Require();
+            if (ship.parts.Count == 0)
+            {
+                throw new ApiException(409, "nothing_to_render", "the craft is empty");
+            }
+            return CraftRenderer.Render(ship, views, (int)resolution, b.Has("markers") && b.GetBool("markers"));
         }
 
         private static object Check(string bodyName, string altitudeText, bool vacuum)

@@ -11,13 +11,16 @@ namespace KspBridge.App.Tests
         {
             public List<(HttpMethod Method, string Path, string? Body, string Query)> Requests { get; } = [];
 
+            /// <summary>The mod's response envelope returned for every request.</summary>
+            public string Response { get; set; } = """{"ok":true,"data":{"accepted":true}}""";
+
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
                 Requests.Add((request.Method, request.RequestUri!.AbsolutePath, body, request.RequestUri.Query));
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent("""{"ok":true,"data":{"accepted":true}}""", Encoding.UTF8, "application/json"),
+                    Content = new StringContent(Response, Encoding.UTF8, "application/json"),
                 };
             }
         }
@@ -215,6 +218,42 @@ namespace KspBridge.App.Tests
             Assert.AreEqual((HttpMethod.Get, "/api/editor/check", "?altitude=0", (string?)null),
                 (handler.Requests[0].Method, handler.Requests[0].Path, handler.Requests[0].Query, handler.Requests[0].Body));
             Assert.AreEqual(("/api/editor/check", "?altitude=1500.5&body=Mun&vacuum=true"), (handler.Requests[1].Path, handler.Requests[1].Query));
+        }
+
+        [TestMethod]
+        public async Task RenderCraftReturnsViewNameAndPngPerImage()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+            byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+            string b64 = Convert.ToBase64String(png);
+            handler.Response = $$$"""{"ok":true,"data":{"images":[{"view":"side","width":64,"height":64,"png":"{{{b64}}}"},{"view":"45,30","width":64,"height":64,"png":"{{{b64}}}"}]}}""";
+
+            ModelContextProtocol.Protocol.CallToolResult result = await tools.RenderCraft(["side", "45,30"], 64, markers: true, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/render"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual("45,30", body.GetProperty("views")[1].GetString());
+            Assert.AreEqual(64, body.GetProperty("resolution").GetInt32());
+            Assert.IsTrue(body.GetProperty("markers").GetBoolean());
+            Assert.AreNotEqual(true, result.IsError);
+            Assert.AreEqual(4, result.Content.Count);
+            Assert.AreEqual("side", ((ModelContextProtocol.Protocol.TextContentBlock)result.Content[0]).Text);
+            ModelContextProtocol.Protocol.ImageContentBlock image = (ModelContextProtocol.Protocol.ImageContentBlock)result.Content[1];
+            Assert.AreEqual("image/png", image.MimeType);
+            CollectionAssert.AreEqual(png, image.DecodedData.ToArray());
+            Assert.AreEqual("45,30", ((ModelContextProtocol.Protocol.TextContentBlock)result.Content[2]).Text);
+        }
+
+        [TestMethod]
+        public async Task RenderCraftErrorIsToolError()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+            handler.Response = """{"ok":false,"error":{"code":"bad_request","message":"resolution must be a whole number 64..1024"}}""";
+
+            ModelContextProtocol.Protocol.CallToolResult result = await tools.RenderCraft(resolution: 2000, ct: CancellationToken.None);
+
+            Assert.IsTrue(result.IsError);
+            StringAssert.StartsWith(((ModelContextProtocol.Protocol.TextContentBlock)result.Content[0]).Text, "error: bad_request");
         }
 
         [TestMethod]

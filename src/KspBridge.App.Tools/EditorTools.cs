@@ -1,3 +1,4 @@
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
 using System.Text.Json;
@@ -164,6 +165,33 @@ namespace KspBridge.App
                 query.Add("vacuum=true");
             }
             return client.SendAsync(HttpMethod.Get, "api/editor/check?" + string.Join("&", query), null, ct);
+        }
+
+        [McpServerTool(Name = "render_craft", ReadOnly = true)]
+        [Description("Pictures of the editor craft on a plain background (no building or floor), the camera fitted to the craft. " +
+            "Each view is a name or \"azimuth,elevation\" in degrees, in root-part space (+Y = rocket up / plane nose): front = from +Y, " +
+            "side = from +X, top = from +Z, iso = from (1,1,1); azimuth goes around +Y (0 = +Z, 90 = +X), elevation from the XZ plane " +
+            "toward +Y (-90..90). Screen up is +Y, or +Z when looking within about 8 degrees of the Y axis. Up to 4 views, default side, front, iso. markers=true adds dots: CoM yellow, CoT red, CoL blue. " +
+            "Returns each view's name followed by its PNG image.")]
+        public async Task<CallToolResult> RenderCraft(
+            [Description("Views: front, side, top, iso or \"az,el\", up to 4; default side, front, iso")] string[]? views = null,
+            [Description("Image width and height in pixels, 64..1024 (default 512)")] int resolution = 512,
+            [Description("Draw CoM (yellow), CoT (red) and CoL (blue) dots")] bool markers = false,
+            CancellationToken ct = default)
+        {
+            string json = await client.SendAsync(HttpMethod.Post, "api/editor/render", new { views, resolution, markers }, ct);
+            if (json.StartsWith("error: ", StringComparison.Ordinal))
+            {
+                return new CallToolResult { IsError = true, Content = [new TextContentBlock { Text = json }] };
+            }
+            using JsonDocument doc = JsonDocument.Parse(json);
+            List<ContentBlock> content = [];
+            foreach (JsonElement image in doc.RootElement.GetProperty("images").EnumerateArray())
+            {
+                content.Add(new TextContentBlock { Text = image.GetProperty("view").GetString()! });
+                content.Add(ImageContentBlock.FromBytes(image.GetProperty("png").GetBytesFromBase64(), "image/png"));
+            }
+            return new CallToolResult { Content = content };
         }
 
         [McpServerTool(Name = "list_parts", ReadOnly = true)]

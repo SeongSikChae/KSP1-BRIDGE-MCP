@@ -142,7 +142,7 @@ namespace KspBridge.Check
         /// The CoL marker's own reference (EditorMarker_CoL.UpdatePosition in the editor): the overlay's pitch and air speed,
         /// 100 m on the home body. Null when nothing makes lift.
         /// </summary>
-        private static Ray? CenterOfLift(Part root)
+        internal static Ray? CenterOfLift(Part root)
         {
             EditorVesselOverlays overlays = EditorVesselOverlays.fetch;
             float pitch = overlays != null ? overlays.referencePitch : 1f;
