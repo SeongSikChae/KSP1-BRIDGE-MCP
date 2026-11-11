@@ -112,6 +112,43 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task RemovePartDeletesById()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.RemovePart(4041040345u, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Delete, "/api/editor/parts/4041040345", (string?)null), (handler.Requests[0].Method, handler.Requests[0].Path, handler.Requests[0].Body));
+        }
+
+        [TestMethod]
+        public async Task OffsetPartPostsDistance()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.OffsetPart(7u, y: -0.5, ct: CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/parts/7/offset"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual(0, body.GetProperty("x").GetDouble());
+            Assert.AreEqual(-0.5, body.GetProperty("y").GetDouble());
+            Assert.AreEqual(0, body.GetProperty("z").GetDouble());
+        }
+
+        [TestMethod]
+        public async Task RotatePartPostsAxisAndAngle()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.RotatePart(7u, "z", 10, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/parts/7/rotate"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual("z", body.GetProperty("axis").GetString());
+            Assert.AreEqual(10, body.GetProperty("angle").GetDouble());
+        }
+
+        [TestMethod]
         public async Task GetCraftGetsEditorCraft()
         {
             (EditorTools tools, RecordingHandler handler) = Create();

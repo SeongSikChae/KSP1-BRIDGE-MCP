@@ -254,7 +254,226 @@ namespace KspBridge.Editor
                 throw;
             }
             EditorScene.Commit(ship);
+            if (p.Children.Any(c => c.CrewCapacity > 0))
+            {
+                EditorScene.RefreshCrew();
+            }
             return EditResult.Added(ship, p.Children);
+        }
+
+        /// <summary>
+        /// Main thread. Removes a part with its symmetry counterparts and everything attached below them. The root cannot be removed.
+        /// The editor's delete works on the part held by the mouse (its symmetry step too), so its steps are replayed here for the
+        /// given part: pick (detachPart, then each counterpart still in the craft: PartSymmetryDeleted, detachPart, deletePart,
+        /// then wipeSymmetry, onEditorPartPicked, PartDetached) and DestroySelectedPart (PartDeleted, deletePart,
+        /// onEditorPartDeleted with the cleared selection), then one Undo step and the crew refresh.
+        /// If a part module throws midway, parts already taken out of the craft are still destroyed, and the editor refresh and
+        /// Undo step still run; the module's exception is the one reported.
+        /// </summary>
+        public static object Remove(uint id)
+        {
+            ShipConstruct ship = EditorScene.Require();
+            Part p = PartIndex.Find(ship, id);
+            if (p.parent == null)
+            {
+                throw ApiException.BadRequest("cannot remove the root part; use new_craft for an empty craft");
+            }
+            List<Part> group = SymmetryGroup(p).Where(s => ship.parts.Contains(s)).ToList();
+            List<uint> removed = group.SelectMany(Subtree).Select(x => x.persistentId).Distinct().ToList();
+            HashSet<Part> deleted = new HashSet<Part>();
+            Exception failure = null;
+
+            try
+            {
+                Detach(ship, p);
+                foreach (Part s in group.Skip(1))
+                {
+                    GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartSymmetryDeleted, s);
+                    Detach(ship, s);
+                    Delete(s, deleted);
+                }
+                WipeSymmetry(p);
+                GameEvents.onEditorPartPicked.Fire(p);
+                GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartDetached, p);
+                GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartDeleted, p);
+                Delete(p, deleted);
+            }
+            catch (Exception e)
+            {
+                failure = e;
+                // Parts already out of the craft must not stay in the scene.
+                foreach (Part s in group)
+                {
+                    if (s != null && !ship.parts.Contains(s))
+                    {
+                        try
+                        {
+                            Delete(s, deleted);
+                        }
+                        catch (Exception cleanup)
+                        {
+                            Debug.LogError("[KspBridge] remove_part cleanup of " + s.partInfo.name + " failed: " + cleanup);
+                        }
+                    }
+                }
+                throw;
+            }
+            finally
+            {
+                try
+                {
+                    GameEvents.onEditorPartDeleted.Fire(null);
+                    EditorScene.Commit(ship);
+                }
+                catch (Exception cleanup) when (failure != null)
+                {
+                    Debug.LogError("[KspBridge] remove_part refresh after " + failure.GetType().Name + " failed: " + cleanup);
+                }
+                EditorScene.RefreshCrew();
+            }
+            return EditResult.Removed(ship, removed);
+        }
+
+        /// <summary>
+        /// EditorLogic.deletePart: the part and its children, children first; parts already deleted are skipped.
+        /// (EditorLogic.DeletePart itself needs a part held by the mouse: it refreshes node icons for EditorLogic.SelectedPart
+        /// and throws when there is none.)
+        /// </summary>
+        private static void Delete(Part part, HashSet<Part> deleted)
+        {
+            List<Part> doomed = Subtree(part).Where(x => !deleted.Contains(x)).ToList();
+            for (int i = doomed.Count - 1; i >= 0; i--)
+            {
+                deleted.Add(doomed[i]);
+                doomed[i].OnDelete();
+                UnityEngine.Object.Destroy(doomed[i].gameObject);
+            }
+        }
+
+        /// <summary>EditorLogic.wipeSymmetry: the part loses its counterparts; its children keep only counterparts inside its subtree.</summary>
+        private static void WipeSymmetry(Part part)
+        {
+            part.symmetryCounterparts = new List<Part>();
+            List<Part> children = EditorLogicBase.FindPartsInChildren(part);
+            HashSet<Part> inside = new HashSet<Part>(children);
+            foreach (Part c in children)
+            {
+                c.symmetryCounterparts.RemoveAll(x => !inside.Contains(x));
+            }
+        }
+
+        /// <summary>
+        /// Main thread. Moves a part and its symmetry counterparts (with everything attached below them) by a root-space distance.
+        /// Like the editor offset tool on the reference transform, plus attPos; counterparts move by the mirrored or turned distance.
+        /// Moving the root moves the whole craft.
+        /// </summary>
+        public static object Offset(uint id, Vector3 deltaRoot)
+        {
+            ShipConstruct ship = EditorScene.Require();
+            Part p = PartIndex.Find(ship, id);
+            Transform root = PartIndex.Root(ship).transform;
+            Vector3 world = root.TransformVector(deltaRoot);
+            List<Part> group = SymmetryGroup(p);
+            foreach (Part s in group)
+            {
+                Transform t = s.GetReferenceTransform();
+                t.position += SymmetricVector(p, s, world, root);
+                s.attPos = t.localPosition - s.attPos0;
+            }
+            GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartOffset, p);
+            EditorScene.Commit(ship);
+            return EditResult.Changed(ship, group);
+        }
+
+        /// <summary>
+        /// Main thread. Turns a part and its symmetry counterparts (with everything attached below them) about a root-space axis
+        /// through the node that attaches it to its parent (the part origin for the root), like the editor rotate tool, including
+        /// its attRotation update. Mirror counterparts turn about the mirrored axis the other way; radial ones about the turned axis.
+        /// </summary>
+        public static object Rotate(uint id, Vector3 axisRoot, float angleDeg)
+        {
+            ShipConstruct ship = EditorScene.Require();
+            Part p = PartIndex.Find(ship, id);
+            Transform root = PartIndex.Root(ship).transform;
+            Vector3 axis = root.TransformDirection(axisRoot);
+            List<Part> group = SymmetryGroup(p);
+            // Each counterpart's turn, worked out before p itself is turned.
+            List<Quaternion> turns = group.Select(s => Quaternion.AngleAxis(
+                s != p && p.symMethod == SymmetryMethod.Mirror ? -angleDeg : angleDeg, SymmetricVector(p, s, axis, root))).ToList();
+            for (int k = 0; k < group.Count; k++)
+            {
+                Part s = group[k];
+                Quaternion q = turns[k];
+                Transform t = s.GetReferenceTransform();
+                AttachNode toParent = s.parent != null ? s.FindAttachNodeByPart(s.parent) : null;
+                Vector3 pivot = toParent != null ? t.TransformPoint(toParent.position) : t.position;
+                Quaternion attRotation = s.attRotation;
+                Quaternion attRotation0 = s.attRotation0;
+                t.rotation = q * t.rotation;
+                t.position = pivot + q * (t.position - pivot);
+                s.attRotation0 = s.transform.localRotation;
+                s.attRotation = attRotation * Quaternion.Inverse(attRotation0) * s.transform.localRotation;
+            }
+            GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartRotated, p);
+            EditorScene.Commit(ship);
+            return EditResult.Changed(ship, group);
+        }
+
+        /// <summary>The part followed by its symmetry counterparts.</summary>
+        private static List<Part> SymmetryGroup(Part p) =>
+            new[] { p }.Concat(p.symmetryCounterparts ?? new List<Part>()).Where(s => s != null).Distinct().ToList();
+
+        private static IEnumerable<Part> Subtree(Part p) => new[] { p }.Concat(EditorLogicBase.FindPartsInChildren(p)).Distinct();
+
+        /// <summary>
+        /// A world vector of part p carried over to counterpart s: mirror counterparts reflect it through the root part's
+        /// up/forward plane (as EditorLogic.UpdateSymmetry places them), radial ones turn it as s is turned from p.
+        /// </summary>
+        private static Vector3 SymmetricVector(Part p, Part s, Vector3 v, Transform root)
+        {
+            if (s == p)
+            {
+                return v;
+            }
+            if (p.symMethod == SymmetryMethod.Mirror)
+            {
+                return v - 2f * Vector3.Dot(v, root.right) * root.right;
+            }
+            return s.transform.rotation * Quaternion.Inverse(p.transform.rotation) * v;
+        }
+
+        /// <summary>EditorLogic.detachPart: out of the craft with its children, node links to the parent cleared, unparented.</summary>
+        private static void Detach(ShipConstruct ship, Part part)
+        {
+            foreach (Part x in Subtree(part).ToList())
+            {
+                ship.Remove(x);
+            }
+            Part parent = part.parent;
+            if (parent != null)
+            {
+                ClearNodes(parent, part);
+                ClearNodes(part, parent);
+            }
+            part.setParent();
+            part.transform.parent = null;
+            part.onDetach();
+        }
+
+        /// <summary>EditorLogicBase.clearAttachNodes, one direction: the nodes of owner that point at other.</summary>
+        private static void ClearNodes(Part owner, Part other)
+        {
+            foreach (AttachNode n in owner.attachNodes)
+            {
+                if (n.attachedPart == other)
+                {
+                    n.attachedPart = null;
+                }
+            }
+            if (owner.srfAttachNode != null && owner.srfAttachNode.attachedPart == other)
+            {
+                owner.srfAttachNode.attachedPart = null;
+            }
         }
 
         private static AttachNode FreeNode(Part parent, string nodeId)

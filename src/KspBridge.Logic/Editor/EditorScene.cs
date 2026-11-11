@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Reflection;
+using UnityEngine;
 
 namespace KspBridge.Editor
 {
@@ -83,6 +86,47 @@ namespace KspBridge.Editor
         {
             GameEvents.onEditorShipModified.Fire(ship);
             EditorLogic.fetch.SetBackup();
+        }
+
+        private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+        private static MethodInfo _refreshCrewAssignment;
+        private static MethodInfo _getPartExistsFilter;
+
+        /// <summary>
+        /// After Commit (SetBackup): the editor's private RefreshCrewAssignment(ShipConstruction.ShipConfig, GetPartExistsFilter()),
+        /// which rebuilds the crew manifest from the backed-up craft so the crew dialog lists crewable parts that were added
+        /// and drops removed ones. The editor calls it after attaching a part with crew capacity and after every delete.
+        /// The editor refreshes the data only (the crew tab cannot be open while parts are edited by hand); tools can edit with
+        /// the crew tab open, so the dialog is redrawn from the refreshed manifest as well.
+        /// Never throws: it runs after the edit is committed, so a failure is logged instead of failing the finished edit.
+        /// </summary>
+        public static void RefreshCrew()
+        {
+            try
+            {
+                if (_refreshCrewAssignment == null || _getPartExistsFilter == null)
+                {
+                    _refreshCrewAssignment = typeof(EditorLogic).GetMethod("RefreshCrewAssignment", Private);
+                    _getPartExistsFilter = typeof(EditorLogic).GetMethod("GetPartExistsFilter", Private);
+                    if (_refreshCrewAssignment == null || _getPartExistsFilter == null)
+                    {
+                        Debug.LogError("[KspBridge] crew refresh skipped: EditorLogic.RefreshCrewAssignment / GetPartExistsFilter not found");
+                        return;
+                    }
+                }
+                EditorLogic editor = EditorLogic.fetch;
+                object filter = _getPartExistsFilter.Invoke(editor, null);
+                _refreshCrewAssignment.Invoke(editor, new[] { ShipConstruction.ShipConfig, filter });
+                if (KSP.UI.CrewAssignmentDialog.Instance != null)
+                {
+                    KSP.UI.CrewAssignmentDialog.Instance.RefreshCrewLists(ShipConstruction.ShipManifest, false, true);
+                }
+            }
+            catch (Exception e)
+            {
+                Exception cause = e is TargetInvocationException t && t.InnerException != null ? t.InnerException : e;
+                Debug.LogError("[KspBridge] crew refresh failed: " + cause);
+            }
         }
 
         /// <summary>Sets the craft name shown in the editor and used by the ship.</summary>

@@ -8,6 +8,10 @@ namespace KspBridge.Editor
     {
         public static object Added(ShipConstruct ship, IEnumerable<Part> parts) => Make(ship, parts, null, null);
 
+        public static object Changed(ShipConstruct ship, IEnumerable<Part> parts) => Make(ship, null, parts, null);
+
+        public static object Removed(ShipConstruct ship, IEnumerable<uint> ids) => Make(ship, null, null, ids);
+
         private static object Make(ShipConstruct ship, IEnumerable<Part> added, IEnumerable<Part> changed, IEnumerable<uint> removed) =>
             new Dictionary<string, object>
             {

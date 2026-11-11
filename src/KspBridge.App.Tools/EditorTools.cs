@@ -62,6 +62,40 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/parts", new { part, parent, node, surface, symmetry }, ct);
 
+        [McpServerTool(Name = "remove_part", Destructive = true)]
+        [Description("Remove a part from the editor craft together with its symmetry counterparts and every part attached below them. " +
+            "The root part cannot be removed (use new_craft). Returns the removed ids; one editor Undo step per call " +
+            "(an editor Undo reloads the craft and gives every part a new id: call get_craft again after one).")]
+        public Task<string> RemovePart(
+            [Description("Part id from get_craft")] uint id,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Delete, "api/editor/parts/" + id, null, ct);
+
+        [McpServerTool(Name = "offset_part", Destructive = false)]
+        [Description("Move a part (with its symmetry counterparts and the parts attached below them) by x, y, z metres in root-part space " +
+            "(+Y = rocket up / plane nose). Counterparts move by the mirrored or turned distance; moving the root moves the whole craft. " +
+            "Parts can be moved apart from their parent (no editor snap-back). Each value is limited to ±1000. " +
+            "Returns the moved part and its counterparts (attached parts move with them but are not listed); one editor Undo step per call.")]
+        public Task<string> OffsetPart(
+            [Description("Part id from get_craft")] uint id,
+            [Description("Metres along root-part X")] double x = 0,
+            [Description("Metres along root-part Y")] double y = 0,
+            [Description("Metres along root-part Z")] double z = 0,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/offset", new { x, y, z }, ct);
+
+        [McpServerTool(Name = "rotate_part", Destructive = false)]
+        [Description("Turn a part (with its symmetry counterparts and the parts attached below them) by angle degrees about a root-part axis " +
+            "through the point where it attaches to its parent (the part origin for the root). Mirror counterparts turn the mirrored way, " +
+            "radial ones about their own turned axis. Angle is limited to ±1000. " +
+            "Returns the turned part and its counterparts (attached parts turn with them but are not listed); one editor Undo step per call.")]
+        public Task<string> RotatePart(
+            [Description("Part id from get_craft")] uint id,
+            [Description("x, y or z axis of root-part space")] string axis,
+            [Description("Degrees; positive turns by the left-hand rule about the axis (Unity)")] double angle,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/rotate", new { axis, angle }, ct);
+
         [McpServerTool(Name = "list_parts", ReadOnly = true)]
         [Description("Part catalog summary: name (use it in add_part), title, category, cost, mass (t), size (bulkhead profiles) and unlocked. " +
             "Career/science list only unlocked, purchased parts unless unlocked=false. Works in any scene with a loaded save.")]
