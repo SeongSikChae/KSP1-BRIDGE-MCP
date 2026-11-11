@@ -112,6 +112,21 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/field", new { module, field, value }, ct);
 
+        [McpServerTool(Name = "set_stage", Destructive = false)]
+        [Description("Move a part's staging icon to another stage, like dragging it in the editor staging list: give stage (an existing " +
+            "stage number from get_craft stages) or new_stage_at (insert a new empty stage at that number; stages numbered that or higher " +
+            "go up by one; the part moves into it). Stage 0 fires last; the highest number fires first. When the part's icon is grouped " +
+            "with its symmetry counterparts, the whole group moves; an ungrouped part moves alone. If the part's old stage becomes empty, " +
+            "the game removes it when it created that stage itself (stages above move down by one) and keeps it when it was added " +
+            "(new_stage_at or the editor + button), as in the editor; read the stage numbers from the returned list. " +
+            "Returns the staging list; one editor Undo step per call that moves something.")]
+        public Task<string> SetStage(
+            [Description("Part id from get_craft (a part with a staging icon: engine, decoupler, parachute...)")] uint id,
+            [Description("Existing stage number to move to")] int? stage = null,
+            [Description("Insert a new stage at this number and move the part into it")] int? new_stage_at = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/stage", new { stage, new_stage_at }, ct);
+
         [McpServerTool(Name = "set_resource", Destructive = false)]
         [Description("Fill a resource of a part (e.g. LiquidFuel, Oxidizer, SolidFuel) to a fraction of its maximum, like the part action " +
             "window slider: symmetry counterparts get the same amount. Returns the changed part and its counterparts with values " +

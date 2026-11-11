@@ -28,6 +28,8 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/editor/parts/(?<id>[0-9]+)/field", (m, b, q) =>
                 PartSettings.SetField(PathId(m), b.GetString("module"), b.GetString("field"),
                     b.GetRaw("value") ?? throw ApiException.BadRequest("'value' is required")));
+            yield return new Route("POST", "/api/editor/parts/(?<id>[0-9]+)/stage", (m, b, q) =>
+                Staging.Move(PathId(m), OptionalIndex(b, "stage"), OptionalIndex(b, "new_stage_at")));
             yield return new Route("POST", "/api/editor/parts/(?<id>[0-9]+)/resource", (m, b, q) =>
                 PartSettings.SetResource(PathId(m), b.GetString("resource"), b.GetDouble("fraction")));
             yield return new Route("GET", "/api/parts", (m, b, q) =>
@@ -100,6 +102,21 @@ namespace KspBridge.Handlers
             return id;
         }
 
+        /// <summary>A whole number from the body, or null when omitted.</summary>
+        private static int? OptionalIndex(RequestBody b, string name)
+        {
+            if (!b.Has(name))
+            {
+                return null;
+            }
+            double v = b.GetDouble(name);
+            if (v != Math.Floor(v) || v < 0 || v > 1000)
+            {
+                throw ApiException.BadRequest(name + " must be a whole number 0..1000");
+            }
+            return (int)v;
+        }
+
         /// <summary>A number from the body; 0 when omitted unless required.</summary>
         private static float Finite(RequestBody b, string name, bool required = false)
         {
@@ -138,7 +155,7 @@ namespace KspBridge.Handlers
             {
                 ["editor"] = EditorScene.Status(),
                 ["parts"] = ship.parts.Select(p => (object)PartIndex.Summary(ship, p)).ToList(),
-                ["stages"] = new List<object>(),   // filled by U9 (Staging.List)
+                ["stages"] = Staging.List(),
             };
         }
     }

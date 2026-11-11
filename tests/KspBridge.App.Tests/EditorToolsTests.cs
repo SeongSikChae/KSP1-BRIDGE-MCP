@@ -178,6 +178,23 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task SetStagePostsStageOrNewStage()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.SetStage(7u, stage: 2, ct: CancellationToken.None);
+            await tools.SetStage(7u, new_stage_at: 0, ct: CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/parts/7/stage"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement first = Body(handler.Requests[0].Body);
+            Assert.AreEqual(2, first.GetProperty("stage").GetInt32());
+            Assert.AreEqual(JsonValueKind.Null, first.GetProperty("new_stage_at").ValueKind);
+            JsonElement second = Body(handler.Requests[1].Body);
+            Assert.AreEqual(JsonValueKind.Null, second.GetProperty("stage").ValueKind);
+            Assert.AreEqual(0, second.GetProperty("new_stage_at").GetInt32());
+        }
+
+        [TestMethod]
         public async Task GetCraftGetsEditorCraft()
         {
             (EditorTools tools, RecordingHandler handler) = Create();
