@@ -28,7 +28,8 @@ namespace KspBridge.Editor
                 ["parent"] = p.parent != null ? (object)p.parent.persistentId : null,
                 ["attach"] = Attach(p),
                 ["symmetry"] = Symmetry(p),
-                ["stage"] = p.hasStagingIcon ? (object)p.inverseStage : null,
+                // Only parts in the staging list: a part whose staging is off (a docking port by default) has no icon.
+                ["stage"] = p.hasStagingIcon && p.stagingOn ? (object)p.inverseStage : null,
                 ["position"] = Format.Vec(Local(ship, p.transform.position)),
                 ["rotation"] = Format.Vec((Quaternion.Inverse(root.transform.rotation) * p.transform.rotation).eulerAngles),
             };
