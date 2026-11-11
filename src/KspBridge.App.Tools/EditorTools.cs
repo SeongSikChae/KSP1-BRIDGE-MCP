@@ -16,8 +16,8 @@ namespace KspBridge.App
         [property: JsonPropertyName("angle"), Description("Degrees about the surface normal")] double Angle = 0);
 
     public sealed record SymmetrySpec(
-        [property: JsonPropertyName("mode"), Description("radial or mirror")] string Mode,
-        [property: JsonPropertyName("count"), Description("1..8 copies in total (mirror: 2)")] int Count);
+        [property: JsonPropertyName("count"), Description("1..8 copies in total (mirror: 2)")] int Count,
+        [property: JsonPropertyName("mode"), Description("radial or mirror; omit for the editor default (VAB radial, SPH mirror)")] string? Mode = null);
 
     /// <summary>VAB/SPH craft design tools. Each call is forwarded to the mod's /api/editor routes.</summary>
     [McpServerToolType]

@@ -104,7 +104,7 @@ namespace KspBridge.App.Tests
         {
             (EditorTools tools, RecordingHandler handler) = Create();
 
-            await tools.AddPart("radialDecoupler", 1u, surface: new SurfaceSpec(90, 0.5), symmetry: new SymmetrySpec("radial", 3), ct: CancellationToken.None);
+            await tools.AddPart("radialDecoupler", 1u, surface: new SurfaceSpec(90, 0.5), symmetry: new SymmetrySpec(3, "radial"), ct: CancellationToken.None);
 
             JsonElement body = Body(handler.Requests[0].Body);
             Assert.AreEqual(90, body.GetProperty("surface").GetProperty("azimuth").GetDouble());
@@ -112,6 +112,18 @@ namespace KspBridge.App.Tests
             Assert.AreEqual(0, body.GetProperty("surface").GetProperty("angle").GetDouble());
             Assert.AreEqual("radial", body.GetProperty("symmetry").GetProperty("mode").GetString());
             Assert.AreEqual(3, body.GetProperty("symmetry").GetProperty("count").GetInt32());
+        }
+
+        [TestMethod]
+        public async Task AddPartLeavesSymmetryModeToTheEditor()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.AddPart("wingConnector", 1u, surface: new SurfaceSpec(90, 0.5), symmetry: new SymmetrySpec(2), ct: CancellationToken.None);
+
+            JsonElement symmetry = Body(handler.Requests[0].Body).GetProperty("symmetry");
+            Assert.AreEqual(2, symmetry.GetProperty("count").GetInt32());
+            Assert.IsTrue(!symmetry.TryGetProperty("mode", out JsonElement mode) || mode.ValueKind == JsonValueKind.Null);
         }
 
         [TestMethod]

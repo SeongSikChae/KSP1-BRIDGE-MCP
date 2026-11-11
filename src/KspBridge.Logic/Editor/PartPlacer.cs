@@ -30,7 +30,8 @@ namespace KspBridge.Editor
 
     public sealed class SymmetrySpec
     {
-        public SymmetryMethod Mode;
+        /// <summary>null = the editor's default for the facility: radial in the VAB, mirror in the SPH.</summary>
+        public SymmetryMethod? Mode;
         public int Count;
     }
 
@@ -78,17 +79,27 @@ namespace KspBridge.Editor
                 return begun;
             }
 
-            DateTime deadline = DateTime.UtcNow + PartStartTimeout;
-            while (!(bool)dispatcher.Invoke(() => Time.frameCount > pending.SpawnFrame, MainThreadTimeout))
+            try
             {
-                if (DateTime.UtcNow > deadline)
+                DateTime deadline = DateTime.UtcNow + PartStartTimeout;
+                while (!(bool)dispatcher.Invoke(() => Time.frameCount > pending.SpawnFrame, MainThreadTimeout))
                 {
-                    dispatcher.Invoke(() => { DiscardAll(EditorLogic.fetch?.ship, pending.Children); return null; }, MainThreadTimeout);
-                    throw new ApiException(504, "part_start_timeout", pending.Children[0].partInfo.name + " did not finish starting within " + PartStartTimeout.TotalSeconds + "s");
+                    if (DateTime.UtcNow > deadline)
+                    {
+                        dispatcher.Invoke(() => { DiscardAll(null, null, pending.Children, false); return null; }, MainThreadTimeout);
+                        throw new ApiException(504, "part_start_timeout", pending.Children[0].partInfo.name + " did not finish starting within " + PartStartTimeout.TotalSeconds + "s");
+                    }
+                    System.Threading.Thread.Sleep(20);
                 }
-                System.Threading.Thread.Sleep(20);
+                return dispatcher.Invoke(() => Finish(pending), MainThreadTimeout);
             }
-            return dispatcher.Invoke(() => Finish(pending), MainThreadTimeout);
+            catch (ApiException e) when (e.Code == "timeout")
+            {
+                // A dispatcher timeout means the work item was cancelled before it ran: Finish (which cleans up after itself)
+                // did not run, so the spawned parts are still loose.
+                DiscardLater(dispatcher, pending);
+                throw;
+            }
         }
 
         /// <summary>Main thread. Checks the request; places the root at once, or spawns the parts to attach and returns them pending.</summary>
@@ -154,6 +165,12 @@ namespace KspBridge.Editor
                     + string.Join(", ", own.Select(c => c.GetType().Name + " " + c.name + " active=" + c.gameObject.activeInHierarchy + " enabled=" + c.enabled + " trigger=" + c.isTrigger + " layer=" + c.gameObject.layer).ToArray()) + ")");
             }
             int count = sym?.Count ?? 1;
+            // count 1 is no symmetry, so the mode does not matter. An explicit mirror with count != 2 is refused in ParseAdd.
+            SymmetryMethod mode = sym?.Mode ?? (EditorDriver.editorFacility == EditorFacility.SPH && count > 1 ? SymmetryMethod.Mirror : SymmetryMethod.Radial);
+            if (sym != null && sym.Mode == null && mode == SymmetryMethod.Mirror && count != 2)
+            {
+                throw ApiException.BadRequest("mirror symmetry.count must be 2 (mirror is the SPH default; set mode radial for another count)");
+            }
 
             Pending p = new Pending
             {
@@ -161,7 +178,7 @@ namespace KspBridge.Editor
                 ParentId = parent.persistentId,
                 Surface = true,
                 SurfaceMeshName = hit.collider.name,
-                SymmetryMode = sym?.Mode ?? SymmetryMethod.Radial,
+                SymmetryMode = mode,
             };
             try
             {
@@ -184,7 +201,7 @@ namespace KspBridge.Editor
             }
             catch
             {
-                DiscardAll(null, p.Children);
+                DiscardAll(null, null, p.Children, false);
                 throw;
             }
             return p;
@@ -194,6 +211,8 @@ namespace KspBridge.Editor
         private static object Finish(Pending p)
         {
             ShipConstruct ship = null;
+            Part parent = null;
+            bool picked = false;
             try
             {
                 ship = EditorScene.Require();
@@ -207,7 +226,7 @@ namespace KspBridge.Editor
                         throw new ApiException(500, "staging_icon_missing", c.partInfo.name + " has no staging icon after Part.Start");
                     }
                 }
-                Part parent = PartIndex.Find(ship, p.ParentId);
+                parent = PartIndex.Find(ship, p.ParentId);
                 AttachNode pn = p.Surface ? null : FreeNode(parent, p.ParentNode);
                 for (int i = 0; i < p.Children.Count; i++)
                 {
@@ -225,6 +244,7 @@ namespace KspBridge.Editor
 
                 // Editor order: picked -> attachPart (each symmetry part) -> placed. Placing after all are linked lets
                 // StageManager group the held icons of symmetry counterparts.
+                picked = true;
                 foreach (Part c in p.Children)
                 {
                     GameEvents.onEditorPartPicked.Fire(c);
@@ -253,7 +273,7 @@ namespace KspBridge.Editor
             }
             catch
             {
-                DiscardAll(ship, p.Children);
+                DiscardAll(ship, parent, p.Children, picked);
                 throw;
             }
             EditorScene.Commit(ship);
@@ -648,24 +668,70 @@ namespace KspBridge.Editor
             GameEvents.onEditorPartEvent.Fire(ConstructionEventType.PartAttached, child);
         }
 
-        /// <summary>Undoes a half-made placement: parts are removed from the craft if they got that far, then destroyed.</summary>
-        private static void DiscardAll(ShipConstruct ship, IEnumerable<Part> parts)
+        /// <summary>
+        /// Undoes a half-made placement. Parts that got linked are taken out like remove_part does (detach, then delete:
+        /// EditorLogic.DeletePart needs a part held by the mouse and throws otherwise); the parent's nodes stop pointing at them;
+        /// the rest are destroyed (Part.OnDestroy takes a held staging icon out of the StageManager). picked: onEditorPartPicked
+        /// was fired, so the stages are re-sorted as after a delete (onEditorPartDeleted). A failing step is logged and the cleanup goes on, so the caller's exception
+        /// is the one reported.
+        /// </summary>
+        private static void DiscardAll(ShipConstruct ship, Part parent, IEnumerable<Part> parts, bool picked)
         {
+            HashSet<Part> deleted = new HashSet<Part>();
             foreach (Part p in parts.ToList())
             {
-                if (p == null)
+                if (p == null || deleted.Contains(p))
                 {
                     continue;
                 }
-                if (ship != null && ship.parts.Contains(p))
+                try
                 {
-                    EditorLogic.DeletePart(p);
+                    if (parent != null)
+                    {
+                        ClearNodes(parent, p);
+                    }
+                    if (ship != null && (ship.parts.Contains(p) || p.parent != null))
+                    {
+                        Detach(ship, p);
+                        Delete(p, deleted);
+                    }
+                    else
+                    {
+                        deleted.Add(p);
+                        UnityEngine.Object.Destroy(p.gameObject);
+                    }
                 }
-                else
+                catch (Exception e)
                 {
+                    Debug.LogError("[KspBridge] add_part cleanup of " + p.partInfo.name + " failed: " + e);
+                    ship?.Remove(p);
+                    deleted.Add(p);
                     UnityEngine.Object.Destroy(p.gameObject);
                 }
             }
+            if (picked)
+            {
+                GameEvents.onEditorPartDeleted.Fire(null);
+            }
+        }
+
+        /// <summary>
+        /// HTTP thread. The main thread did not answer in time (dispatcher 504), so Finish never ran and the spawned parts are
+        /// still loose in the scene. Their cleanup is queued to run whenever the main thread is free again, without holding the request.
+        /// </summary>
+        private static void DiscardLater(MainThreadDispatcher dispatcher, Pending pending)
+        {
+            System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    dispatcher.Invoke(() => { DiscardAll(null, null, pending.Children, false); return null; }, TimeSpan.FromMinutes(10));
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError("[KspBridge] add_part cleanup after a timeout failed: " + e);
+                }
+            });
         }
 
         private static string DefaultChildNode(string parentNodeId, List<AttachNode> childNodes)

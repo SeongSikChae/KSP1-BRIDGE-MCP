@@ -83,21 +83,26 @@ namespace KspBridge.Handlers
                     throw ApiException.BadRequest("symmetry needs a surface attach (stack symmetry is not supported)");
                 }
                 RequestBody sym = new RequestBody(b.GetObject("symmetry"));
-                string mode = sym.GetString("mode").ToLowerInvariant();
+                // mode omitted: the facility default (radial in the VAB, mirror in the SPH), decided in the editor (PartPlacer).
+                string mode = sym.Has("mode") ? sym.GetString("mode").ToLowerInvariant() : null;
                 int count = (int)sym.GetDouble("count");
-                if (mode == "radial" && (count < 1 || count > 8))
+                if (mode != null && mode != "radial" && mode != "mirror")
                 {
-                    throw ApiException.BadRequest("radial symmetry.count must be 1..8");
+                    throw ApiException.BadRequest("symmetry.mode must be radial or mirror");
+                }
+                if (mode != "mirror" && (count < 1 || count > 8))
+                {
+                    throw ApiException.BadRequest(mode == null ? "symmetry.count must be 1..8 (mirror: 2)" : "radial symmetry.count must be 1..8");
                 }
                 if (mode == "mirror" && count != 2)
                 {
                     throw ApiException.BadRequest("mirror symmetry.count must be 2");
                 }
-                if (mode != "radial" && mode != "mirror")
+                r.Symmetry = new SymmetrySpec
                 {
-                    throw ApiException.BadRequest("symmetry.mode must be radial or mirror");
-                }
-                r.Symmetry = new SymmetrySpec { Mode = mode == "mirror" ? SymmetryMethod.Mirror : SymmetryMethod.Radial, Count = count };
+                    Mode = mode == null ? (SymmetryMethod?)null : mode == "mirror" ? SymmetryMethod.Mirror : SymmetryMethod.Radial,
+                    Count = count,
+                };
             }
             return r;
         }
