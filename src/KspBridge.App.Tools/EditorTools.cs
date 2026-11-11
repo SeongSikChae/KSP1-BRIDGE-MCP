@@ -138,6 +138,34 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/resource", new { resource, fraction }, ct);
 
+        [McpServerTool(Name = "check_craft", ReadOnly = true)]
+        [Description("Check the editor craft. structure: ok (no error issues) and issues {severity error|warning, code locked_part | orphan | " +
+            "bad_node | no_root | overlap, parts, message; overlap also depth m and separator id: parts that become separate vessels when " +
+            "that decoupler or docking port fires and push apart}. performance for a situation (body, altitude m, vacuum): stages that " +
+            "fire first first, each with stage, mass_start/mass_end t, thrust kN, isp s, twr (gravity at that altitude), delta_v m/s for " +
+            "the situation, delta_v_vac and delta_v_asl as the staging app shows them, burn_time s; total_delta_v; com/cot/col [x,y,z] m " +
+            "in root-part space (null without engines or lift; col as the editor CoL marker: home body air at 100 m); warnings " +
+            "twr_below_1 (the stage the craft lifts off in: where the last launch clamp lets go, else the first stage with thrust), " +
+            "col_ahead_of_com (toward the nose), no_control. " +
+            "performance.ready=false while the game is still calculating: call again shortly.")]
+        public Task<string> CheckCraft(
+            [Description("Body name, e.g. Kerbin, Mun; default the home body")] string? body = null,
+            [Description("Altitude above sea level in metres (default 0)")] double altitude = 0,
+            [Description("Vacuum instead of the body's air at that altitude")] bool vacuum = false,
+            CancellationToken ct = default)
+        {
+            List<string> query = ["altitude=" + altitude.ToString(System.Globalization.CultureInfo.InvariantCulture)];
+            if (!string.IsNullOrWhiteSpace(body))
+            {
+                query.Add("body=" + Uri.EscapeDataString(body));
+            }
+            if (vacuum)
+            {
+                query.Add("vacuum=true");
+            }
+            return client.SendAsync(HttpMethod.Get, "api/editor/check?" + string.Join("&", query), null, ct);
+        }
+
         [McpServerTool(Name = "list_parts", ReadOnly = true)]
         [Description("Part catalog summary: name (use it in add_part), title, category, cost, mass (t), size (bulkhead profiles) and unlocked. " +
             "Career/science list only unlocked, purchased parts unless unlocked=false. Works in any scene with a loaded save.")]

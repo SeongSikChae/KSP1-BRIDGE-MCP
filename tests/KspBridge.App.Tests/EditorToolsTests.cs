@@ -205,6 +205,19 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task CheckCraftGetsSituationQuery()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.CheckCraft(ct: CancellationToken.None);
+            await tools.CheckCraft("Mun", 1500.5, vacuum: true, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Get, "/api/editor/check", "?altitude=0", (string?)null),
+                (handler.Requests[0].Method, handler.Requests[0].Path, handler.Requests[0].Query, handler.Requests[0].Body));
+            Assert.AreEqual(("/api/editor/check", "?altitude=1500.5&body=Mun&vacuum=true"), (handler.Requests[1].Path, handler.Requests[1].Query));
+        }
+
+        [TestMethod]
         public async Task GetPartEscapesName()
         {
             (EditorTools tools, RecordingHandler handler) = Create();

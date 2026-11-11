@@ -1,4 +1,5 @@
 using KspBridge.Catalog;
+using KspBridge.Check;
 using KspBridge.Editor;
 using System;
 using System.Collections.Generic;
@@ -18,6 +19,7 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/editor/new", (m, b, q) =>
                 CraftFiles.New(b.Has("name") ? b.GetString("name") : null));
             yield return new Route("GET", "/api/editor/craft", (m, b, q) => GetCraft());
+            yield return new Route("GET", "/api/editor/check", (m, b, q) => Check(Empty(q["body"]), Empty(q["altitude"]), q["vacuum"] == "true"));
             // HTTP thread: add_part waits across frames for Part.Start (see PartPlacer.Add).
             yield return new Route("POST", "/api/editor/parts", (m, b, q) => PartPlacer.Add(dispatcher, ParseAdd(b)), onHttpThread: true);
             yield return new Route("DELETE", "/api/editor/parts/(?<id>[0-9]+)", (m, b, q) => PartPlacer.Remove(PathId(m)));
@@ -146,6 +148,33 @@ namespace KspBridge.Handlers
                 throw ApiException.BadRequest(name + " must be a part id from get_craft");
             }
             return (uint)value;
+        }
+
+        private static object Check(string bodyName, string altitudeText, bool vacuum)
+        {
+            ShipConstruct ship = EditorScene.Require();
+            CelestialBody body = PerformanceCheck.Body(bodyName);
+            double altitude = 0;
+            if (altitudeText != null && (!double.TryParse(altitudeText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out altitude) || double.IsNaN(altitude) || altitude < 0 || altitude > 1e9))
+            {
+                throw ApiException.BadRequest("altitude must be a number of metres 0..1e9");
+            }
+            return new Dictionary<string, object>
+            {
+                ["structure"] = Structure(ship),
+                ["performance"] = ship.parts.Count == 0 ? null : PerformanceCheck.Run(ship, body, altitude, vacuum),
+            };
+        }
+
+        private static Dictionary<string, object> Structure(ShipConstruct ship)
+        {
+            List<Dictionary<string, object>> issues = StructureCheck.Run(ship);
+            return new Dictionary<string, object>
+            {
+                ["ok"] = issues.All(i => (string)i["severity"] != "error"),
+                ["issues"] = issues.Cast<object>().ToList(),
+            };
         }
 
         private static object GetCraft()
