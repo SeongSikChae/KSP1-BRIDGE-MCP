@@ -160,6 +160,18 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Get,
                 "api/editor/crafts" + (string.IsNullOrWhiteSpace(facility) ? "" : "?facility=" + Uri.EscapeDataString(facility)), null, ct);
 
+        [McpServerTool(Name = "launch_craft", Destructive = true)]
+        [Description("Launch the editor craft like the editor's Launch button (writes the game's auto-save craft, not a craft under " +
+            "its name: use save_craft to keep it; assigns crew; runs the game's pre-flight checks; then loads the flight scene). " +
+            "Returns {accepted, site} at once; poll get_status until scene is FLIGHT with an active vessel. If a pre-flight check " +
+            "shows a dialog, the scene stays EDITOR until the player answers it on screen (continue launches, cancel stays). " +
+            "launch_locked while a launch or dialog is in progress or launching is not allowed; unsaveable for a craft with structure " +
+            "errors (check_craft). Launch sites depend on the editor (VAB: LaunchPad..., SPH: Runway...).")]
+        public Task<string> LaunchCraft(
+            [Description("Launch site, e.g. LaunchPad, Runway; omit for the site picked in the editor")] string? site = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/launch", new { site }, ct);
+
         [McpServerTool(Name = "check_craft", ReadOnly = true)]
         [Description("Check the editor craft. structure: ok (no error issues) and issues {severity error|warning, code locked_part | orphan | " +
             "bad_node | no_root | overlap, parts, message; overlap also depth m and separator id: parts that become separate vessels when " +

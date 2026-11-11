@@ -284,6 +284,19 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task LaunchCraftPostsOptionalSite()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.LaunchCraft(ct: CancellationToken.None);
+            await tools.LaunchCraft("Runway", CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/launch"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            Assert.AreEqual(JsonValueKind.Null, Body(handler.Requests[0].Body).GetProperty("site").ValueKind);
+            Assert.AreEqual("Runway", Body(handler.Requests[1].Body).GetProperty("site").GetString());
+        }
+
+        [TestMethod]
         public async Task GetPartEscapesName()
         {
             (EditorTools tools, RecordingHandler handler) = Create();

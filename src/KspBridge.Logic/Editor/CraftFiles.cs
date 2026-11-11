@@ -187,6 +187,51 @@ namespace KspBridge.Editor
             return new Dictionary<string, object> { ["crafts"] = crafts };
         }
 
+        /// <summary>
+        /// Main thread. Launches the editor craft like the Launch button (EditorLogic.launchVessel: auto-save, crew, the game's
+        /// pre-flight checks and their dialogs, then the flight scene). Returns at once; the result shows in get_status (scene FLIGHT).
+        /// site null = the launch site picked in the editor. The game would silently swap an unknown site for its default, so an
+        /// unknown site is refused here.
+        /// </summary>
+        public static object Launch(string site)
+        {
+            ShipConstruct ship = EditorScene.Require();
+            if (ship.parts.Count == 0)
+            {
+                throw new ApiException(409, "unsaveable", "the craft is empty");
+            }
+            Game.Modes mode = HighLogic.CurrentGame.Mode;
+            if (mode == Game.Modes.MISSION || mode == Game.Modes.MISSION_BUILDER || mode == Game.Modes.SCENARIO_NON_RESUMABLE)
+            {
+                throw new ApiException(409, "not_supported", "launch_craft does not support " + mode + " games; use the editor's Launch button");
+            }
+            // The Launch button is usable only while EDITOR_LAUNCH is unlocked (EditorLogic: launchBtn.interactable). A launch in
+            // progress holds that lock (its pre-flight dialog included), as do the load/flag dialogs, CanLaunch=false and tutorials.
+            // EditorDriver_AppFocus only blocks the player's input while the game window is in the background (OnApplicationFocus),
+            // which is how an agent usually calls, so it does not count.
+            List<string> launchLocks = InputLockManager.lockStack
+                .Where(l => l.Key != "EditorDriver_AppFocus" && (l.Value & (ulong)ControlTypes.EDITOR_LAUNCH) != 0)
+                .Select(l => l.Key).ToList();
+            if (launchLocks.Count > 0)
+            {
+                throw new ApiException(409, "launch_locked", "launching is locked in the editor now (a launch or its pre-flight dialog " +
+                    "in progress, another dialog open, or launching not allowed in this game); locks: " + string.Join(", ", launchLocks));
+            }
+            site = string.IsNullOrWhiteSpace(site) ? EditorLogic.fetch.launchSiteName : site.Trim();
+            if (!EditorDriver.ValidLaunchSite(site))
+            {
+                throw ApiException.BadRequest("invalid launch site '" + site + "' (valid: " + string.Join(", ", EditorDriver.ValidLaunchSites) + ")");
+            }
+            List<Dictionary<string, object>> errors = Check.StructureCheck.Run(ship).Where(i => (string)i["severity"] == "error").ToList();
+            if (errors.Count > 0)
+            {
+                throw new ApiException(409, "unsaveable", "fix the structure errors first (check_craft): "
+                    + string.Join("; ", errors.Select(e => (string)e["message"])));
+            }
+            EditorLogic.fetch.launchVessel(site);
+            return new Dictionary<string, object> { ["accepted"] = true, ["site"] = site };
+        }
+
         public static string CraftPath(EditorFacility facility, string name)
         {
             if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
