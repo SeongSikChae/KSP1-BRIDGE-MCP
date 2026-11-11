@@ -420,7 +420,7 @@ namespace KspBridge.Editor
         }
 
         /// <summary>The part followed by its symmetry counterparts.</summary>
-        private static List<Part> SymmetryGroup(Part p) =>
+        internal static List<Part> SymmetryGroup(Part p) =>
             new[] { p }.Concat(p.symmetryCounterparts ?? new List<Part>()).Where(s => s != null).Distinct().ToList();
 
         private static IEnumerable<Part> Subtree(Part p) => new[] { p }.Concat(EditorLogicBase.FindPartsInChildren(p)).Distinct();

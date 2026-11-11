@@ -1,5 +1,6 @@
 using ModelContextProtocol.Server;
 using System.ComponentModel;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace KspBridge.App
@@ -95,6 +96,32 @@ namespace KspBridge.App
             [Description("Degrees; positive turns by the left-hand rule about the axis (Unity)")] double angle,
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/rotate", new { axis, angle }, ct);
+
+        [McpServerTool(Name = "set_part_field", Destructive = false)]
+        [Description("Change an editor field of a part module (the fields get_part lists, e.g. ModuleEngines thrustPercentage), " +
+            "like the part action window: symmetry counterparts get the same value. value is a number, true/false or text " +
+            "(enum or option name) matching the field, within the placed part's control range (get_part shows the catalog part's range). " +
+            "With several modules of the same name, the first enabled one showing the field is changed. " +
+            "Returns the changed part and its counterparts with values (each part's field value read back after the change); " +
+            "one editor Undo step per call that changes something.")]
+        public Task<string> SetPartField(
+            [Description("Part id from get_craft")] uint id,
+            [Description("Module name from get_part fields, e.g. ModuleEngines")] string module,
+            [Description("Field name from get_part fields, e.g. thrustPercentage")] string field,
+            [Description("New value: number, true/false or text")] JsonElement value,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/field", new { module, field, value }, ct);
+
+        [McpServerTool(Name = "set_resource", Destructive = false)]
+        [Description("Fill a resource of a part (e.g. LiquidFuel, Oxidizer, SolidFuel) to a fraction of its maximum, like the part action " +
+            "window slider: symmetry counterparts get the same amount. Returns the changed part and its counterparts with values " +
+            "(each part's amount and max after the change); one editor Undo step per call.")]
+        public Task<string> SetResource(
+            [Description("Part id from get_craft")] uint id,
+            [Description("Resource name from get_part resources")] string resource,
+            [Description("0..1 of the maximum amount")] double fraction,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/resource", new { resource, fraction }, ct);
 
         [McpServerTool(Name = "list_parts", ReadOnly = true)]
         [Description("Part catalog summary: name (use it in add_part), title, category, cost, mass (t), size (bulkhead profiles) and unlocked. " +

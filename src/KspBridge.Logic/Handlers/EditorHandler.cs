@@ -25,6 +25,11 @@ namespace KspBridge.Handlers
                 PartPlacer.Offset(PathId(m), new Vector3(Finite(b, "x"), Finite(b, "y"), Finite(b, "z"))));
             yield return new Route("POST", "/api/editor/parts/(?<id>[0-9]+)/rotate", (m, b, q) =>
                 PartPlacer.Rotate(PathId(m), ParseAxis(b.GetString("axis")), Finite(b, "angle", required: true)));
+            yield return new Route("POST", "/api/editor/parts/(?<id>[0-9]+)/field", (m, b, q) =>
+                PartSettings.SetField(PathId(m), b.GetString("module"), b.GetString("field"),
+                    b.GetRaw("value") ?? throw ApiException.BadRequest("'value' is required")));
+            yield return new Route("POST", "/api/editor/parts/(?<id>[0-9]+)/resource", (m, b, q) =>
+                PartSettings.SetResource(PathId(m), b.GetString("resource"), b.GetDouble("fraction")));
             yield return new Route("GET", "/api/parts", (m, b, q) =>
                 PartCatalog.List(Empty(q["category"]), Empty(q["q"]), q["unlocked"] != "false"));
             yield return new Route("GET", "/api/parts/(?<name>[^/]+)", (m, b, q) =>

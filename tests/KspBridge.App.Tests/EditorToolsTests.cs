@@ -149,6 +149,35 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task SetPartFieldPostsValueAsGiven()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.SetPartField(7u, "ModuleEngines", "thrustPercentage", JsonDocument.Parse("50").RootElement, CancellationToken.None);
+            await tools.SetPartField(7u, "ModuleGimbal", "gimbalLock", JsonDocument.Parse("true").RootElement, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/parts/7/field"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual("ModuleEngines", body.GetProperty("module").GetString());
+            Assert.AreEqual("thrustPercentage", body.GetProperty("field").GetString());
+            Assert.AreEqual(50, body.GetProperty("value").GetDouble());
+            Assert.AreEqual(JsonValueKind.True, Body(handler.Requests[1].Body).GetProperty("value").ValueKind);
+        }
+
+        [TestMethod]
+        public async Task SetResourcePostsFraction()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.SetResource(7u, "LiquidFuel", 0.5, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/parts/7/resource"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement body = Body(handler.Requests[0].Body);
+            Assert.AreEqual("LiquidFuel", body.GetProperty("resource").GetString());
+            Assert.AreEqual(0.5, body.GetProperty("fraction").GetDouble());
+        }
+
+        [TestMethod]
         public async Task GetCraftGetsEditorCraft()
         {
             (EditorTools tools, RecordingHandler handler) = Create();
