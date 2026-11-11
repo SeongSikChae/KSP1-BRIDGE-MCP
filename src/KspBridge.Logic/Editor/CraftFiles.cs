@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 
 namespace KspBridge.Editor
 {
@@ -56,6 +59,132 @@ namespace KspBridge.Editor
             EditorDriver.StartupBehaviour = EditorDriver.StartupBehaviours.START_CLEAN;
             ShipConstruction.ShipConfig = null;
             EditorDriver.StartEditor(facility);
+        }
+
+        private static readonly System.Reflection.MethodInfo OnSaveConfirm =
+            typeof(EditorLogic).GetMethod("onSaveConfirm", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        /// <summary>
+        /// Main thread. Saves the editor craft under a name like the editor's Save button: the name goes into the name field and
+        /// the button's confirm step runs (EditorLogic.onSaveConfirm: name, description and flag into the craft, backup, saved-state
+        /// bookkeeping, then ShipConstruction.SaveShipToPath with the thumbnail) into the editor's current save folder.
+        /// An existing file is replaced only with overwrite (unlike the button, which re-saves the craft last saved under that
+        /// name without asking); a craft with structure errors is not saved. Mission modes are not supported (the button's
+        /// mission checks are not replayed).
+        /// </summary>
+        public static object Save(string name, bool overwrite)
+        {
+            ShipConstruct ship = EditorScene.Require();
+            if (HighLogic.CurrentGame.Mode == Game.Modes.MISSION || HighLogic.CurrentGame.Mode == Game.Modes.MISSION_BUILDER)
+            {
+                throw new ApiException(409, "not_supported", "save_craft does not support mission games; use the editor's Save button");
+            }
+            name = (name ?? "").Trim();
+            if (name.Length == 0)
+            {
+                throw ApiException.BadRequest("name is required");
+            }
+            if (name.Any(char.IsControl))
+            {
+                throw ApiException.BadRequest("name must not contain control characters");
+            }
+            if (ship.parts.Count == 0)
+            {
+                throw new ApiException(409, "unsaveable", "the craft is empty");
+            }
+            if (OnSaveConfirm == null)
+            {
+                throw new ApiException(500, "save_unavailable", "EditorLogic.onSaveConfirm was not found in this game version");
+            }
+
+            // The button saves the name field's text, which the field may shorten (the editor's craft name length limit),
+            // so the name is put there first and every check below uses what the field holds.
+            string previousText = EditorLogic.fetch.shipNameField.text;
+            bool saved = false;
+            try
+            {
+                EditorLogic.fetch.shipNameField.text = name;
+                string fieldName = EditorLogic.fetch.shipNameField.text;
+                // The same path the Save button checks and writes (the file name is the sanitized craft name).
+                string path = Path.GetFullPath(ShipConstruction.GetSavePath(fieldName));
+                if (File.Exists(path) && !overwrite)
+                {
+                    throw new ApiException(409, "name_exists", "a craft named '" + fieldName + "' already exists (" + path + "); set overwrite=true to replace it");
+                }
+                List<Dictionary<string, object>> issues = Check.StructureCheck.Run(ship);
+                List<Dictionary<string, object>> errors = issues.Where(i => (string)i["severity"] == "error").ToList();
+                if (errors.Count > 0)
+                {
+                    throw new ApiException(409, "unsaveable", "fix the structure errors first (check_craft): "
+                        + string.Join("; ", errors.Select(e => (string)e["message"])));
+                }
+                try
+                {
+                    OnSaveConfirm.Invoke(EditorLogic.fetch, null);
+                    saved = true;
+                }
+                catch (System.Reflection.TargetInvocationException e) when (e.InnerException != null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                    throw;
+                }
+                return new Dictionary<string, object>
+                {
+                    ["name"] = ship.shipName,
+                    ["file"] = Path.GetFileNameWithoutExtension(path),
+                    ["facility"] = EditorDriver.editorFacility.ToString(),
+                    ["path"] = path,
+                    ["warnings"] = issues.Where(i => (string)i["severity"] != "error").Cast<object>().ToList(),
+                };
+            }
+            finally
+            {
+                if (!saved)
+                {
+                    EditorLogic.fetch.shipNameField.text = previousText;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The saved crafts of this save (Ships/VAB, Ships/SPH, not their subfolders): file name (use it in open_editor), part count
+        /// (top-level PART nodes; parts stored in inventories are not counted), modified time. An unreadable file is listed with error.
+        /// </summary>
+        public static object List(EditorFacility? facility)
+        {
+            if (HighLogic.CurrentGame == null)
+            {
+                throw new ApiException(409, "no_game", "load a save first");
+            }
+            List<object> crafts = new List<object>();
+            foreach (EditorFacility f in facility.HasValue ? new[] { facility.Value } : new[] { EditorFacility.VAB, EditorFacility.SPH })
+            {
+                string dir = ShipConstruction.GetShipsPathFor(HighLogic.SaveFolder, f);
+                if (!Directory.Exists(dir))
+                {
+                    continue;
+                }
+                foreach (string file in Directory.GetFiles(dir, "*.craft").OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+                {
+                    Dictionary<string, object> craft = new Dictionary<string, object>
+                    {
+                        ["name"] = Path.GetFileNameWithoutExtension(file),
+                        ["facility"] = f.ToString(),
+                    };
+                    try
+                    {
+                        ConfigNode node = ConfigNode.Load(file);
+                        craft["parts"] = node != null ? node.GetNodes("PART").Length : 0;
+                        craft["modified"] = File.GetLastWriteTimeUtc(file).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+                    }
+                    catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                    {
+                        craft["error"] = e.Message;
+                    }
+                    crafts.Add(craft);
+                }
+            }
+            return new Dictionary<string, object> { ["crafts"] = crafts };
         }
 
         public static string CraftPath(EditorFacility facility, string name)

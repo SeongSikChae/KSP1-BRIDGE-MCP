@@ -139,6 +139,27 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/editor/parts/" + id + "/resource", new { resource, fraction }, ct);
 
+        [McpServerTool(Name = "save_craft", Destructive = true)]
+        [Description("Save the editor craft under a name, like the editor's Save button (also makes the thumbnail), into the editor's " +
+            "current save folder (normally this save's Ships/VAB or Ships/SPH). An existing craft of that name is replaced only with " +
+            "overwrite=true (else name_exists). A craft with structure errors (check_craft) is not saved (unsaveable). Not for mission " +
+            "games. Returns name, file (use it in open_editor craft), facility, path and structure warnings.")]
+        public Task<string> SaveCraft(
+            [Description("Craft name, at most the editor's name length (128 by default; longer names are cut); in the file name \\ / . : | * ? { } < > \" become _")] string name,
+            [Description("Replace an existing craft of the same name")] bool overwrite = false,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/editor/save", new { name, overwrite }, ct);
+
+        [McpServerTool(Name = "list_crafts", ReadOnly = true)]
+        [Description("Saved crafts of the loaded save's Ships/VAB and Ships/SPH (not subfolders): name (use it in open_editor craft), " +
+            "facility (VAB/SPH), parts (stored inventory parts not counted), modified (UTC); error instead for an unreadable file. " +
+            "Works in any scene with a loaded save.")]
+        public Task<string> ListCrafts(
+            [Description("VAB or SPH; omit for both")] string? facility = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get,
+                "api/editor/crafts" + (string.IsNullOrWhiteSpace(facility) ? "" : "?facility=" + Uri.EscapeDataString(facility)), null, ct);
+
         [McpServerTool(Name = "check_craft", ReadOnly = true)]
         [Description("Check the editor craft. structure: ok (no error issues) and issues {severity error|warning, code locked_part | orphan | " +
             "bad_node | no_root | overlap, parts, message; overlap also depth m and separator id: parts that become separate vessels when " +

@@ -257,6 +257,33 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task SaveCraftPostsNameAndOverwrite()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.SaveCraft("Test 1", ct: CancellationToken.None);
+            await tools.SaveCraft("Test 1", overwrite: true, CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Post, "/api/editor/save"), (handler.Requests[0].Method, handler.Requests[0].Path));
+            JsonElement first = Body(handler.Requests[0].Body);
+            Assert.AreEqual("Test 1", first.GetProperty("name").GetString());
+            Assert.IsFalse(first.GetProperty("overwrite").GetBoolean());
+            Assert.IsTrue(Body(handler.Requests[1].Body).GetProperty("overwrite").GetBoolean());
+        }
+
+        [TestMethod]
+        public async Task ListCraftsGetsOptionalFacility()
+        {
+            (EditorTools tools, RecordingHandler handler) = Create();
+
+            await tools.ListCrafts(ct: CancellationToken.None);
+            await tools.ListCrafts("SPH", CancellationToken.None);
+
+            Assert.AreEqual((HttpMethod.Get, "/api/editor/crafts", ""), (handler.Requests[0].Method, handler.Requests[0].Path, handler.Requests[0].Query));
+            Assert.AreEqual("?facility=SPH", handler.Requests[1].Query);
+        }
+
+        [TestMethod]
         public async Task GetPartEscapesName()
         {
             (EditorTools tools, RecordingHandler handler) = Create();

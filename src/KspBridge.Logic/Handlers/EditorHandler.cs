@@ -20,6 +20,10 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/editor/new", (m, b, q) =>
                 CraftFiles.New(b.Has("name") ? b.GetString("name") : null));
             yield return new Route("GET", "/api/editor/craft", (m, b, q) => GetCraft());
+            yield return new Route("POST", "/api/editor/save", (m, b, q) =>
+                CraftFiles.Save(b.GetString("name"), b.Has("overwrite") && b.GetBool("overwrite")));
+            yield return new Route("GET", "/api/editor/crafts", (m, b, q) =>
+                CraftFiles.List(Empty(q["facility"]) is string f ? CraftFiles.ParseFacility(f) : (EditorFacility?)null));
             yield return new Route("POST", "/api/editor/render", (m, b, q) => Render(b));
             yield return new Route("GET", "/api/editor/check", (m, b, q) => Check(Empty(q["body"]), Empty(q["altitude"]), q["vacuum"] == "true"));
             // HTTP thread: add_part waits across frames for Part.Start (see PartPlacer.Add).
