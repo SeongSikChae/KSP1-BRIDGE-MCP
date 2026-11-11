@@ -12,7 +12,7 @@ namespace KspBridge.Editor
             RequireOpenableScene();
             if (craft == null)
             {
-                EditorDriver.StartEditor(facility);
+                StartClean(facility);
             }
             else
             {
@@ -36,10 +36,26 @@ namespace KspBridge.Editor
                 throw new ApiException(409, "not_in_editor", "open the VAB or SPH first (scene: " + HighLogic.LoadedScene + ")");
             }
             EditorFacility facility = EditorDriver.editorFacility;
-            EditorDriver.StartEditor(facility);
+            if (EditorLogic.fetch != null && EditorLogic.fetch.ship != null && FlightGlobals.fetch != null)
+            {
+                FlightGlobals.PersistentVesselIds.Remove(EditorLogic.fetch.ship.persistentId);
+            }
+            StartClean(facility);
             EditorScene.BeginStart();
             EditorScene.PendingName = name;
             return new Dictionary<string, object> { ["accepted"] = true, ["facility"] = facility.ToString(), ["craft"] = name };
+        }
+
+        /// <summary>
+        /// The state the editor's new-craft button sets (EditorLogic.OnNewShipConfirm: START_CLEAN, ShipConfig cleared), then a
+        /// scene reload: without them the editor reloads its cached craft (EditorDriver.StartupBehaviour stays LOAD_FROM_CACHE,
+        /// e.g. after a flight). Unlike clicking the VAB/SPH building, a cached craft of the same type is not resumed.
+        /// </summary>
+        private static void StartClean(EditorFacility facility)
+        {
+            EditorDriver.StartupBehaviour = EditorDriver.StartupBehaviours.START_CLEAN;
+            ShipConstruction.ShipConfig = null;
+            EditorDriver.StartEditor(facility);
         }
 
         public static string CraftPath(EditorFacility facility, string name)
