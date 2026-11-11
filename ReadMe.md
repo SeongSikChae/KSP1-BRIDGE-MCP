@@ -1,7 +1,8 @@
 # KspBridge
 
-Kerbal Space Program 1(KSP 1.12.5)과 MCP(Model Context Protocol) 클라이언트를 잇는 브리지의 골격입니다.
-KSP 쪽 로직(Logic)과 MCP 서버 쪽 도구(Tools)를 각각 KSP·MCP 클라이언트 재시작 없이 교체할 수 있습니다. 게임 기능(읽기·조작·발사 중계)은 아직 없습니다.
+Kerbal Space Program 1(KSP 1.12.5)과 MCP(Model Context Protocol) 클라이언트를 잇는 브리지입니다.
+MCP 클라이언트가 VAB·SPH 에디터에서 기체를 설계(부품 부착·이동·회전·설정·스테이징), 검사(구조·Δv·TWR·CoM/CoT/CoL), 렌더, 저장, 발사할 수 있습니다.
+KSP 쪽 로직(Logic)과 MCP 서버 쪽 도구(Tools)를 각각 KSP·MCP 클라이언트 재시작 없이 교체할 수 있습니다.
 
 ## 구성
 
@@ -15,9 +16,9 @@ MCP 클라이언트 ──stdio──▶ KspBridge.App (셸) ──HTTP──▶
 | --- | --- | --- | --- |
 | `src/KspBridge.App` | net10.0 | MCP stdio 서버 셸. 설정·로그, 도구 DLL 로더, `reload_app` | MCP 서버 재시작 |
 | `src/KspBridge.App.Core` | net10.0 | 셸·도구 공유 코드(Mod HTTP 클라이언트) | MCP 서버 재시작 |
-| `src/KspBridge.App.Tools` | net10.0 | MCP 도구(`get_status`, `reload_mod`). 도구 호출을 Mod의 HTTP API로 전달 | `reload_app` |
-| `src/KspBridge.Mod` | net472 | KSP 애드온. HTTP 서버, 메인 스레드 디스패처, Logic DLL 로더 | KSP 재시작 |
-| `src/KspBridge.Logic` | net472 | KSP 쪽 로직(현재 라우트 없음) | `reload_mod` |
+| `src/KspBridge.App.Tools` | net10.0 | MCP 도구(상태·리로드, 기체 설계 `EditorTools`). 도구 호출을 Mod의 HTTP API로 전달 | `reload_app` |
+| `src/KspBridge.Mod` | net472 | KSP 애드온. HTTP 서버, 메인 스레드 디스패처, Logic DLL 로더, `get_status`의 에디터 상태 연결(`ILogic.Status`) | KSP 재시작 |
+| `src/KspBridge.Logic` | net472 | KSP 쪽 로직. `/api/editor`·`/api/parts` 라우트: Editor(에디터·부품 배치·설정·스테이징·저장·발사), Catalog(부품 목록), Check(구조·성능 검사), Render(기체 렌더) | `reload_mod` |
 | `tests/KspBridge.App.Tests` | net10.0 | App 단위·stdio 통합 테스트(MSTest) | |
 
 KSP는 Unity 2019.4 Mono에서 동작하므로 Mod·Logic은 .NET Framework 4.7.2를 대상으로 합니다.
@@ -65,6 +66,7 @@ dotnet build KspBridge.slnx
 | `KspBridge.Logic.dll` | `GameData\KspBridge\PluginData` | `reload_mod` 도구 호출 |
 
 `PluginData`에 두기 때문에 KSP가 Logic을 자동 로드하지 않고, Mod의 로더가 로드합니다.
+Mod와 Logic 사이 인터페이스(`ILogic`)가 바뀌면 Mod의 `LoaderVersion`이 올라가며, 이때는 Mod·Logic을 함께 배포하고 KSP를 한 번 재시작해야 합니다(기체 설계 기능 추가 때 `ILogic.Status`가 생겨 `LoaderVersion` 0.0.2). 그 뒤 Logic만 바뀌면 `reload_mod`로 충분합니다.
 KSP 실행 중에는 `Plugins\KspBridge.Mod.dll`이 잠겨 있을 수 있습니다. 그때 Mod를 바꾸려면 KSP를 끄고 빌드합니다.
 
 ### Mod 설정 (`settings.cfg`)
@@ -151,9 +153,20 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 
 | 분류 | 도구 | 위치 |
 | --- | --- | --- |
-| 상태 | `get_status` | Tools |
+| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`) | Tools |
 | 리로드 | `reload_mod` | Tools |
 | 리로드 | `reload_app` | 셸 |
+| 에디터 | `open_editor`, `new_craft`, `save_craft` | Tools |
+| 조회 | `list_parts`, `get_part`, `list_crafts`, `get_craft` | Tools |
+| 편집 | `add_part`, `remove_part`, `offset_part`, `rotate_part`, `set_part_field`, `set_resource` | Tools |
+| 스테이징 | `set_stage` | Tools |
+| 검증 | `check_craft`, `render_craft` | Tools |
+| 발사 | `launch_craft` | Tools |
+
+기체 설계 도구는 VAB·SPH 에디터에서 동작합니다(`list_parts`·`get_part`·`list_crafts`는 세이브만 불러와 있으면 어느 씬에서나 됩니다).
+`open_editor`·`new_craft`·`launch_craft`는 바로 `{accepted}`를 돌려주므로 `get_status`로 완료(`editor.ready` 또는 `scene=FLIGHT`)를 확인합니다.
+부품은 `persistentId`(`get_craft`의 `id`)로 가리키고, 좌표는 루트 부품 기준(+Y = 로켓 위·비행기 기수)입니다. 편집 도구는 기체를 바꾼 호출마다 에디터 Undo 한 단계를 남기고 응답에 관련 구조 경고를 담습니다.
+설계 결정은 [기체 설계 설계 문서](docs/ksp-bridge/0002-기체설계-설계.md), 단위별 구현 결정은 [기체 설계 개발 문서](docs/ksp-bridge/0003-기체설계-개발.md)에 있습니다.
 
 ## 테스트
 
