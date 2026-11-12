@@ -63,6 +63,30 @@ namespace KspBridge.Flight
             return plan;
         }
 
+        /// <summary>reload: parses and validates the handed-over plan JSON again with this logic's rules, keeping its id.
+        /// Throws (400 invalid_plan or any parse error) when it no longer passes.</summary>
+        public static Plan Restore(string rawJson, string id, Vessel v)
+        {
+            Dictionary<string, object> raw = Json.Json.Parse(rawJson) as Dictionary<string, object>
+                ?? throw new InvalidOperationException("handed-over plan is not an object");
+            Plan plan = Parse(raw, rawJson, v);
+            plan.Id = id;
+            return plan;
+        }
+
+        /// <summary>Every condition leaf of the plan in a fixed order: plan abort, then per step until and abort (reload timers).</summary>
+        public List<Leaf> Leaves()
+        {
+            List<Leaf> l = new List<Leaf>();
+            Abort?.CollectLeaves(l);
+            foreach (Step s in Steps)
+            {
+                s.Until?.CollectLeaves(l);
+                s.Abort?.CollectLeaves(l);
+            }
+            return l;
+        }
+
         /// <summary>auto_stage: the control part must stay on the root vessel through every later stage; otherwise KSP would
         /// switch the active vessel to the dropped side after a separation (ModuleDecouple.WaitAndSwitchFocus).</summary>
         private static void CheckControlPart(Vessel v, uint controlPartId)

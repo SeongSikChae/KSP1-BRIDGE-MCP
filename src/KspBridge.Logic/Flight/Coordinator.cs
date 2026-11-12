@@ -372,32 +372,263 @@ namespace KspBridge.Flight
             return _plan != null && v != null && v.persistentId == _plan.VesselId ? v : null;
         }
 
-        /// <summary>Logic stop (reload_mod, KSP exit). Unit 11 hands the plan over; until then the plan is aborted. Never throws.</summary>
+        /// <summary>Handover.Capture's plan: null without a running plan. Dictionary, List, numbers, strings and bools only.</summary>
+        internal static Dictionary<string, object> CapturePlan()
+        {
+            if (!Running)
+            {
+                return null;
+            }
+            List<object> timers = new List<object>();
+            foreach (Leaf l in _plan.Leaves())
+            {
+                timers.Add(l.TrueSince);   // NaN is written as null and read back as NaN
+            }
+            Vessel v = PlanVessel();
+            List<object> attitude = null;
+            if (Command.Attitude.HasValue && v != null)
+            {
+                Vector3d d = Command.Attitude.Value.Direction(v);   // world direction: Stop and Start run in the same frame
+                attitude = new List<object> { d.x, d.y, d.z };
+            }
+            return new Dictionary<string, object>
+            {
+                ["plan_id"] = _plan.Id,
+                ["vessel_id"] = (double)_plan.VesselId,
+                ["raw"] = _plan.Raw,
+                ["step"] = (double)_step,
+                ["step_start_ut"] = _stepStartUt,
+                ["timers"] = timers,
+                ["mode_state"] = _mode.Save(),
+                ["staging"] = AutoStager.Save(),
+                ["command"] = new Dictionary<string, object>
+                {
+                    ["attitude"] = attitude,
+                    ["throttle"] = Command.Throttle,
+                    ["mode_throttle"] = Command.ModeThrottle,
+                },
+                ["sas_before"] = AttitudeController.SasBefore,
+                ["controller_integral"] = AttitudeController.SaveIntegral(),
+                ["warp_cancelled"] = Warp.Cancelled,
+            };
+        }
+
+        /// <summary>
+        /// Logic stop (reload_mod, KSP exit): hands the plan and the events over in context.Handover and keeps throttle and SAS
+        /// (the next logic carries on). Never throws. Without a plan the user's throttle, SAS and warp are left alone.
+        /// </summary>
         public static IList<string> Stop(LogicContext context)
         {
             List<string> released = new List<string>();
-            if (Running)
+            if (!Running && AttitudeController.Target != null)
             {
-                released.Add("flight_plan " + _plan.Id);
-            }
-            if (Running || AttitudeController.Target != null)
-            {
+                // A half-done state (attached without a running plan): nothing to hand over, release as before.
                 _logicStopping = true;
                 try
                 {
-                    Abort("error", null, "logic stopped");   // without a plan the user's manual throttle and SAS are left alone
+                    Abort("error", null, "logic stopped");
                 }
                 finally
                 {
                     _logicStopping = false;
                 }
             }
-            Safe(() => AutoStager.Clear(null));
+            Safe(() =>
+            {
+                if (Warp.Requested)
+                {
+                    Warp.Stop();   // before serializing, only our warp: warp_stopped goes into the handed-over events
+                }
+            });
+            bool handedPlan = Running;
+            try
+            {
+                if (handedPlan)
+                {
+                    Safe(() => UnityEngine.Debug.Log("[KspBridge] handover out: " + CommandLog() + " integral " + IntegralLog()));
+                }
+                context.Handover = Json.Json.Serialize(Handover.Capture());
+                if (handedPlan)
+                {
+                    released.Add("flight plan " + _plan.Id + " handed over");
+                }
+            }
+            catch (Exception e)
+            {
+                if (handedPlan)
+                {
+                    // Cannot be taken over: throttle 0, SAS restore (plan_aborted goes into the events). Without a plan the
+                    // user's throttle and SAS are left alone; only the events fallback below runs.
+                    released.Add("flight plan " + _plan.Id + " aborted (handover failed)");
+                    _logicStopping = true;
+                    try
+                    {
+                        Abort("error", null, e.Message);
+                    }
+                    finally
+                    {
+                        _logicStopping = false;
+                    }
+                }
+                try
+                {
+                    context.Handover = Json.Json.Serialize(Handover.CaptureEvents());
+                }
+                catch
+                {
+                    Safe(() => context.Handover = Json.Json.Serialize(new Dictionary<string, object>
+                    {
+                        ["format"] = (double)Handover.Format,
+                        ["epoch"] = FlightEvents.Epoch,
+                        ["seq"] = (double)FlightEvents.LastSeq,
+                    }));
+                }
+            }
+            Safe(() => AttitudeController.Detach());       // OnFlyByWire only: throttle and SAS stay for the next logic
+            Safe(() => FlightScene.Unhook());
+            Safe(() => AutoStager.Clear(PlanVessel()));    // a staged recorded here is dropped below; the next logic records it once
             _plan = null;
             _mode = null;
             _step = 0;
             Command = ModeCommand.Idle;
+            Safe(() => FlightEvents.Clear());
+            Safe(() => Warp.ClearLatch());
             return released;
+        }
+
+        /// <summary>
+        /// Logic start: restores the events and takes over a handed-over plan (logic_reloaded {resumed}). Never throws: a plan
+        /// that cannot be taken over ends as reload_incompatible, a missing engine as no_thrust. Throwing would make the loader
+        /// restart the previous logic with the same handover and repeat side effects already done (a stage activation).
+        /// </summary>
+        public static void Resume(HandoverState h)
+        {
+            Safe(() => FlightEvents.Restore(h.Events, h.Seq, h.Epoch));
+            if (h.Plan == null)
+            {
+                Safe(() => FlightEvents.Add("logic_reloaded", -1, Reloaded(false)));
+                return;
+            }
+            HandedPlan hp = h.Plan;
+            Vessel v = HighLogic.LoadedSceneIsFlight && FlightGlobals.fetch != null ? FlightGlobals.ActiveVessel : null;
+            bool stagerLoaded = false;
+            try
+            {
+                if (h.Incompatible)
+                {
+                    throw new InvalidOperationException(h.Error ?? "handover does not match");
+                }
+                if (v == null || v.persistentId != hp.VesselId)
+                {
+                    throw new InvalidOperationException("the active vessel is not the plan's vessel");
+                }
+                // 1. What can fail first, without touching static state.
+                Plan plan = Plan.Restore(hp.Raw, hp.PlanId, v);
+                if (hp.Step < 0 || hp.Step >= plan.Steps.Count)
+                {
+                    throw new InvalidOperationException("step " + hp.Step + " out of range");
+                }
+                List<Leaf> leaves = plan.Leaves();
+                if (leaves.Count != hp.Timers.Count)
+                {
+                    throw new InvalidOperationException("condition timers do not match the plan");
+                }
+                for (int i = 0; i < leaves.Count; i++)
+                {
+                    leaves[i].TrueSince = hp.Timers[i] == null ? double.NaN : Convert.ToDouble(hp.Timers[i], System.Globalization.CultureInfo.InvariantCulture);
+                }
+                IFlightMode mode = plan.Steps[hp.Step].CreateMode();
+                mode.Load(v, hp.ModeState);   // instead of Begin
+                // 2. Then the stager, the warp latch and the switch to Running.
+                AutoStager.Load(hp.Staging ?? throw new InvalidOperationException("staging missing"));
+                stagerLoaded = true;
+                Warp.LoadLatch(hp.WarpCancelled);
+                _plan = plan;
+                _mode = mode;
+                _step = hp.Step;
+                _stepStartUt = hp.StepStartUt;
+                _plan.State = PlanState.Running;
+                Command = hp.Command;   // the last command: attitude_error has a value and Prev*Throttle are the old ones
+                double ut = Planetarium.GetUniversalTime();
+                Capture(v, ut);
+                Command = ComputeCommand(v, ut, _plan, _mode, true);   // as Tick: the first OnFlyByWire already has a command
+                AttitudeController.Attach(v, hp.SasBefore);             // SAS is off by now: keep the handed-over state
+                AttitudeController.LoadIntegral(hp.ControllerIntegral);
+                Safe(() => UnityEngine.Debug.Log("[KspBridge] handover in: " + CommandLog() + " integral " + IntegralLog()
+                    + " attitude_error " + _t.Num["attitude_error"].ToString("F3") + " main_throttle " + FlightInputHandler.state.mainThrottle.ToString("F3")));
+                FlightEvents.Add("logic_reloaded", _step, Reloaded(true));
+            }
+            catch (NoThrustException e)
+            {
+                // Taken over correctly, only no thrust: not reload_incompatible.
+                Safe(() => AttitudeController.Adopt(v, hp.SasBefore));
+                Safe(() => FlightEvents.Add("logic_reloaded", _step, Reloaded(false)));
+                Abort("no_thrust", null, e.Message);
+            }
+            catch (Exception e)
+            {
+                Incompatible(v, hp, stagerLoaded, e.Message);
+            }
+        }
+
+        /// <summary>Never throws. Touches throttle, SAS and warp only on the handed-over vessel; on another vessel only the global
+        /// input throttle is zeroed, and only when the handed-over command throttle was above 0.</summary>
+        private static void Incompatible(Vessel v, HandedPlan hp, bool stagerLoaded, string message)
+        {
+            bool same = v != null && v.persistentId == hp.VesselId;
+            Vessel planVessel = same ? v : null;
+            if (stagerLoaded)
+            {
+                Safe(() => AutoStager.Clear(planVessel));   // a loaded request that already fired is recorded before clearing
+            }
+            else
+            {
+                // Load not done (failed before it or half way): drop whatever is in memory without recording, then judge the
+                // handed-over requests once from the handover itself.
+                Safe(() => AutoStager.Clear(null));
+                Safe(() => AutoStager.RecordHandedRequests(planVessel, hp.Staging));
+            }
+            _plan = null;
+            _mode = null;
+            if (same)
+            {
+                Safe(() => AttitudeController.Adopt(v, hp.SasBefore));   // attached already: unchanged
+                Release();                                              // throttle 0, our warp off, SAS restore, OnFlyByWire off
+            }
+            else
+            {
+                Command = ModeCommand.Idle;
+                if (hp.CommandThrottle > 0)
+                {
+                    Safe(() => FlightInputHandler.state.mainThrottle = 0);
+                }
+            }
+            Safe(() => FlightEvents.Add("logic_reloaded", -1, Reloaded(false)));
+            Safe(() => FlightEvents.Add("plan_aborted", -1, new Dictionary<string, object>
+            {
+                ["reason"] = "reload_incompatible",
+                ["condition"] = null,
+                ["message"] = message,
+            }));
+        }
+
+        private static Dictionary<string, object> Reloaded(bool resumed) => new Dictionary<string, object>
+        {
+            ["resumed"] = resumed,
+            ["version"] = Routes.Version,
+        };
+
+        private static string CommandLog()
+        {
+            Vessel v = PlanVessel();
+            string att = Command.Attitude.HasValue && v != null ? Command.Attitude.Value.Direction(v).ToString("F5") : "none";
+            return "attitude " + att + " throttle " + Command.Throttle.ToString("F3") + " mode_throttle " + Command.ModeThrottle.ToString("F3");
+        }
+
+        private static string IntegralLog()
+        {
+            List<object> i = AttitudeController.SaveIntegral();
+            return "[" + string.Join(", ", i.ConvertAll(x => ((double)x).ToString("F5")).ToArray()) + "]";
         }
 
         private static Dictionary<string, object> StepData(Plan plan, int index) => new Dictionary<string, object>

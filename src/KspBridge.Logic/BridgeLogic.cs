@@ -34,10 +34,29 @@ namespace KspBridge
         private IEnumerable<Route> StartCore(LogicContext context)
         {
             Stopped = false;
-            _context = context;   // Stop uses it
+            // What can fail first; the hooks, the takeover and consuming the handover last.
             Settings.Reload();
             List<Route> routes = Routes.Build(context.Dispatcher);
-            FlightScene.Hook();
+            HandoverState h = Handover.Parse(context.Handover);   // never throws: a bad handover is h.Incompatible / no epoch
+            try
+            {
+                FlightScene.Hook();
+            }
+            catch
+            {
+                try
+                {
+                    FlightScene.Unhook();   // undo what was hooked; context.Handover stays for the previous logic's restart
+                }
+                catch (Exception e)
+                {
+                    UnityEngine.Debug.LogError("[KspBridge] flight unhook after a failed hook failed: " + e);
+                }
+                throw;
+            }
+            Coordinator.Resume(h);   // never throws
+            context.Handover = null;
+            _context = context;      // Stop uses it
             return routes;
         }
 

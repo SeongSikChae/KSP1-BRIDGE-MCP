@@ -1,5 +1,7 @@
 using KspBridge.Flight.Modes;
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 namespace KspBridge.Flight.Control
@@ -59,6 +61,45 @@ namespace KspBridge.Flight.Control
             }
             _v.OnFlyByWire -= Fly;
             _v = null;
+            _integral = Vector3.zero;
+        }
+
+        /// <summary>SAS state to restore when the plan ends (reload handover).</summary>
+        public static bool SasBefore => _sasBefore;
+
+        /// <summary>PID integral per axis (reload handover).</summary>
+        public static List<object> SaveIntegral() => new List<object> { (double)_integral.x, (double)_integral.y, (double)_integral.z };
+
+        /// <summary>Resume, after Attach: continues the handed-over integral. Missing or malformed values leave it at zero.</summary>
+        public static void LoadIntegral(List<object> l)
+        {
+            if (l == null || l.Count != 3)
+            {
+                return;
+            }
+            try
+            {
+                _integral = new Vector3(
+                    (float)Convert.ToDouble(l[0], CultureInfo.InvariantCulture),
+                    (float)Convert.ToDouble(l[1], CultureInfo.InvariantCulture),
+                    (float)Convert.ToDouble(l[2], CultureInfo.InvariantCulture));
+            }
+            catch (Exception)
+            {
+                _integral = Vector3.zero;   // malformed: start from zero rather than fail the takeover
+            }
+        }
+
+        /// <summary>A failed resume before Attach: makes v the release target with the handed-over SAS state, so Release
+        /// (RestoreSas, Detach) acts on it. No OnFlyByWire and no SAS change here. Already attached: unchanged.</summary>
+        public static void Adopt(Vessel v, bool? sasBefore)
+        {
+            if (_v != null || v == null)
+            {
+                return;
+            }
+            _v = v;
+            _sasBefore = sasBefore ?? v.ActionGroups[KSPActionGroup.SAS];
             _integral = Vector3.zero;
         }
 

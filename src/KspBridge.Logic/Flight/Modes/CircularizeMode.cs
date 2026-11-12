@@ -181,9 +181,9 @@ namespace KspBridge.Flight.Modes
             _lockedDir = state.TryGetValue("locked_dir", out object l) && l is List<object> xs && xs.Count == 3
                 ? new Vector3d(Convert.ToDouble(xs[0]), Convert.ToDouble(xs[1]), Convert.ToDouble(xs[2]))
                 : (Vector3d?)null;
-            _prevDv = state.TryGetValue("prev_dv", out object pd) && pd is double dvValue ? dvValue : double.PositiveInfinity;
-            _prevEcc = state.TryGetValue("prev_ecc", out object pe) && pe is double eccValue ? eccValue : double.PositiveInfinity;
-            _eccFlat = state.TryGetValue("ecc_flat", out object ef) && ef is double flat ? (int)flat : 0;
+            _prevDv = Handover.D(state, "prev_dv", double.PositiveInfinity);
+            _prevEcc = Handover.D(state, "prev_ecc", double.PositiveInfinity);
+            _eccFlat = (int)Handover.D(state, "ecc_flat", 0);
         }
     }
 }

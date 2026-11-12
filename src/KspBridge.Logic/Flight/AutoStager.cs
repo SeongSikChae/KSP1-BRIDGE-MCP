@@ -760,21 +760,23 @@ namespace KspBridge.Flight
             };
         }
 
+        /// <summary>Submit's trial restore and the reload handover. Doubles follow the handover Load rule (null = NaN;
+        /// last_ut: −∞, its initial value).</summary>
         public static void Load(Dictionary<string, object> d)
         {
-            _state = (StagingState)(int)(double)d["state"];
-            _since = (double)d["since"];
-            _burnoutUt = (double)d["burnout_ut"];
-            _separateUt = (double)d["separate_ut"];
-            _settleUt = (double)d["settle_ut"];
-            _ticks = (int)(double)d["ticks"];
-            _parallel = (bool)d["parallel"];
-            _lastUt = (double)d["last_ut"];
-            _request = StageRequest.Load(d["request"] as Dictionary<string, object>);
-            _onStart = StageRequest.Load(d["on_start"] as Dictionary<string, object>);
-            _onStartQueued = (bool)d["on_start_queued"];
+            _state = (StagingState)(int)Handover.D(d, "state", 0);
+            _since = Handover.D(d, "since");
+            _burnoutUt = Handover.D(d, "burnout_ut");
+            _separateUt = Handover.D(d, "separate_ut");
+            _settleUt = Handover.D(d, "settle_ut");
+            _ticks = (int)Handover.D(d, "ticks", 0);
+            _parallel = Handover.B(d, "parallel");
+            _lastUt = Handover.D(d, "last_ut", double.NegativeInfinity);
+            _request = StageRequest.Load(d.TryGetValue("request", out object r) ? r as Dictionary<string, object> : null);
+            _onStart = StageRequest.Load(d.TryGetValue("on_start", out object os) ? os as Dictionary<string, object> : null);
+            _onStartQueued = Handover.B(d, "on_start_queued");
             _before = null;
-            if (d["before"] is List<object> before)
+            if (d.TryGetValue("before", out object b) && b is List<object> before)
             {
                 _before = new HashSet<uint>();
                 foreach (object id in before)
@@ -782,7 +784,29 @@ namespace KspBridge.Flight
                     _before.Add((uint)(double)id);
                 }
             }
-            _latch = d["latch_stage"] is double ls && d["latch_ignited"] is List<object> li ? new Latch((int)ls, li) : null;
+            _latch = d.TryGetValue("latch_stage", out object ls) && ls is double stage
+                && d.TryGetValue("latch_ignited", out object li) && li is List<object> ids ? new Latch((int)stage, ids) : null;
+        }
+
+        /// <summary>A resume that failed before Load: the handed-over requests are not in memory, so their sent-and-confirmed check
+        /// (as in RecordSent) is made from the handed-over staging alone. v null (another vessel): nothing.</summary>
+        public static void RecordHandedRequests(Vessel v, Dictionary<string, object> staging)
+        {
+            if (v == null || staging == null)
+            {
+                return;
+            }
+            StageRequest request = StageRequest.Load(staging.TryGetValue("request", out object r) ? r as Dictionary<string, object> : null);
+            StageRequest onStart = StageRequest.Load(staging.TryGetValue("on_start", out object os) ? os as Dictionary<string, object> : null);
+            StagingState state = (StagingState)(int)Handover.D(staging, "state", 0);
+            if (request != null && request.Sent && v.currentStage < request.StageBefore)
+            {
+                Staged(v, state == StagingState.Separate ? "separate" : "ignite");
+            }
+            if (onStart != null && onStart.Sent && v.currentStage < onStart.StageBefore)
+            {
+                Staged(v, "on_start");
+            }
         }
     }
 }

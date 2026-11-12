@@ -102,6 +102,82 @@ namespace KspBridge.Flight
             }
         }
 
+        /// <summary>Handover: the buffer oldest first ({seq, ut, met, type, step, data}; met NaN becomes null).</summary>
+        public static List<object> Save()
+        {
+            List<object> l = new List<object>(_count);
+            for (int i = 0; i < _count; i++)
+            {
+                FlightEvent e = At(i);
+                l.Add(new Dictionary<string, object>
+                {
+                    ["seq"] = (double)e.Seq,
+                    ["ut"] = e.Ut,
+                    ["met"] = e.Met,
+                    ["type"] = e.Type,
+                    ["step"] = (double)e.Step,
+                    ["data"] = e.Data,
+                });
+            }
+            return l;
+        }
+
+        /// <summary>Logic stop: empties the buffer, seq and trial (the handover carries them; a restarted logic restores them).</summary>
+        public static void Clear()
+        {
+            Array.Clear(_buf, 0, Capacity);
+            _start = 0;
+            _count = 0;
+            _trial = null;
+            LastSeq = 0;
+        }
+
+        /// <summary>Logic start: buffer, seq and epoch from the handover. No epoch (no handover, unreadable) = a new session id.
+        /// An unreadable event is skipped; seq still continues from the handed-over value.</summary>
+        public static void Restore(List<object> events, long seq, string epoch)
+        {
+            Clear();
+            Epoch = string.IsNullOrEmpty(epoch) ? Guid.NewGuid().ToString("N") : epoch;
+            if (events != null)
+            {
+                foreach (object o in events)
+                {
+                    if (!(o is Dictionary<string, object> d) || !(d.TryGetValue("type", out object t) && t is string type))
+                    {
+                        continue;
+                    }
+                    FlightEvent e;
+                    try
+                    {
+                        e = new FlightEvent
+                        {
+                            Seq = (long)Handover.D(d, "seq", 0),
+                            Ut = Handover.D(d, "ut"),
+                            Met = Handover.D(d, "met"),
+                            Type = type,
+                            Step = (int)Handover.D(d, "step", 0),
+                            Data = d.TryGetValue("data", out object data) ? data as Dictionary<string, object> : null,
+                        };
+                    }
+                    catch (Exception)
+                    {
+                        continue;   // a malformed event is skipped; seq still continues from the handed-over value
+                    }
+                    if (_count < Capacity)
+                    {
+                        _buf[(_start + _count) % Capacity] = e;
+                        _count++;
+                    }
+                    else
+                    {
+                        _buf[_start] = e;
+                        _start = (_start + 1) % Capacity;
+                    }
+                }
+            }
+            LastSeq = Math.Max(seq, _count > 0 ? At(_count - 1).Seq : 0);
+        }
+
         /// <summary>i-th oldest event.</summary>
         private static FlightEvent At(int i) => _buf[(_start + i) % Capacity];
 

@@ -16,6 +16,9 @@ namespace KspBridge.Flight
         /// by waiting, or are already true or past, drop out; all = latest of the rest, any = earliest, nothing left = null.</summary>
         public abstract double? WarpTargetUt(Telemetry t, double ut);
 
+        /// <summary>Every leaf in a fixed depth-first order (reload handover of the for_s timers).</summary>
+        public abstract void CollectLeaves(List<Leaf> into);
+
         private static double? Combine(List<Condition> items, Telemetry t, double ut, bool all)
         {
             double? r = null;
@@ -78,6 +81,8 @@ namespace KspBridge.Flight
 
             public All(List<Condition> items) => _items = items;
 
+            public override void CollectLeaves(List<Leaf> into) => _items.ForEach(c => c.CollectLeaves(into));
+
             public override bool Eval(Telemetry t, double ut)
             {
                 bool result = true;
@@ -106,6 +111,8 @@ namespace KspBridge.Flight
             private readonly List<Condition> _items;
 
             public Any(List<Condition> items) => _items = items;
+
+            public override void CollectLeaves(List<Leaf> into) => _items.ForEach(c => c.CollectLeaves(into));
 
             public override bool Eval(Telemetry t, double ut)
             {
@@ -143,6 +150,15 @@ namespace KspBridge.Flight
         private readonly bool _isString;
         private readonly double _forS;
         private double _trueSince = double.NaN;
+
+        /// <summary>UT since the comparison has been true (NaN = not true); handed over on reload.</summary>
+        public double TrueSince
+        {
+            get => _trueSince;
+            set => _trueSince = value;
+        }
+
+        public override void CollectLeaves(List<Leaf> into) => into.Add(this);
 
         private Leaf(string var, string op, double num, string str, bool isString, double forS)
         {

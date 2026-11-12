@@ -74,12 +74,13 @@ namespace KspBridge.Flight
             ["tries"] = (double)_tries,
         };
 
+        /// <summary>Handover Load rule: null doubles come back as NaN (a request not started yet counts from its first try again).</summary>
         public static StageRequest Load(Dictionary<string, object> d) => d == null ? null : new StageRequest
         {
-            _stageBefore = (int)(double)d["stage_before"],
-            _firstUt = (double)d["first_ut"],
-            _lastSendUt = (double)d["last_send_ut"],
-            _tries = (int)(double)d["tries"],
+            _stageBefore = (int)Handover.D(d, "stage_before", -1),
+            _firstUt = Handover.D(d, "first_ut"),
+            _lastSendUt = Handover.D(d, "last_send_ut"),
+            _tries = (int)Handover.D(d, "tries", 0),
         };
     }
 }
