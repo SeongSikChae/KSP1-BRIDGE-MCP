@@ -17,7 +17,18 @@ namespace KspBridge.Flight
         private static readonly MethodInfo SetModeMethod = typeof(TimeWarp).GetMethod("setMode",
             BindingFlags.Instance | BindingFlags.NonPublic, null, new[] { typeof(TimeWarp.Modes) }, null);
 
+        // The private judges WarpTo itself uses (TimeWarp.Update → setRate(1) → getMaxOnRailsRateIdx; getMaxWarpRateForTravel).
+        // If either gives rate index 0, autoWarpTo ends after one FixedUpdate: calling them first means we never send a WarpTo
+        // that KSP ends by itself (which Sync would read as a user cancel).
+        private static readonly MethodInfo RailsRateMethod = typeof(TimeWarp).GetMethod("getMaxOnRailsRateIdx",
+            BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new[] { typeof(int), typeof(bool), typeof(ClearToSaveStatus).MakeByRefType() }, null);
+        private static readonly MethodInfo TravelRateMethod = typeof(TimeWarp).GetMethod("getMaxWarpRateForTravel",
+            BindingFlags.Instance | BindingFlags.NonPublic, null,
+            new[] { typeof(double), typeof(double), typeof(double), typeof(int).MakeByRefType() }, null);
+
         private static bool _wasActive;    // our warp was in effect at the last Sync
+        private static string _refusal;    // last KSP refusal logged (log once per change)
         private static bool _requested;    // our WarpTo is alive
         private static bool _cancelled;    // user-cancel latch: no new request within the step
         private static string _unavailable; // reason already reported in this step (warp_unavailable once per step and reason)
@@ -88,10 +99,24 @@ namespace KspBridge.Flight
                 Unavailable("player_warp");
                 return;
             }
-            if (AutoWarpEngagedField == null)
+            if (AutoWarpEngagedField == null || RailsRateMethod == null || TravelRateMethod == null)
             {
                 Unavailable("not_supported");   // a running autoWarp would look stopped before its rate rises
                 return;
+            }
+            // After the player-warp check: the rate index is 0 here, so rails index 1 > 0 is exactly WarpTo's first setRate(1).
+            string refusal = KspRefusal(TimeWarp.fetch, targetUt - 10);
+            if (refusal != _refusal)
+            {
+                _refusal = refusal;
+                if (refusal != null)
+                {
+                    Debug.Log("[KspBridge] warp waits: KSP refuses (" + refusal + ")");
+                }
+            }
+            if (refusal != null)
+            {
+                return;   // not requested yet; judged again next tick
             }
             // WarpTo warps in the current mode: physics mode at rate 0 would give a slow physics warp.
             if (TimeWarp.WarpMode == TimeWarp.Modes.LOW && !SetMode(TimeWarp.fetch, TimeWarp.Modes.HIGH))
@@ -140,6 +165,25 @@ namespace KspBridge.Flight
         {
             _cancelled = false;
             _unavailable = null;
+            _refusal = null;
+        }
+
+        /// <summary>Why KSP would end a WarpTo(warpUt) at once (rate index stays 0), or null when it would warp.</summary>
+        private static string KspRefusal(TimeWarp w, double warpUt)
+        {
+            // As TimeWarp.Update passes WarpTo's defaults (8, 2.5); 1 s margin for the time until KSP's Update judges it.
+            object[] travel = { warpUt - Planetarium.GetUniversalTime() - 1, 8.0, 2.5, 0 };
+            TravelRateMethod.Invoke(w, travel);
+            if ((int)travel[3] <= 0)
+            {
+                return "too_close";
+            }
+            object[] rails = { 1, true, ClearToSaveStatus.CLEAR };
+            if ((int)RailsRateMethod.Invoke(w, rails) <= 0)
+            {
+                return rails[2].ToString();
+            }
+            return null;
         }
 
         public static void LoadLatch(bool cancelled) => _cancelled = cancelled;
