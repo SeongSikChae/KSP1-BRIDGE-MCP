@@ -167,7 +167,8 @@ namespace KspBridge.App
             "requests the flight scene one frame after this returns; FLIGHT is ready only after the flight scene's initial save; if " +
             "reset.loading_seconds keeps growing, reload_mod). Still EDITOR with an EDITOR_LAUNCH lock in input_locks: a pre-flight check " +
             "dialog waits for the player on screen (continue launches, cancel stays). " +
-            "clear_site: first recover the vessels landed at the site without dialogs, listed in recovered (as recover_vessel); they stay " +
+            "clear_site: first recover the vessels landed at the site without dialogs (the game's launch-check substring match, so a " +
+            "site whose name contains it counts too; check the names in recovered), listed in recovered (as recover_vessel); they stay " +
             "recovered even if a pre-flight check dialog then stops or cancels the launch (save_disabled, scene_loading, not_supported). " +
             "launch_locked while a launch or dialog is in progress or launching is not allowed; unsaveable for a craft with structure " +
             "errors (check_craft). Launch sites depend on the editor (VAB: LaunchPad..., SPH: Runway...).")]

@@ -153,7 +153,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 
 | 분류 | 도구 | 위치 |
 | --- | --- | --- |
-| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`, 비행 요약 `flight`, 입력 잠금) | Tools |
+| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`, 비행 요약 `flight`, 입력 잠금, 리셋·회수 상태 `reset`) | Tools |
 | 리로드 | `reload_mod` | Tools |
 | 리로드 | `reload_app` | 셸 |
 | 에디터 | `open_editor`, `new_craft`, `save_craft` | Tools |
@@ -165,6 +165,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 비행 계획 | `submit_flight_plan`, `replace_flight_steps`, `abort_flight` | Tools |
 | 비행 조회 | `get_flight`, `get_flight_events` | Tools |
 | 시간 가속 | `set_time_warp` | Tools |
+| 리셋·회수 | `revert_flight`, `leave_flight`, `recover_vessel` | Tools |
 
 기체 설계 도구는 VAB·SPH 에디터에서 동작합니다(`list_parts`·`get_part`·`list_crafts`는 세이브만 불러와 있으면 어느 씬에서나 됩니다).
 `open_editor`·`new_craft`·`launch_craft`는 바로 `{accepted}`를 돌려주므로 `get_status`로 완료를 확인합니다. `open_editor`·`new_craft`는 `editor.ready`, `launch_craft`는 `reset.requested_scene`이 `FLIGHT`이고 `reset.scene_ready`가 true일 때 끝난 것입니다(게임이 비행 씬 로드를 한 프레임 늦게 요청하고, `scene`은 로드 요청 시점에 바뀝니다). EDITOR에 머물고 `input_locks`에 `EDITOR_LAUNCH` 잠금이 있으면 발사 전 검사 대화상자가 화면 입력을 기다리는 것입니다. `reset.loading_seconds`가 계속 늘어나면 `reload_mod`로 풉니다. `launch_craft`의 `clear_site: true`는 발사 지점에 착지한 기체를 대화상자 없이 먼저 회수합니다.
@@ -199,7 +200,23 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 - **스테이징 설정**(`staging_options`): `tailoff_ratio` 0.05, `max_tailoff_s` 5, `settle_distance` 2 m, `max_settle_s` 3.
 - **추력 없음**: Mode가 스로틀 > 0을 원하는데 작동 중인 엔진이 없고 기다릴 스테이징도 없을 때입니다(엔진 없는 `coast`는 해당 없음). 제출과 `replace_flight_steps`(현재 단계 포함)는 409 `no_thrust`, 실행 중이면 `plan_aborted {reason: no_thrust}`입니다.
 - 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
-- **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`.
+- **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`, `revert`(`revert_flight`), `recover`(`recover_vessel`), `leave`(`leave_flight`).
+
+### 리셋·회수
+
+비행을 되돌리거나 기체를 치워 "발사 → 실패 → 되돌리기 → 재시도"를 MCP 도구만으로 반복합니다. 모두 게임 메뉴·버튼과 같은 조건을 따르고, 실행 중인 계획은 허용될 때만 먼저 중단합니다(reason `revert`·`leave`·`recover`).
+
+| 도구 | 하는 일 | 씬 |
+| --- | --- | --- |
+| `revert_flight` | `target: launch`는 발사 직후로, `editor`는 기체를 만든 VAB/SPH로 되돌림(일시정지 메뉴의 Revert) | 비행 |
+| `leave_flight` | 기체를 그 자리에 두고 우주센터로 나감(Space Center 버튼) | 비행 |
+| `recover_vessel` | 비행 씬: 착지·착수한 활성 기체를 우주센터로 옮겨 회수(회수 버튼). 우주센터·조립동: `site`에 정확히 착지한 기체 회수 | 비행, 우주센터, 조립동 |
+| `launch_craft` `clear_site: true` | 발사 지점의 기체를 먼저 회수하고 발사 | 조립동 |
+
+- 회수는 게임의 회수 결과 창을 띄우지 않습니다. 결과(`vessel`, `id`, `crew`, 자금·과학·평판의 회수 전후 차이, 샌드박스는 null)는 응답 `recovered`나, 비행 씬 회수면 `get_status.reset.recovery`(`pending` → `done`/`failed`)에 있습니다.
+- 씬을 바꾸는 도구는 바로 `{accepted}`를 돌려줍니다. `get_status.reset.requested_scene`이 목적 씬이고 `reset.scene_ready`가 true가 될 때까지 기다립니다(`scene`은 로드 요청 시점에 바뀌고, 비행 씬은 첫 저장 뒤에 준비됩니다). 로드 중에는 409 `scene_loading`, 비행 씬 회수를 기다리는 중에는 409 `recovery_pending`입니다.
+- 미리 확인: `reset.can_revert_launch`, `can_revert_editor`(`revert_editor_facility`), `revert_unavailable`(이유), `can_recover`. 발사 직후처럼 기체가 움직이는 동안은 `leave_unavailable`이 날 수 있습니다.
+- 설계는 [비행리셋 설계 문서](docs/ksp-bridge/0011-비행리셋-설계.md), 단위별 구현과 실측은 [비행리셋 개발 문서](docs/ksp-bridge/0012-비행리셋-개발.md)에 있습니다.
 
 **reload 동작**: 계획 실행 중 `reload_mod`를 해도 계획이 끊기지 않습니다. 이전 Logic이 계획·이벤트·Mode 상태·스테이징 진행·직전 명령·SAS·자세 제어 적분값을 넘기고, 새 Logic이 계획을 다시 검증해 같은 단계에서 이어받습니다(`logic_reloaded {resumed: true}`, `plan.id`·`epoch` 유지, `seq` 이어짐). 계획이 건 시간 가속은 넘기기 전에 풀고(`warp_stopped`), 단계가 계속 가속을 원하면 새 Logic이 다시 겁니다(사용자가 취소한 가속은 그 단계에서 다시 걸지 않음). 이어받을 수 없으면(새 검증 규칙에서 실패, 활성 기체가 다름 등) `plan_aborted {reason: reload_incompatible}`로 중단합니다. 활성 기체가 계획의 기체면 스로틀 0과 SAS 복원을 하고, 다른 기체면 입력 스로틀만 0으로 둡니다. 이어받았는데 추력만 없으면 `no_thrust`로 중단합니다. 계획이 없으면 사용자의 스로틀·SAS·가속을 건드리지 않습니다. 비행 제어 설계는 [비행제어 설계 문서](docs/ksp-bridge/0005-비행제어-설계.md), 단위별 구현 결정은 [비행제어 개발 문서](docs/ksp-bridge/0006-비행제어-개발.md)에 있습니다.
 

@@ -500,12 +500,30 @@ namespace KspBridge.Flight
                 && FlightGlobals.ClearToSave(false) == ClearToSaveStatus.CLEAR   // no game log on every poll
                 && HighLogic.CurrentGame.Parameters.Flight.CanLeaveToSpaceCenter
                 && HighLogic.CurrentGame.Parameters.Flight.CanAutoSave;
+            EditorFacility facility = EditorFacility.None;
+            List<string> launch = new List<string>();
+            List<string> editor = new List<string>();
+            if (flight && !stock)
+            {
+                launch.Add("not_supported");
+            }
+            else if (flight)
+            {
+                launch = RevertBlockers(false, out _);
+                editor = RevertBlockers(true, out facility);
+            }
+            bool canRevertLaunch = flight && stock && launch.Count == 0;
+            bool canRevertEditor = flight && stock && editor.Count == 0;
             return new Dictionary<string, object>
             {
                 ["scene_ready"] = !_sceneLoading,
                 ["requested_scene"] = _requestedScene?.ToString(),
                 ["loading_seconds"] = _sceneLoading ? (object)(double)(Time.realtimeSinceStartup - _loadStarted) : null,
                 ["can_recover"] = canRecover,
+                ["can_revert_launch"] = canRevertLaunch,
+                ["can_revert_editor"] = canRevertEditor,
+                ["revert_editor_facility"] = canRevertEditor ? facility.ToString() : null,
+                ["revert_unavailable"] = flight ? launch.Concat(editor).Distinct().ToList() : null,
                 // a copy: the response is serialized on the HTTP thread (HttpServer) while Fail edits _recovery on the main thread
                 ["recovery"] = _recovery == null ? null : new Dictionary<string, object>(_recovery),
             };
