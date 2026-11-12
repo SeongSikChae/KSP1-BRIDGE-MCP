@@ -270,6 +270,10 @@ namespace KspBridge.Editor
                 {
                     GameEvents.onEditorPartPlaced.Fire(c);
                 }
+                foreach (Part c in p.Children)
+                {
+                    EndFairingPlacement(c);
+                }
             }
             catch
             {
@@ -655,6 +659,35 @@ namespace KspBridge.Editor
                 rotation = Quaternion.AngleAxis(180f, up) * rotation;
             }
             copy.transform.SetPositionAndRotation(position, rotation);
+        }
+
+        private static readonly System.Reflection.FieldInfo FairingFsm =
+            typeof(ModuleProceduralFairing).GetField("fsm", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        private static readonly System.Reflection.FieldInfo FairingPlaceCancel =
+            typeof(ModuleProceduralFairing).GetField("on_PlaceCancel", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        /// <summary>
+        /// A shell-less fairing base attached in the editor enters its shell placement state (st_place: on_PartAttached), which locks
+        /// the editor and cone-casts and logs every frame until the player clicks the shell or right-clicks to cancel
+        /// (ModuleProceduralFairing decompile checked). add_part builds no shell, so it ends the state like the right-click cancel
+        /// (on_PlaceCancel: an empty fairing base, editor unlocked). Does nothing if the fields are missing or the state is another.
+        /// </summary>
+        private static void EndFairingPlacement(Part c)
+        {
+            if (FairingFsm == null || FairingPlaceCancel == null)
+            {
+                return;
+            }
+            foreach (ModuleProceduralFairing f in c.FindModulesImplementing<ModuleProceduralFairing>())
+            {
+                if (FairingFsm.GetValue(f) is KerbalFSM fsm && fsm.currentStateName == "st_place"
+                    && FairingPlaceCancel.GetValue(f) is KFSMEvent cancel)
+                {
+                    fsm.RunEvent(cancel);
+                    Debug.Log("[KspBridge] fairing placement ended on " + c.partInfo.name + " (state now " + fsm.currentStateName + ")");
+                }
+            }
         }
 
         /// <summary>What EditorLogic.attachPart does after the nodes are set: attached flag, ship membership, part and transform parents.</summary>
