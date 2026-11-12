@@ -92,6 +92,9 @@ namespace KspBridge.Flight
                 // Facts the incompatible path needs are read first and one by one.
                 hp.VesselId = (uint)D(plan, "vessel_id", 0);
                 hp.SasBefore = plan.TryGetValue("sas_before", out object sb) && sb is bool sasB ? sasB : (bool?)null;
+                hp.SasModeBefore = plan.TryGetValue("sas_mode_before", out object sm) ? sm as string : null;   // older logic: missing
+                hp.RcsBefore = plan.TryGetValue("rcs_before", out object rb) && rb is bool rcsB ? rcsB : (bool?)null;
+                hp.RcsTouched = plan.TryGetValue("rcs_touched", out object rt) && rt is bool rcsT ? rcsT : (bool?)null;
                 hp.Staging = plan.TryGetValue("staging", out object st) ? st as Dictionary<string, object> : null;
                 Dictionary<string, object> cmd = plan.TryGetValue("command", out object c) ? c as Dictionary<string, object> : null;
                 hp.CommandThrottle = D(cmd, "throttle", 0);
@@ -141,6 +144,9 @@ namespace KspBridge.Flight
         public Dictionary<string, object> Source;
         public uint VesselId;
         public bool? SasBefore;
+        public string SasModeBefore;   // tool mode name (ManualControl.ModeName)
+        public bool? RcsBefore;
+        public bool? RcsTouched;
         public Dictionary<string, object> Staging;
         public double CommandThrottle;
         public string PlanId;

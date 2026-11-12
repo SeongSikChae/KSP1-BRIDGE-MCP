@@ -438,4 +438,22 @@ public Task<string> RcsTranslate(double seconds, double x = 0, double y = 0, dou
   - x·y 펄스의 z 성분(−0.48, −0.38)은 기수 방향으로 날며 받는 항력이다(`dv_note ["atmosphere"]`). 항력 축을 뺀 나머지 축은 1% 이하다. "다른 축 10% 이하" 기준은 진공 조건이며, 이번 실측은 대기 안이라 항력 축만 예외로 기록한다.
   - MonoPropellant 50 → 48.24로 감소.
   - 펄스 중 `reload_mod` → `released: ["rcs pulse stopped"]`, 이후 `get_status.translate.ended` `logic_stop`.
-- 확인하지 못한 것: `replaced`는 마지막 펄스만 보여 주므로 새 펄스 응답에 가려져 보이지 않는다(새 펄스는 `ended: null`). `leave`·`recover`(비행 중 기체는 leave가 막힘), `docked`, `not_controllable`, `vessel_changed`, `vessel_lost`, `on_rails`, `error`는 코드 검토로 확인한다.
+- 확인하지 못한 것(단위 3): `replaced`는 마지막 펄스만 보여 주므로 새 펄스 응답에 가려져 보이지 않는다(새 펄스는 `ended: null`). `leave`·`recover`(비행 중 기체는 leave가 막힘), `docked`, `not_controllable`, `vessel_changed`, `vessel_lost`, `on_rails`, `error`는 코드 검토로 확인한다.
+
+### 단위 4 (2026-11-13, Logic 0.2.23, TestB-RCS, 샌드박스)
+
+- 빌드 오류 0, App 테스트 통과 38/38. `reload_mod` 0.2.22 → 0.2.23. 구현은 개발 문서의 `HandedControl` 대신 기존 `HandedPlan`에 `SasModeBefore`·`RcsBefore`·`RcsTouched`를 더해 `Attach(v, hp)`·`Adopt(v, hp)`로 넘겼다(같은 묶음, 타입 추가 없음).
+- 발사대, 계획 전 SAS on normal(orbit)·RCS off:
+  - `[rcs: true 단계, rcs 생략 단계]` → 첫 단계 중 `get_status.flight.rcs` true(MonoPropellant 50 → 48.65로 자세 제어에 쓰임), 둘째 단계 시작 뒤 false, 완료 뒤 SAS on **normal**(단위 1에서 stability로 바뀌던 동작이 고쳐짐), RCS off.
+  - `rcs: true` 단계 실행 중 `reload_mod` → `released: ["flight plan ... handed over"]`, 이어받은 뒤에도 RCS on. 그다음 `replace_flight_steps include_current:true`로 `rcs` 생략 단계 → RCS off(핸드오버된 `rcs_touched`·`rcs_before`로 계획 전 상태 복원).
+  - 다시 `include_current`로 `rcs: true` 단계 → RCS on, `abort_flight` → SAS on normal, RCS off.
+  - `rcs: "yes"` → 400 `invalid_plan` "steps[0].rcs: must be a boolean".
+  - RCS를 켠 상태에서 `rcs` 없는 계획 → 계획 중 RCS on 유지, 중단 뒤에도 on(건드리지 않음).
+- 진공 비교(고도 89~95km 관성 비행, 시작 전 SAS stability):
+  - A(`rcs` 생략, pitch 88 → 0, 시작 `attitude_error` 91.9°): `step_started` UT 328.00 → `step_completed` 330.46, **2.46초**. MonoPropellant 변화 없음(41.24).
+  - B(`rcs: true`, pitch −3 → 90, 시작 `attitude_error` 92.9°): UT 341.70 → 344.14, **2.44초**. MonoPropellant 41.24 → 41.11(RCS가 자세 제어에 쓰임). 끝난 뒤 RCS off, SAS on stability(계획 전 상태) 복원.
+  - 판정 기준 "rcs: true 쪽이 더 짧다"는 **충족하지 못했다**(차이 0.02초). 이 기체(최종 단 약 2톤, Mk1 사령선 휠)는 휠만으로도 Controller의 회전 속도 상한(`OmegaMax` 0.5 rad/s)에 닿아, RCS 토크가 더해져도 시간이 줄지 않는다. RCS가 실제로 분사되어 토크에 더해진 것은 MonoPropellant 감소로 확인했다. 휠 토크가 상한에 못 미치는 무거운 기체로는 실측하지 않았다.
+- 재실측(휠 토크가 모자란 조건): 실제로 무거운 기체를 진공까지 올리기 어려워, TestB-RCS의 Mk1 사령선 휠 토크(`ModuleReactionWheel.authorityLimiter`)를 5%로 줄인 TestB-RCS-LowTorque를 새로 저장해 같은 조건을 만들었다(질량 대비 휠 토크가 약 20배 무거운 기체와 같음). 고도 85~97km 관성 비행.
+  - A2(`rcs` 생략, 시작 `attitude_error` 88.3°): UT 251.94 → 276.08, **24.14초**. MonoPropellant 변화 없음(49.68).
+  - B2(`rcs: true`, 시작 `attitude_error` 146.4°: A2 뒤 약한 휠로 잔여 회전이 남아 시작 오차가 더 컸다): UT 282.58 → 290.80, **8.22초**. MonoPropellant 49.66 → 47.23. 끝난 뒤 RCS off, SAS on stability 복원.
+  - 판정: 시작 오차가 더 큰데도 `rcs: true` 쪽이 약 3배 빨랐고 MonoPropellant가 줄었다. 기준 충족. 첫 비교에서 차이가 없던 것은 휠만으로 회전 속도 상한에 닿는 가벼운 기체였기 때문이다.

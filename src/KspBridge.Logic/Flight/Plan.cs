@@ -15,7 +15,7 @@ namespace KspBridge.Flight
     public sealed class Plan
     {
         private static readonly string[] PlanKeys = { "auto_stage", "staging_options", "abort", "steps" };
-        private static readonly string[] StepKeys = { "name", "mode", "on_start", "until", "abort", "timeout_s" };
+        private static readonly string[] StepKeys = { "name", "mode", "on_start", "until", "abort", "timeout_s", "rcs" };
 
         public string Id;
         public PlanState State;
@@ -189,6 +189,9 @@ namespace KspBridge.Flight
             public Condition Until;
             public Condition Abort;
             public double? TimeoutS;
+
+            /// <summary>Step key rcs: applied once when the step starts (AttitudeController.ApplyStepRcs); null = omitted.</summary>
+            public bool? Rcs;
             public Func<IFlightMode> CreateMode;
 
             /// <summary>The step object as given (reload handover).</summary>
@@ -229,6 +232,10 @@ namespace KspBridge.Flight
                     {
                         throw Invalid(path, "unknown field " + key + " for mode " + step.Mode);
                     }
+                }
+                if (o.TryGetValue("rcs", out object r) && r != null)
+                {
+                    step.Rcs = r as bool? ?? throw Invalid(path + ".rcs", "must be a boolean");
                 }
                 if (o.TryGetValue("name", out object n) && n != null)
                 {

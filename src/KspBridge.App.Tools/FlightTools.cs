@@ -68,7 +68,9 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Post, "api/flight/translate", new { seconds, x, y, z }, ct);
 
         [McpServerTool(Name = "submit_flight_plan", Destructive = true)]
-        [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?}]}. " +
+        [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?, rcs?}]}. " +
+            "rcs (any step): true/false sets the RCS group when the step starts (RCS adds its torque to attitude control; e.g. true for vacuum turns); " +
+            "a step without rcs after the plan changed RCS puts it back to the state before the plan; the plan end restores it too. " +
             "Modes: attitude (pitch+heading [+roll] or reference prograde|retrograde|surface_prograde|normal|antinormal|radial_in|radial_out, throttle 0..1; until required); " +
             "gravity_turn (target_apoapsis m required and above the atmosphere, heading 90, turn_start_altitude 1000, turn_end_altitude 45000, final_pitch 0, shape 0.6, " +
             "max_throttle 1, max_aoa 5 deg, aoa_free_q 1 kPa; completes above the atmosphere once the apoapsis is reached at throttle 0); " +
@@ -91,14 +93,14 @@ namespace KspBridge.App
 
         [McpServerTool(Name = "replace_flight_steps", Destructive = true)]
         [Description("Replace the steps after the current one in the running flight plan (include_current: true replaces from the current step and starts it now). " +
-            "Same step format as submit_flight_plan; error paths index the new steps array (steps[i]...). Empty steps with include_current false drops the remaining steps. " +
+            "Same step format as submit_flight_plan (step key rcs included: with include_current the new current step applies it at once); error paths index the new steps array (steps[i]...). Empty steps with include_current false drops the remaining steps. " +
             "A staging sequence in progress finishes. 409 no_plan without a running plan. Returns {plan_id, state, steps, event_seq, epoch}.")]
         public Task<string> ReplaceFlightSteps([Description("Steps array")] JsonElement steps,
             [Description("Replace from the current step and start it now (default false)")] bool include_current = false, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/steps", new { steps, include_current }, ct);
 
         [McpServerTool(Name = "abort_flight", Destructive = true)]
-        [Description("Abort the running flight plan: throttle 0, SAS back to its state before the plan, control released (event plan_aborted reason user). no_plan when nothing runs.")]
+        [Description("Abort the running flight plan: throttle 0, SAS back to its state and mode before the plan, RCS back to its state before the plan if the plan changed it (step key rcs), control released (event plan_aborted reason user). no_plan when nothing runs.")]
         public Task<string> AbortFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Post, "api/flight/abort", new { }, ct);
 

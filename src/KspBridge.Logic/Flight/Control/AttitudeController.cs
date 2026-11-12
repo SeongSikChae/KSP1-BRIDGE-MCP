@@ -20,6 +20,9 @@ namespace KspBridge.Flight.Control
 
         private static Vessel _v;
         private static bool _sasBefore;
+        private static VesselAutopilot.AutopilotMode _sasModeBefore;
+        private static bool _rcsBefore;
+        private static bool _rcsTouched;   // the plan really changed the RCS group at least once
         private static Vector3 _integral;
 
         // Torque provider cache. Key: the vessel object (a reloaded scene keeps persistentId but has new modules) and part count.
@@ -38,19 +41,55 @@ namespace KspBridge.Flight.Control
         public static double ErrorDeg(Vessel v, AttitudeTarget target) =>
             Vector3d.Angle(v.ReferenceTransform.up, target.Direction(v));
 
-        /// <param name="sasBefore">Resume: SAS state handed over from the previous logic (SAS is already off by then).</param>
-        public static void Attach(Vessel v, bool? sasBefore = null)
+        /// <param name="hp">Resume: SAS/RCS state handed over from the previous logic (SAS is already off by then); missing
+        /// fields (older logic) are recorded from the vessel now.</param>
+        public static void Attach(Vessel v, HandedPlan hp = null)
         {
             if (_v == v)
             {
-                return;   // a plan replacement does not re-attach: the original SAS state stays the one to restore
+                return;   // a plan replacement does not re-attach: the original SAS/RCS state stays the one to restore
             }
             Detach();
-            _sasBefore = sasBefore ?? v.ActionGroups[KSPActionGroup.SAS];
+            Record(v, hp);
             _v = v;
             _integral = Vector3.zero;
             v.ActionGroups.SetGroup(KSPActionGroup.SAS, false);
             v.OnFlyByWire += Fly;
+        }
+
+        private static void Record(Vessel v, HandedPlan hp)
+        {
+            _sasBefore = hp?.SasBefore ?? v.ActionGroups[KSPActionGroup.SAS];
+            _sasModeBefore = ManualControl.ParseModeOrNull(hp?.SasModeBefore) ?? v.Autopilot.Mode;   // Disable keeps the mode
+            _rcsBefore = hp?.RcsBefore ?? v.ActionGroups[KSPActionGroup.RCS];
+            _rcsTouched = hp?.RcsTouched ?? false;
+        }
+
+        public static VesselAutopilot.AutopilotMode SasModeBefore => _sasModeBefore;
+        public static bool RcsBefore => _rcsBefore;
+        public static bool RcsTouched => _rcsTouched;
+
+        /// <summary>
+        /// Once at each step start (never every tick: override groups and the toggle cooldown could flip it back and forth).
+        /// rcs given: set it. Omitted after the plan changed RCS: back to the state before the plan. Omitted otherwise: untouched.
+        /// A change refused by an override group or a cooldown is skipped and not counted as touched.
+        /// </summary>
+        public static void ApplyStepRcs(bool? rcs)
+        {
+            if (_v == null)
+            {
+                return;
+            }
+            bool? want = rcs ?? (_rcsTouched ? _rcsBefore : (bool?)null);
+            if (!want.HasValue || _v.ActionGroups[KSPActionGroup.RCS] == want.Value || ManualControl.Overridden(_v, KSPActionGroup.RCS))
+            {
+                return;
+            }
+            _v.ActionGroups.SetGroup(KSPActionGroup.RCS, want.Value);
+            if (_v.ActionGroups[KSPActionGroup.RCS] == want.Value)
+            {
+                _rcsTouched = true;
+            }
         }
 
         public static void Detach()
@@ -92,21 +131,41 @@ namespace KspBridge.Flight.Control
 
         /// <summary>A failed resume before Attach: makes v the release target with the handed-over SAS state, so Release
         /// (RestoreSas, Detach) acts on it. No OnFlyByWire and no SAS change here. Already attached: unchanged.</summary>
-        public static void Adopt(Vessel v, bool? sasBefore)
+        public static void Adopt(Vessel v, HandedPlan hp)
         {
             if (_v != null || v == null)
             {
                 return;
             }
             _v = v;
-            _sasBefore = sasBefore ?? v.ActionGroups[KSPActionGroup.SAS];
+            Record(v, hp);
             _integral = Vector3.zero;
         }
 
-        /// <summary>Applies the SAS state recorded at Attach; call before Detach.</summary>
+        /// <summary>Applies the SAS state recorded at Attach, with its mode; call before Detach. SetGroup alone comes back as
+        /// stability on the next VesselAutopilot.Update, so Enable(mode) is called, but only on the live active vessel: Release
+        /// also runs for vessel_changed / vessel_lost / scene, and CanSetMode uses the active vessel's display velocity.</summary>
         public static void RestoreSas()
         {
-            _v?.ActionGroups.SetGroup(KSPActionGroup.SAS, _sasBefore);
+            if (_v == null)
+            {
+                return;
+            }
+            _v.ActionGroups.SetGroup(KSPActionGroup.SAS, _sasBefore);
+            if (_sasBefore && ReferenceEquals(_v, FlightGlobals.ActiveVessel) && _v.loaded && !_v.packed && _v.state != Vessel.State.DEAD)
+            {
+                VesselAutopilot ap = _v.Autopilot;
+                ap.Enable(ap.CanSetMode(_sasModeBefore) ? _sasModeBefore : VesselAutopilot.AutopilotMode.StabilityAssist);
+            }
+        }
+
+        /// <summary>Puts RCS back to its state before the plan, only when the plan changed it; call before Detach.</summary>
+        public static void RestoreRcs()
+        {
+            if (_rcsTouched && _v != null && _v.ActionGroups[KSPActionGroup.RCS] != _rcsBefore)
+            {
+                _v.ActionGroups.SetGroup(KSPActionGroup.RCS, _rcsBefore);
+            }
         }
 
         public static void ZeroThrottle()

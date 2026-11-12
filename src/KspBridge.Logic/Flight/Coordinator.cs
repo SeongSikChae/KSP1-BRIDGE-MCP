@@ -116,6 +116,7 @@ namespace KspBridge.Flight
             _mode = BeginStep(v, _plan, _step + 1);
             _step++;
             _stepStartUt = ut;
+            AttitudeController.ApplyStepRcs(_plan.Steps[_step].Rcs);
             FlightEvents.Add("step_started", _step, StepData(_plan, _step));
             Capture(v, ut);
             Command = ComputeCommand(v, ut, _plan, _mode, true);   // the new step's first command in the same tick
@@ -211,6 +212,7 @@ namespace KspBridge.Flight
                 _stepStartUt = ut;
                 plan.State = PlanState.Running;
                 AttitudeController.Attach(v);   // no re-attach on replacement
+                AttitudeController.ApplyStepRcs(plan.Steps[0].Rcs);   // step start, after the trial (BeginStep runs in the trial too)
                 FlightEvents.Add("plan_started", 0, new Dictionary<string, object> { ["plan_id"] = plan.Id, ["steps"] = plan.Steps.Count });
                 FlightEvents.Add("step_started", 0, StepData(plan, 0));
                 Command = first;                // no throttle-0 tick right after a replacement
@@ -286,6 +288,7 @@ namespace KspBridge.Flight
                     Warp.Stop();        // like NextStep
                     Warp.ClearLatch();
                     Command = first;
+                    AttitudeController.ApplyStepRcs(_plan.Steps[_step].Rcs);   // the new current step starts now
                 }
                 catch (Exception e)
                 {
@@ -362,6 +365,7 @@ namespace KspBridge.Flight
                 }
             });
             Safe(() => AttitudeController.RestoreSas());   // before Detach clears the vessel
+            Safe(() => AttitudeController.RestoreRcs());
             Safe(() => AttitudeController.Detach());
             Safe(() => AutoStager.Reset(PlanVessel()));
         }
@@ -409,6 +413,9 @@ namespace KspBridge.Flight
                     ["mode_throttle"] = Command.ModeThrottle,
                 },
                 ["sas_before"] = AttitudeController.SasBefore,
+                ["sas_mode_before"] = ManualControl.ModeName(AttitudeController.SasModeBefore),   // tool name; null when unknown
+                ["rcs_before"] = AttitudeController.RcsBefore,
+                ["rcs_touched"] = AttitudeController.RcsTouched,
                 ["controller_integral"] = AttitudeController.SaveIntegral(),
                 ["warp_cancelled"] = Warp.Cancelled,
             };
@@ -553,7 +560,7 @@ namespace KspBridge.Flight
                 double ut = Planetarium.GetUniversalTime();
                 Capture(v, ut);
                 Command = ComputeCommand(v, ut, _plan, _mode, true);   // as Tick: the first OnFlyByWire already has a command
-                AttitudeController.Attach(v, hp.SasBefore);             // SAS is off by now: keep the handed-over state
+                AttitudeController.Attach(v, hp);                       // SAS is off by now: keep the handed-over state
                 AttitudeController.LoadIntegral(hp.ControllerIntegral);
                 Safe(() => UnityEngine.Debug.Log("[KspBridge] handover in: " + CommandLog() + " integral " + IntegralLog()
                     + " attitude_error " + _t.Num["attitude_error"].ToString("F3") + " main_throttle " + FlightInputHandler.state.mainThrottle.ToString("F3")));
@@ -562,7 +569,7 @@ namespace KspBridge.Flight
             catch (NoThrustException e)
             {
                 // Taken over correctly, only no thrust: not reload_incompatible.
-                Safe(() => AttitudeController.Adopt(v, hp.SasBefore));
+                Safe(() => AttitudeController.Adopt(v, hp));
                 Safe(() => FlightEvents.Add("logic_reloaded", _step, Reloaded(false)));
                 Abort("no_thrust", null, e.Message);
             }
@@ -593,7 +600,7 @@ namespace KspBridge.Flight
             _mode = null;
             if (same)
             {
-                Safe(() => AttitudeController.Adopt(v, hp.SasBefore));   // attached already: unchanged
+                Safe(() => AttitudeController.Adopt(v, hp));   // attached already: unchanged
                 Release();                                              // throttle 0, our warp off, SAS restore, OnFlyByWire off
             }
             else
