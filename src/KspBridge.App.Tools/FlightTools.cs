@@ -82,13 +82,17 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Post, "api/flight/leave", new { }, ct);
 
         [McpServerTool(Name = "recover_vessel", Destructive = true)]
-        [Description("Recover vessels like the game, without the recovery result dialog. In the editor or space center: every vessel " +
-            "landed exactly at site; returns {recovered: [...]}, each {vessel, id (as get_flight), crew, funds, science, reputation}: the " +
-            "changes over the recovery (contract rewards included), null when the game has no such currency. Errors: save_disabled, " +
-            "scene_loading, recovery_pending, no_game, not_supported (mission games, or no space center loaded), scene_not_allowed " +
-            "(flight, tracking station and other scenes), 400 for a missing or unknown site.")]
+        [Description("Recover vessels like the game, without the recovery result dialog. In flight: the active vessel (landed or splashed " +
+            "on the home body; get_status reset.can_recover), via the space center like the game's recover button; a running plan is " +
+            "aborted only when recovery is allowed (reason recover); returns {accepted, vessel} at once, the result shows in get_status " +
+            "reset.recovery {state pending|done|failed, error, ...}: poll until state is not pending (reset.requested_scene SPACECENTER " +
+            "and reset.scene_ready come first; if reset.loading_seconds keeps growing, reload_mod). In the editor or space center: every " +
+            "vessel landed exactly at site; returns {recovered: [...]}. Each result {vessel, id (as get_flight), crew, funds, science, " +
+            "reputation}: the changes over the recovery (contract rewards included), null when the game has no such currency. Errors: " +
+            "not_recoverable, leave_unavailable, save_disabled, scene_loading, recovery_pending, no_game, not_supported (mission games, " +
+            "or no space center loaded), scene_not_allowed (tracking station and other scenes), 400 for a missing or unknown site.")]
         public Task<string> RecoverVessel(
-            [Description("Launch site, e.g. LaunchPad, Runway; required outside the flight scene")] string? site = null,
+            [Description("Launch site, e.g. LaunchPad, Runway; required outside the flight scene, ignored in flight")] string? site = null,
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/vessel/recover", new { site }, ct);
 

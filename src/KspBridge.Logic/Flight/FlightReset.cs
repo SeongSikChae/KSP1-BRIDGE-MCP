@@ -22,8 +22,11 @@ namespace KspBridge.Flight
         private static float _loadStarted;            // Time.realtimeSinceStartup of the last load request
         private static int _readyFrame;               // Time.frameCount when the requested scene became ready
 
-        // Flight-scene recovery waiting for the space center (filled in by recover_vessel; null while none is pending).
-        private static Guid? _pendingId;
+        // Flight-scene recovery waiting for the space center (VesselRetrieval order: save, load SPACECENTER, recover 8 frames later).
+        private static Guid? _pendingId;                        // vessel to recover; null while none is pending
+        private static bool _loaded;                            // the space center's GUIReady arrived
+        private static float _deadline;                         // realtime: request → GUIReady 300 s, GUIReady → recovery 30 s
+        private static Dictionary<string, object> _recovery;    // get_status reset.recovery (last flight-scene recovery)
 
         public static void Hook()
         {
@@ -42,7 +45,9 @@ namespace KspBridge.Flight
             _hooked = null;
             _sceneLoading = false;
             _requestedScene = null;
-            _pendingId = null;
+            _pendingId = null;      // not handed over (0011): the vessel stays at the space center, recover_vessel(site) handles it
+            _loaded = false;
+            _recovery = null;
             if (r == null)
             {
                 return;
@@ -57,6 +62,17 @@ namespace KspBridge.Flight
             _sceneLoading = true;
             _requestedScene = scene;
             _loadStarted = Time.realtimeSinceStartup;
+            if (_pendingId == null)
+            {
+                return;
+            }
+            if (scene != GameScenes.SPACECENTER)
+            {
+                Fail("scene_changed");
+                return;
+            }
+            _loaded = false;                                      // our request or a repeat: wait for this load
+            _deadline = Time.realtimeSinceStartup + 300f;
         }
 
         /// <summary>FlightDriver.PostInit fires it after PostInitState is made: only then is revert to launch this flight's.</summary>
@@ -78,6 +94,110 @@ namespace KspBridge.Flight
                 _sceneLoading = false;
                 _readyFrame = Time.frameCount;
             }
+            if (_pendingId == null || scene != _requestedScene)
+            {
+                return;
+            }
+            if (scene == GameScenes.SPACECENTER)
+            {
+                _loaded = true;
+                _deadline = Time.realtimeSinceStartup + 30f;      // the recovery limit starts once loaded
+            }
+            else
+            {
+                Fail("scene_changed");
+            }
+        }
+
+        private static void Fail(string error)
+        {
+            if (_recovery != null)
+            {
+                _recovery["state"] = "failed";
+                _recovery["error"] = error;
+            }
+            _pendingId = null;
+            _loaded = false;
+        }
+
+        /// <summary>Called from Tick and Status, so a timeout is found even when FixedUpdate does not run (timeScale 0).</summary>
+        private static void CheckDeadline()
+        {
+            if (_pendingId != null && Time.realtimeSinceStartup > _deadline)
+            {
+                Fail("timeout");
+            }
+        }
+
+        /// <summary>
+        /// BridgeLogic.FixedUpdate, after Coordinator.Tick. Recovers 8 render frames after the space center's GUIReady
+        /// (VesselRetrieval: 8 × yield return null after sceneLoaded; GUIReady is sceneLoaded + 1), judged by the frame difference
+        /// rather than the number of FixedUpdates, i.e. before the vessel markers spawn. Never throws.
+        /// </summary>
+        public static void Tick()
+        {
+            CheckDeadline();
+            // _sceneLoading: a repeated SPACECENTER request makes it wait for that load to finish
+            if (_pendingId == null || !_loaded || _sceneLoading || Time.frameCount - _readyFrame < 8)
+            {
+                return;
+            }
+            Guid id = _pendingId.Value;
+            bool fired = false;   // once the recovery event (rewards) may have gone out, save even after a failure
+            try
+            {
+                Vessel v = FlightGlobals.Vessels.FirstOrDefault(x => x.id == id);
+                if (v == null)
+                {
+                    Fail("vessel_not_found");
+                    return;
+                }
+                Dictionary<string, object> r = Measure(v.protoVessel, () =>
+                {
+                    fired = true;
+                    GameEvents.onVesselRecovered.Fire(v.protoVessel, true);   // quick: VesselRecovery makes no result dialog
+                    UnityEngine.Object.DestroyImmediate(v.gameObject);
+                });
+                Save();
+                Safe(RefreshKscMarkers);   // in case FixedUpdate came late, after the markers spawned
+                r["state"] = "done";
+                _recovery = r;
+                _pendingId = null;
+                _loaded = false;
+            }
+            catch (Exception e)
+            {
+                if (fired)
+                {
+                    Safe(Save);
+                }
+                Fail(e.GetType().Name + ": " + e.Message);
+            }
+        }
+
+        /// <summary>The active vessel, like the recover button: the same checks, then VesselRetrieval's order (save, load the space
+        /// center, recover there) with quick recovery so no result dialog waits for the player.</summary>
+        private static object RecoverActive()
+        {
+            Vessel v = Guard.ActiveVessel();
+            if (!v.IsRecoverable)
+            {
+                throw new ApiException(409, "not_recoverable", "the active vessel must be landed or splashed on "
+                    + FlightGlobals.GetHomeBodyName() + " (situation " + v.situation + ")");
+            }
+            RequireLeave();
+            RequireSave();
+            if (Coordinator.Running)
+            {
+                Coordinator.Abort("recover", null, null);
+            }
+            Save();   // throws before anything is pending
+            _pendingId = v.id;
+            _loaded = false;
+            _deadline = Time.realtimeSinceStartup + 300f;
+            _recovery = new Dictionary<string, object> { ["state"] = "pending", ["vessel"] = v.vesselName, ["id"] = v.persistentId };
+            HighLogic.LoadScene(GameScenes.SPACECENTER);
+            return new Dictionary<string, object> { ["accepted"] = true, ["vessel"] = v.vesselName };
         }
 
         internal static bool IsStockGame()
@@ -205,7 +325,7 @@ namespace KspBridge.Flight
             GameScenes s = HighLogic.LoadedScene;
             if (s == GameScenes.FLIGHT)
             {
-                throw ApiException.SceneNotAllowed("recover_vessel");   // the active vessel's recovery comes with unit 4
+                return RecoverActive();
             }
             if (s != GameScenes.EDITOR && s != GameScenes.SPACECENTER)
             {
@@ -371,11 +491,23 @@ namespace KspBridge.Flight
         /// <summary>get_status reset.</summary>
         public static Dictionary<string, object> Status()
         {
+            CheckDeadline();
+            // Judged only in a loaded flight scene (LoadedScene changes when the load is requested).
+            bool flight = HighLogic.LoadedScene == GameScenes.FLIGHT && !_sceneLoading && FlightGlobals.ActiveVessel != null;
+            bool stock = IsStockGame();
+            Vessel v = flight ? FlightGlobals.ActiveVessel : null;
+            bool canRecover = flight && stock && _pendingId == null && v.IsRecoverable
+                && FlightGlobals.ClearToSave(false) == ClearToSaveStatus.CLEAR   // no game log on every poll
+                && HighLogic.CurrentGame.Parameters.Flight.CanLeaveToSpaceCenter
+                && HighLogic.CurrentGame.Parameters.Flight.CanAutoSave;
             return new Dictionary<string, object>
             {
                 ["scene_ready"] = !_sceneLoading,
                 ["requested_scene"] = _requestedScene?.ToString(),
                 ["loading_seconds"] = _sceneLoading ? (object)(double)(Time.realtimeSinceStartup - _loadStarted) : null,
+                ["can_recover"] = canRecover,
+                // a copy: the response is serialized on the HTTP thread (HttpServer) while Fail edits _recovery on the main thread
+                ["recovery"] = _recovery == null ? null : new Dictionary<string, object>(_recovery),
             };
         }
     }

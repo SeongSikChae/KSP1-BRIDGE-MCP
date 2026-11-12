@@ -64,7 +64,11 @@ namespace KspBridge
 
         private LogicContext _context;
 
-        public void FixedUpdate() => Coordinator.Tick();
+        public void FixedUpdate()
+        {
+            Coordinator.Tick();
+            FlightReset.Tick();   // never throws
+        }
 
         public IList<string> Stop()
         {
