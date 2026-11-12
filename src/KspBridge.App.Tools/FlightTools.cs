@@ -37,7 +37,7 @@ namespace KspBridge.App
             "omitted: stability when turning on, unchanged when already on). reference: orbit, surface or target sets the navball speed display " +
             "first, which is the frame the mode follows (the game may switch it again by itself, e.g. by altitude or near a target; check speed_mode). " +
             "Availability is the game's own check: sas_mode_unavailable lists the modes available now (e.g. target without a target, maneuver " +
-            "without a node), sas_unavailable when the vessel has no SAS. Any error leaves SAS and the speed display unchanged. Other errors: " +
+            "without a node), sas_unavailable when the vessel has no SAS. Any error leaves SAS and the speed display unchanged (if the SAS group cannot be put back, e.g. a cooldown, the message says \"SAS group left ...\"). Other errors: " +
             "group_locked (action group cooldown or override), eva_not_supported, not_controllable. Returns {on, mode, speed_mode, available_modes}.")]
         public Task<string> SetSas([Description("true = on, false = off")] bool on,
             [Description("SAS mode (on: true only)")] string? mode = null,

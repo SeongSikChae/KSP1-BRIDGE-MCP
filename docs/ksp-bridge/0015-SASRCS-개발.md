@@ -457,3 +457,14 @@ public Task<string> RcsTranslate(double seconds, double x = 0, double y = 0, dou
   - A2(`rcs` 생략, 시작 `attitude_error` 88.3°): UT 251.94 → 276.08, **24.14초**. MonoPropellant 변화 없음(49.68).
   - B2(`rcs: true`, 시작 `attitude_error` 146.4°: A2 뒤 약한 휠로 잔여 회전이 남아 시작 오차가 더 컸다): UT 282.58 → 290.80, **8.22초**. MonoPropellant 49.66 → 47.23. 끝난 뒤 RCS off, SAS on stability 복원.
   - 판정: 시작 오차가 더 큰데도 `rcs: true` 쪽이 약 3배 빨랐고 MonoPropellant가 줄었다. 기준 충족. 첫 비교에서 차이가 없던 것은 휠만으로 회전 속도 상한에 닿는 가벼운 기체였기 때문이다.
+
+### 단위 5와 완료 전 검토 반영 (2026-11-13, Logic 0.2.24)
+
+- ReadMe: 도구 표 `SAS·RCS` 행, `get_status.translate`, 비행 제어 절의 단계 키 `rcs`, `abort_flight`·reload 동작의 SAS 모드·RCS 복원, 새 절 "SAS·RCS"(도구, 오류, navball 표시 모드, 병진 좌표계·데드존·`dv_local`·종료 사유, 알려진 제약).
+- 완료 전 독립 검토(판정 보류, 높음·중간 없음)의 낮음 3건 반영:
+  - 그룹 변경을 `ManualControl.TrySetGroup`(오버라이드 판정 → SetGroup → 다시 읽기) 하나로 모았다. `SetGroupChecked`(도구), `ApplyStepRcs`(계획), `RestoreRcs`(계획 종료), `SasSnapshot.Restore`(`set_sas` 실패)가 모두 이 경로를 쓴다. `RestoreRcs`가 오버라이드 판정 없이 `SetGroup`을 부르던 누락이 이것으로 없어졌다.
+  - `set_sas` 실패 뒤 SAS 그룹을 되돌리지 못하면(쿨다운) 오류 메시지에 "SAS group left on/off"를 붙인다.
+  - ReadMe 알려진 제약에 "이전 Logic으로 되돌리면 계획이 바꾼 RCS는 복원되지 않음", 오버라이드가 RCS를 잡을 때의 동작을 더했다.
+- 빌드 오류 0, App 테스트 38/38. `reload_mod` 0.2.23 → 0.2.24.
+- 회귀 실측(GEO-1, 발사대): `set_sas on normal reference:orbit` 200, `mode:target` 409, `reference:surface mode:prograde` 409 뒤 mode normal·speed_mode orbit 불변. `set_rcs` on/off 200. `rcs: true` 계획 → rcs true, `include_current`로 `rcs` 생략 단계 → false, 다시 `rcs: true` 뒤 `abort_flight` → SAS on normal, RCS off. 펄스 중 `set_rcs off` → `get_status.translate.ended` `rcs_off`.
+- 실측 중 사고: 회귀 실측을 시작하며 `reload_mod`와 `revert_flight launch`를 확인 없이 보냈다. 그때 KSP에서 실행 중이던 GEO-1의 5단계 계획(83a0ce2c…, 상승 중)이 인계된 뒤 `revert`로 중단되고 발사 직후로 되돌아갔다. 씬을 바꾸는 도구를 쓰기 전에는 활성 기체와 실행 중인 계획이 시험 대상인지 먼저 확인해야 한다.

@@ -147,9 +147,14 @@ namespace KspBridge.Flight.Control
                 }
                 return DescribeSas(v);
             }
-            catch
+            catch (Exception e)
             {
-                before.Restore(v);
+                if (!before.Restore(v))
+                {
+                    // the group could not be put back (cooldown): say so instead of promising "unchanged"
+                    string left = "; SAS group left " + (v.ActionGroups[KSPActionGroup.SAS] ? "on" : "off") + " (could not restore: cooldown or override)";
+                    throw e is ApiException a ? new ApiException(a.Status, a.Code, a.Message + left) : new ApiException(500, "error", e.Message + left);
+                }
                 throw;
             }
         }
@@ -168,19 +173,36 @@ namespace KspBridge.Flight.Control
         /// </summary>
         internal static void SetGroupChecked(Vessel v, KSPActionGroup g, bool on)
         {
+            if (!TrySetGroup(v, g, on, out string blocked))
+            {
+                throw new ApiException(409, "group_locked", g + " " + blocked);
+            }
+        }
+
+        /// <summary>
+        /// The single path for every action group change (tools, plan step rcs, restores): override check → SetGroup → read back.
+        /// True when the group ends up as wanted. Never touches a group held by an override (that would only flip the user's
+        /// override list). blocked says why it failed.
+        /// </summary>
+        internal static bool TrySetGroup(Vessel v, KSPActionGroup g, bool on, out string blocked)
+        {
+            blocked = null;
             if (v.ActionGroups[g] == on)
             {
-                return;
+                return true;
             }
             if (Overridden(v, g))
             {
-                throw new ApiException(409, "group_locked", g + " is held by action group override " + v.GroupOverride);
+                blocked = "is held by action group override " + v.GroupOverride;
+                return false;
             }
             v.ActionGroups.SetGroup(g, on);
             if (v.ActionGroups[g] != on)
             {
-                throw new ApiException(409, "group_locked", g + " did not change (cooldown)");
+                blocked = "did not change (cooldown)";
+                return false;
             }
+            return true;
         }
 
         internal static bool Overridden(Vessel v, KSPActionGroup g)
@@ -207,7 +229,8 @@ namespace KspBridge.Flight.Control
                 Mode = v.Autopilot.Mode,
             };
 
-            public void Restore(Vessel v)
+            /// <summary>Never throws. False when the SAS group could not be put back.</summary>
+            public bool Restore(Vessel v)
             {
                 Safe(() =>
                 {
@@ -216,13 +239,8 @@ namespace KspBridge.Flight.Control
                         FlightGlobals.SetSpeedMode(Speed);
                     }
                 });
-                Safe(() =>
-                {
-                    if (v.ActionGroups[KSPActionGroup.SAS] != Group && !Overridden(v, KSPActionGroup.SAS))
-                    {
-                        v.ActionGroups.SetGroup(KSPActionGroup.SAS, Group);
-                    }
-                });
+                bool groupOk = false;
+                Safe(() => groupOk = TrySetGroup(v, KSPActionGroup.SAS, Group, out _));
                 Safe(() =>
                 {
                     VesselAutopilot ap = v.Autopilot;
@@ -231,6 +249,7 @@ namespace KspBridge.Flight.Control
                         ap.Enable(Mode);
                     }
                 });
+                return groupOk;
             }
         }
 

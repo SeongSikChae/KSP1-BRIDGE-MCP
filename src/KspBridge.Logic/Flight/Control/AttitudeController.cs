@@ -81,14 +81,13 @@ namespace KspBridge.Flight.Control
                 return;
             }
             bool? want = rcs ?? (_rcsTouched ? _rcsBefore : (bool?)null);
-            if (!want.HasValue || _v.ActionGroups[KSPActionGroup.RCS] == want.Value || ManualControl.Overridden(_v, KSPActionGroup.RCS))
+            if (!want.HasValue || _v.ActionGroups[KSPActionGroup.RCS] == want.Value)
             {
                 return;
             }
-            _v.ActionGroups.SetGroup(KSPActionGroup.RCS, want.Value);
-            if (_v.ActionGroups[KSPActionGroup.RCS] == want.Value)
+            if (ManualControl.TrySetGroup(_v, KSPActionGroup.RCS, want.Value, out _))
             {
-                _rcsTouched = true;
+                _rcsTouched = true;   // only when it really changed
             }
         }
 
@@ -162,9 +161,9 @@ namespace KspBridge.Flight.Control
         /// <summary>Puts RCS back to its state before the plan, only when the plan changed it; call before Detach.</summary>
         public static void RestoreRcs()
         {
-            if (_rcsTouched && _v != null && _v.ActionGroups[KSPActionGroup.RCS] != _rcsBefore)
+            if (_rcsTouched && _v != null)
             {
-                _v.ActionGroups.SetGroup(KSPActionGroup.RCS, _rcsBefore);
+                ManualControl.TrySetGroup(_v, KSPActionGroup.RCS, _rcsBefore, out _);   // an override-held group is left alone
             }
         }
 

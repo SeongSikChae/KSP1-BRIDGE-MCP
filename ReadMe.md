@@ -153,7 +153,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 
 | 분류 | 도구 | 위치 |
 | --- | --- | --- |
-| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`, 비행 요약 `flight`, 입력 잠금, 리셋·회수 상태 `reset`) | Tools |
+| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`, 비행 요약 `flight`, 입력 잠금, 리셋·회수 상태 `reset`, 마지막 병진 펄스 `translate`) | Tools |
 | 리로드 | `reload_mod` | Tools |
 | 리로드 | `reload_app` | 셸 |
 | 에디터 | `open_editor`, `new_craft`, `save_craft` | Tools |
@@ -166,6 +166,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 비행 조회 | `get_flight`, `get_flight_events` | Tools |
 | 시간 가속 | `set_time_warp` | Tools |
 | 리셋·회수 | `revert_flight`, `leave_flight`, `recover_vessel` | Tools |
+| SAS·RCS | `set_sas`, `set_rcs`, `rcs_translate` | Tools |
 
 기체 설계 도구는 VAB·SPH 에디터에서 동작합니다(`list_parts`·`get_part`·`list_crafts`는 세이브만 불러와 있으면 어느 씬에서나 됩니다).
 `open_editor`·`new_craft`·`launch_craft`는 바로 `{accepted}`를 돌려주므로 `get_status`로 완료를 확인합니다. `open_editor`·`new_craft`는 `editor.ready`, `launch_craft`는 `reset.requested_scene`이 `FLIGHT`이고 `reset.scene_ready`가 true일 때 끝난 것입니다(게임이 비행 씬 로드를 한 프레임 늦게 요청하고, `scene`은 로드 요청 시점에 바뀝니다). EDITOR에 머물고 `input_locks`에 `EDITOR_LAUNCH` 잠금이 있으면 발사 전 검사 대화상자가 화면 입력을 기다리는 것입니다. `reset.loading_seconds`가 계속 늘어나면 `reload_mod`로 풉니다. `launch_craft`의 `clear_site: true`는 발사 지점에 착지한 기체를 대화상자 없이 먼저 회수합니다.
@@ -199,7 +200,8 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 - **자동 스테이징**(`auto_stage: true`): 연소 종료 → 잔여 추력 감쇠(tailoff) → 분리 → 이격(settle) → 점화를 스스로 합니다. 병렬 부스터는 코어를 계속 태우고, 직렬 단은 스로틀을 0으로 두고 분리한 뒤 이격 거리만큼 떨어지면 점화합니다. 다 쓴 엔진을 떼어낼 수 없거나 남는 쪽에 엔진이 없으면 스테이지를 쓰지 않고 `out_of_stages`를 남깁니다. 점화할 다음 스테이지에 엔진이 없으면(페어링·낙하산 등) 그 스테이지를 쓰지 않고 `ignite_blocked`, 스테이지 작동이 확인되지 않으면 `stage_failed`입니다. 이 셋 뒤에 Mode가 추력을 원하면 `no_thrust`로 중단하고, 다시 시작하려면 `on_start: ["stage"]`가 필요합니다. 분리 뒤 조종 부품이 떨어져 나갈 구성은 제출 때 400 `invalid_plan`(메시지에 `control_part_jettisoned`)으로 거부합니다.
 - **스테이징 설정**(`staging_options`): `tailoff_ratio` 0.05, `max_tailoff_s` 5, `settle_distance` 2 m, `max_settle_s` 3.
 - **추력 없음**: Mode가 스로틀 > 0을 원하는데 작동 중인 엔진이 없고 기다릴 스테이징도 없을 때입니다(엔진 없는 `coast`는 해당 없음). 제출과 `replace_flight_steps`(현재 단계 포함)는 409 `no_thrust`, 실행 중이면 `plan_aborted {reason: no_thrust}`입니다.
-- 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
+- **RCS 사용**(모든 단계 공통 키 `rcs`): `true`·`false`면 그 단계가 시작될 때 RCS 그룹을 그 값으로 맞춥니다. 켜 두면 RCS 토크가 자세 제어에 더해집니다(진공에서 휠 토크가 작은 기체에 유용). 계획이 RCS를 바꾼 뒤 `rcs`를 생략한 단계가 시작되면 계획 전 상태로 되돌리고, 계획이 끝날 때도 되돌립니다. 단계 중에는 강제하지 않으므로 그 사이 키로 바꾼 RCS는 다음 단계 시작이나 계획 종료 때 다시 맞춰집니다. 스로틀 연동(`useThrottle`)이 켜진 RCS 부품은 RCS가 켜져 있으면 추진 중 스로틀에 따라 분사합니다(스톡 동작).
+- 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태와 모드로, RCS를 계획이 바꿨으면 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
 - **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`, `revert`(`revert_flight`), `recover`(`recover_vessel`), `leave`(`leave_flight`).
 
 ### 리셋·회수
@@ -218,7 +220,23 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 - 미리 확인: `reset.can_revert_launch`, `can_revert_editor`(`revert_editor_facility`), `revert_unavailable`(이유), `can_recover`. 발사 직후처럼 기체가 움직이는 동안은 `leave_unavailable`이 날 수 있습니다.
 - 설계는 [비행리셋 설계 문서](docs/ksp-bridge/0011-비행리셋-설계.md), 단위별 구현과 실측은 [비행리셋 개발 문서](docs/ksp-bridge/0012-비행리셋-개발.md)에 있습니다.
 
-**reload 동작**: 계획 실행 중 `reload_mod`를 해도 계획이 끊기지 않습니다. 이전 Logic이 계획·이벤트·Mode 상태·스테이징 진행·직전 명령·SAS·자세 제어 적분값을 넘기고, 새 Logic이 계획을 다시 검증해 같은 단계에서 이어받습니다(`logic_reloaded {resumed: true}`, `plan.id`·`epoch` 유지, `seq` 이어짐). 계획이 건 시간 가속은 넘기기 전에 풀고(`warp_stopped`), 단계가 계속 가속을 원하면 새 Logic이 다시 겁니다(사용자가 취소한 가속은 그 단계에서 다시 걸지 않음). 이어받을 수 없으면(새 검증 규칙에서 실패, 활성 기체가 다름 등) `plan_aborted {reason: reload_incompatible}`로 중단합니다. 활성 기체가 계획의 기체면 스로틀 0과 SAS 복원을 하고, 다른 기체면 입력 스로틀만 0으로 둡니다. 이어받았는데 추력만 없으면 `no_thrust`로 중단합니다. 계획이 없으면 사용자의 스로틀·SAS·가속을 건드리지 않습니다. 비행 제어 설계는 [비행제어 설계 문서](docs/ksp-bridge/0005-비행제어-설계.md), 단위별 구현 결정은 [비행제어 개발 문서](docs/ksp-bridge/0006-비행제어-개발.md)에 있습니다.
+### SAS·RCS
+
+비행 계획 밖에서 스톡 SAS·RCS를 다룹니다. 계획이 실행 중이면 세 도구 모두 409 `plan_running`입니다(계획은 SAS를 끄고, RCS는 단계 키 `rcs`로 씁니다). 상태는 `get_flight.controls`(`sas`, `rcs`, `translate`)와 `get_status.flight`(`sas`, `rcs`, `translating`)에 있습니다.
+
+| 도구 | 하는 일 |
+| --- | --- |
+| `set_sas` | SAS 켜기·끄기와 모드(`stability`, `prograde`, `retrograde`, `normal`, `antinormal`, `radial_in`, `radial_out`, `target`, `anti_target`, `maneuver`). `reference`(`orbit`, `surface`, `target`)로 navball 속도 표시를 먼저 맞춥니다 |
+| `set_rcs` | RCS 액션 그룹 켜기·끄기. 응답에 RCS 부품 수와 MonoPropellant 잔량 |
+| `rcs_translate` | 조종 부품 기준 병진 펄스: `x` 오른쪽, `y` 위(등 쪽), `z` 기수 방향, 각각 -1~1(0이 아니면 절댓값 0.05 이상), `seconds` 0 초과 30 이하(게임 시간) |
+
+- **SAS 모드**: 사용 가능 여부는 게임의 판정(`CanSetMode`)만 따릅니다. 쓸 수 없으면 409 `sas_mode_unavailable`(메시지에 지금 고를 수 있는 모드), SAS 자체가 없으면 `sas_unavailable`입니다. 모드의 기준 프레임은 navball 속도 표시 모드(`speed_mode`)를 따르고, 게임이 고도·목표 접근에 따라 표시 모드를 스스로 바꿀 수 있으므로 `reference`는 유지가 보장되지 않습니다. 오류가 나면 SAS와 속도 표시는 바뀌지 않습니다.
+- **액션 그룹**: 그룹 쿨다운이나 추가 액션 그룹 오버라이드로 바꿀 수 없으면 409 `group_locked`입니다. EVA는 `eva_not_supported`, 조종할 수 없는 기체는 `not_controllable`입니다.
+- **병진 펄스**: RCS가 꺼져 있으면 409 `rcs_off`(먼저 `set_rcs`), 레일 가속 중이면 `on_rails`입니다. 새 펄스는 진행 중인 펄스를 대신하고, 펄스 중 `submit_flight_plan`이 오면 펄스를 멈춥니다. `controls.translate.dv_local`은 펄스 동안의 비중력 속도 변화(m/s, 같은 축)이고, 착지·대기·프레임 변경이 섞이면 `dv_note`(`landed`, `atmosphere`, `frame_changed`)로 알립니다. 종료 사유 `ended`: `done`, `replaced`, `plan`, `scene`, `vessel_changed`, `vessel_lost`, `revert`, `leave`, `recover`, `on_rails`, `rcs_off`, `not_controllable`, `docked`, `error`, `logic_stop`. 우주센터로 간 뒤에도 `get_status.translate`로 확인합니다. 펄스는 `reload_mod`에서 넘기지 않고 멈춥니다(`released`에 "rcs pulse stopped").
+- **알려진 제약**: 계획 중 KSP를 종료하거나 `reload_mod`의 새 로직과 이전 로직이 모두 시작하지 못하면, 로더는 SAS만 복원하고 RCS는 복원하지 않습니다. 이 Logic보다 이전 Logic으로 되돌리면 단계 키 `rcs`가 있는 계획은 이어받지 못하고(`reload_incompatible`), 이때 계획이 바꾼 RCS는 복원되지 않습니다. 추가 액션 그룹 오버라이드가 RCS를 잡고 있으면 계획은 RCS를 바꾸거나 복원하지 않습니다. `set_sas` 오류 뒤 SAS 그룹을 되돌리지 못한 드문 경우(쿨다운)는 오류 메시지에 "SAS group left ..."로 알립니다.
+- 설계는 [SASRCS 설계 문서](docs/ksp-bridge/0014-SASRCS-설계.md), 단위별 구현과 실측은 [SASRCS 개발 문서](docs/ksp-bridge/0015-SASRCS-개발.md)에 있습니다.
+
+**reload 동작**: 계획 실행 중 `reload_mod`를 해도 계획이 끊기지 않습니다. 이전 Logic이 계획·이벤트·Mode 상태·스테이징 진행·직전 명령·SAS(상태·모드)·RCS(계획 전 상태와 변경 여부)·자세 제어 적분값을 넘기고, 새 Logic이 계획을 다시 검증해 같은 단계에서 이어받습니다(`logic_reloaded {resumed: true}`, `plan.id`·`epoch` 유지, `seq` 이어짐). 계획이 건 시간 가속은 넘기기 전에 풀고(`warp_stopped`), 단계가 계속 가속을 원하면 새 Logic이 다시 겁니다(사용자가 취소한 가속은 그 단계에서 다시 걸지 않음). 이어받을 수 없으면(새 검증 규칙에서 실패, 활성 기체가 다름 등) `plan_aborted {reason: reload_incompatible}`로 중단합니다. 활성 기체가 계획의 기체면 스로틀 0과 SAS 복원을 하고, 다른 기체면 입력 스로틀만 0으로 둡니다. 이어받았는데 추력만 없으면 `no_thrust`로 중단합니다. 계획이 없으면 사용자의 스로틀·SAS·가속을 건드리지 않습니다. 비행 제어 설계는 [비행제어 설계 문서](docs/ksp-bridge/0005-비행제어-설계.md), 단위별 구현 결정은 [비행제어 개발 문서](docs/ksp-bridge/0006-비행제어-개발.md)에 있습니다.
 
 ## 테스트
 
