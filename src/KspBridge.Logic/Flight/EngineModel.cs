@@ -8,9 +8,9 @@ namespace KspBridge.Flight
     /// </summary>
     public static class EngineModel
     {
-        // Engine array cache. Key: vessel persistentId, currentStage, part count.
+        // Engine array cache. Key: the vessel object (a reloaded scene keeps persistentId but has new modules), currentStage, part count.
         private static ModuleEngines[] _engines = new ModuleEngines[0];
-        private static uint _vesselId;
+        private static Vessel _vessel;
         private static int _stage = int.MinValue;
         private static int _parts = -1;
 
@@ -24,11 +24,11 @@ namespace KspBridge.Flight
         /// <summary>Every engine on the vessel, recomputed only when the array key changes.</summary>
         public static ModuleEngines[] Engines(Vessel v)
         {
-            if (v.persistentId == _vesselId && v.currentStage == _stage && v.parts.Count == _parts)
+            if (ReferenceEquals(v, _vessel) && v.currentStage == _stage && v.parts.Count == _parts)
             {
                 return _engines;
             }
-            _vesselId = v.persistentId;
+            _vessel = v;
             _stage = v.currentStage;
             _parts = v.parts.Count;
             _engines = v.FindPartModulesImplementing<ModuleEngines>().ToArray();

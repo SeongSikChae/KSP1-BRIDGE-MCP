@@ -48,11 +48,6 @@ namespace KspBridge.Flight.Modes
         public static ModeCommand Idle => default(ModeCommand);
     }
 
-    /// <summary>Attitude target of a mode. Filled in by the attitude controller unit (unit 4).</summary>
-    public sealed class AttitudeTarget
-    {
-    }
-
     /// <summary>The mode wants thrust, no engine is operational and no staging is pending (ComputeCommand).</summary>
     public sealed class NoThrustException : Exception
     {

@@ -1,4 +1,5 @@
 using KspBridge.Check;
+using KspBridge.Flight.Control;
 using KspBridge.Flight.Modes;
 using System;
 using System.Collections.Generic;
@@ -52,7 +53,7 @@ namespace KspBridge.Flight
             }
         }
 
-        /// <param name="target">Current attitude target (the last command's), for attitude_error (unit 4).</param>
+        /// <param name="target">Current attitude target (the last command's), for attitude_error.</param>
         public void Capture(Vessel v, AttitudeTarget target, double ut)
         {
             Orbit o = v.orbit;
@@ -75,7 +76,7 @@ namespace KspBridge.Flight
             Num["pitch"] = pitch;
             Num["heading"] = heading;
             Num["roll"] = roll;
-            Num["attitude_error"] = double.NaN;   // unit 4: attitude target and AttitudeController.ErrorDeg
+            Num["attitude_error"] = target != null && !AttitudeController.Suspended(v) ? AttitudeController.ErrorDeg(v, target) : double.NaN;
             Num["dynamic_pressure"] = v.dynamicPressurekPa;
 
             Num["stage"] = v.currentStage;
@@ -109,10 +110,7 @@ namespace KspBridge.Flight
         /// <summary>Pitch (deg above the horizon), heading (deg from north) and roll (deg) of the control reference in the surface frame.</summary>
         private static void SurfaceAttitude(Vessel v, out double pitch, out double heading, out double roll)
         {
-            Vector3d com = v.CoMD;
-            Vector3d up = (com - v.mainBody.position).normalized;
-            Vector3d north = Vector3d.Exclude(up, v.mainBody.position + (Vector3d)v.mainBody.transform.up * v.mainBody.Radius - com).normalized;
-            Quaternion surface = Quaternion.LookRotation(north, up);
+            Quaternion surface = AttitudeTarget.SurfaceRotation(v);
             Quaternion vesselSurface = Quaternion.Inverse(Quaternion.Euler(90, 0, 0) * Quaternion.Inverse(v.ReferenceTransform.rotation) * surface);
             Vector3 e = vesselSurface.eulerAngles;
             heading = e.y;

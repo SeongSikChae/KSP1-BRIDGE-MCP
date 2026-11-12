@@ -5,7 +5,7 @@ namespace KspBridge.Flight.Modes
 {
     /// <summary>
     /// attitude: hold an attitude and a fixed throttle; never completes by itself (until is required).
-    /// Attitude arguments are optional: pitch + heading (+ roll), or reference (+ roll). The attitude target itself is unit 4.
+    /// Attitude arguments are optional: pitch + heading (+ roll), or reference (+ roll); without them only the throttle is set.
     /// </summary>
     public sealed class AttitudeMode : IFlightMode
     {
@@ -15,20 +15,19 @@ namespace KspBridge.Flight.Modes
             { "prograde", "retrograde", "surface_prograde", "normal", "antinormal", "radial_in", "radial_out" };
 
         private readonly double _throttle;
-
-        // Kept for the attitude target (unit 4); NaN / null = not given.
-        private readonly double _pitch;
-        private readonly double _heading;
-        private readonly double _roll;
-        private readonly string _reference;
+        private readonly AttitudeTarget _target;   // null = no attitude control
 
         private AttitudeMode(double pitch, double heading, double roll, string reference, double throttle)
         {
-            _pitch = pitch;
-            _heading = heading;
-            _roll = roll;
-            _reference = reference;
             _throttle = throttle;
+            if (reference != null)
+            {
+                _target = AttitudeTarget.Reference(reference, roll);
+            }
+            else if (!double.IsNaN(pitch))
+            {
+                _target = AttitudeTarget.PitchHeading(pitch, heading, roll);
+            }
         }
 
         /// <summary>Validates the step's mode arguments at submit time and returns a factory for the step's mode.</summary>
@@ -72,7 +71,7 @@ namespace KspBridge.Flight.Modes
         {
         }
 
-        public ModeCommand Update(Vessel v, Telemetry t) => new ModeCommand(null, _throttle);
+        public ModeCommand Update(Vessel v, Telemetry t) => new ModeCommand(_target, _throttle);
 
         public Dictionary<string, object> Save() => new Dictionary<string, object>();
 
