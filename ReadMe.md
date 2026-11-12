@@ -167,7 +167,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 시간 가속 | `set_time_warp` | Tools |
 
 기체 설계 도구는 VAB·SPH 에디터에서 동작합니다(`list_parts`·`get_part`·`list_crafts`는 세이브만 불러와 있으면 어느 씬에서나 됩니다).
-`open_editor`·`new_craft`·`launch_craft`는 바로 `{accepted}`를 돌려주므로 `get_status`로 완료(`editor.ready` 또는 `scene=FLIGHT`)를 확인합니다.
+`open_editor`·`new_craft`·`launch_craft`는 바로 `{accepted}`를 돌려주므로 `get_status`로 완료를 확인합니다. `open_editor`·`new_craft`는 `editor.ready`, `launch_craft`는 `reset.requested_scene`이 `FLIGHT`이고 `reset.scene_ready`가 true일 때 끝난 것입니다(게임이 비행 씬 로드를 한 프레임 늦게 요청하고, `scene`은 로드 요청 시점에 바뀝니다). EDITOR에 머물고 `input_locks`에 `EDITOR_LAUNCH` 잠금이 있으면 발사 전 검사 대화상자가 화면 입력을 기다리는 것입니다. `reset.loading_seconds`가 계속 늘어나면 `reload_mod`로 풉니다. `launch_craft`의 `clear_site: true`는 발사 지점에 착지한 기체를 대화상자 없이 먼저 회수합니다.
 부품은 `persistentId`(`get_craft`의 `id`)로 가리키고, 좌표는 루트 부품 기준(+Y = 로켓 위·비행기 기수)입니다. 편집 도구는 기체를 바꾼 호출마다 에디터 Undo 한 단계를 남기고 응답에 관련 구조 경고를 담습니다.
 설계 결정은 [기체 설계 설계 문서](docs/ksp-bridge/0002-기체설계-설계.md), 단위별 구현 결정은 [기체 설계 개발 문서](docs/ksp-bridge/0003-기체설계-개발.md)에 있습니다.
 

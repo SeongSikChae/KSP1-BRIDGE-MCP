@@ -301,11 +301,16 @@ namespace KspBridge.App.Tests
             (EditorTools tools, RecordingHandler handler) = Create();
 
             await tools.LaunchCraft(ct: CancellationToken.None);
-            await tools.LaunchCraft("Runway", CancellationToken.None);
+            await tools.LaunchCraft("Runway", ct: CancellationToken.None);
+            await tools.LaunchCraft("LaunchPad", true, CancellationToken.None);
 
             Assert.AreEqual((HttpMethod.Post, "/api/editor/launch"), (handler.Requests[0].Method, handler.Requests[0].Path));
             Assert.AreEqual(JsonValueKind.Null, Body(handler.Requests[0].Body).GetProperty("site").ValueKind);
+            Assert.IsFalse(Body(handler.Requests[0].Body).GetProperty("clear_site").GetBoolean());
             Assert.AreEqual("Runway", Body(handler.Requests[1].Body).GetProperty("site").GetString());
+            Assert.IsFalse(Body(handler.Requests[1].Body).GetProperty("clear_site").GetBoolean());
+            Assert.AreEqual("LaunchPad", Body(handler.Requests[2].Body).GetProperty("site").GetString());
+            Assert.IsTrue(Body(handler.Requests[2].Body).GetProperty("clear_site").GetBoolean());
         }
 
         [TestMethod]

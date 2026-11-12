@@ -163,14 +163,19 @@ namespace KspBridge.App
         [McpServerTool(Name = "launch_craft", Destructive = true)]
         [Description("Launch the editor craft like the editor's Launch button (writes the game's auto-save craft, not a craft under " +
             "its name: use save_craft to keep it; assigns crew; runs the game's pre-flight checks; then loads the flight scene). " +
-            "Returns {accepted, site} at once; poll get_status until scene is FLIGHT with an active vessel. If a pre-flight check " +
-            "shows a dialog, the scene stays EDITOR until the player answers it on screen (continue launches, cancel stays). " +
+            "Returns {accepted, site} at once; poll get_status until reset.requested_scene is FLIGHT and reset.scene_ready (the game " +
+            "requests the flight scene one frame after this returns; FLIGHT is ready only after the flight scene's initial save; if " +
+            "reset.loading_seconds keeps growing, reload_mod). Still EDITOR with an EDITOR_LAUNCH lock in input_locks: a pre-flight check " +
+            "dialog waits for the player on screen (continue launches, cancel stays). " +
+            "clear_site: first recover the vessels landed at the site without dialogs, listed in recovered (as recover_vessel); they stay " +
+            "recovered even if a pre-flight check dialog then stops or cancels the launch (save_disabled, scene_loading, not_supported). " +
             "launch_locked while a launch or dialog is in progress or launching is not allowed; unsaveable for a craft with structure " +
             "errors (check_craft). Launch sites depend on the editor (VAB: LaunchPad..., SPH: Runway...).")]
         public Task<string> LaunchCraft(
             [Description("Launch site, e.g. LaunchPad, Runway; omit for the site picked in the editor")] string? site = null,
+            [Description("Recover vessels landed at the site first, without dialogs; default false")] bool clear_site = false,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/editor/launch", new { site }, ct);
+            => client.SendAsync(HttpMethod.Post, "api/editor/launch", new { site, clear_site }, ct);
 
         [McpServerTool(Name = "check_craft", ReadOnly = true)]
         [Description("Check the editor craft. structure: ok (no error issues) and issues {severity error|warning, code locked_part | orphan | " +

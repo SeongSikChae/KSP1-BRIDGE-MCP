@@ -192,8 +192,10 @@ namespace KspBridge.Editor
         /// pre-flight checks and their dialogs, then the flight scene). Returns at once; the result shows in get_status (scene FLIGHT).
         /// site null = the launch site picked in the editor. The game would silently swap an unknown site for its default, so an
         /// unknown site is refused here.
+        /// clearSite: first recovers the vessels landed at the site (the game's LaunchSiteClear substring match, no dialog); they
+        /// stay recovered even if a pre-flight check dialog then stops or cancels the launch. Without it nothing changes.
         /// </summary>
-        public static object Launch(string site)
+        public static object Launch(string site, bool clearSite)
         {
             ShipConstruct ship = EditorScene.Require();
             if (ship.parts.Count == 0)
@@ -228,8 +230,20 @@ namespace KspBridge.Editor
                 throw new ApiException(409, "unsaveable", "fix the structure errors first (check_craft): "
                     + string.Join("; ", errors.Select(e => (string)e["message"])));
             }
+            // No recovery_pending check: a pending flight-scene recovery fails on the EDITOR load request, so none is pending here.
+            List<Dictionary<string, object>> recovered = null;
+            if (clearSite)
+            {
+                Flight.FlightReset.RequireSceneReady();
+                recovered = Flight.FlightReset.RecoverAtSite(site, false);
+            }
             EditorLogic.fetch.launchVessel(site);
-            return new Dictionary<string, object> { ["accepted"] = true, ["site"] = site };
+            Dictionary<string, object> r = new Dictionary<string, object> { ["accepted"] = true, ["site"] = site };
+            if (recovered != null)
+            {
+                r["recovered"] = recovered;
+            }
+            return r;
         }
 
         public static string CraftPath(EditorFacility facility, string name)
