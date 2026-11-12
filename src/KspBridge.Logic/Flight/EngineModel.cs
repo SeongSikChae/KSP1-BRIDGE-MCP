@@ -165,7 +165,19 @@ namespace KspBridge.Flight
             IsOperational(e) && e.useEngineResponseTime && !e.throttleUseAlternate && !e.throttleLocked;
 
         /// <summary>Solid boosters: throttle-locked, burn until propellant runs out (thrustCurve only if present).</summary>
-        private static bool IsSolid(ModuleEngines e) => IsOperational(e) && e.throttleLocked;
+        internal static bool IsSolid(ModuleEngines e) => IsOperational(e) && e.throttleLocked;
+
+        /// <summary>Drops every cached engine reference (AutoStager.Clear: an unloading logic must not hold part references).</summary>
+        public static void ClearCaches()
+        {
+            _engines = new ModuleEngines[0];
+            _vessel = null;
+            _stage = int.MinValue;
+            _parts = -1;
+            _igKeyValid = false;
+            _hasProp.Clear();
+            _srbCache.Clear();
+        }
 
         /// <summary>0→90% thrust time of the slowest responsive engine. ln 10 / k is a continuous approximation
         /// of the per-tick Lerp and differs from the discrete path by about 10%.</summary>

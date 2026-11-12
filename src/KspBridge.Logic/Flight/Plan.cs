@@ -20,7 +20,7 @@ namespace KspBridge.Flight
         public string Id;
         public PlanState State;
         public bool AutoStage;
-        public Dictionary<string, object> StagingOptions;   // validated in unit 8
+        public StagingOptions StagingOptions = StagingOptions.Default;
         public Condition Abort;
         public List<Step> Steps;
         public uint VesselId;
@@ -47,10 +47,8 @@ namespace KspBridge.Flight
                 AutoStage = OptionalBool(raw, "auto_stage", "plan", false),
                 Abort = raw.TryGetValue("abort", out object abort) ? Condition.Parse(abort, "abort") : null,
             };
-            if (raw.TryGetValue("staging_options", out object so))
-            {
-                plan.StagingOptions = so as Dictionary<string, object> ?? throw Invalid("staging_options", "must be an object");
-            }
+            raw.TryGetValue("staging_options", out object so);
+            plan.StagingOptions = StagingOptions.Parse(so, "staging_options");
             List<object> steps = raw.TryGetValue("steps", out object s) ? s as List<object> : null;
             if (steps == null || steps.Count == 0)
             {
@@ -58,7 +56,27 @@ namespace KspBridge.Flight
             }
             plan.Steps = ParseSteps(steps, "steps", v.mainBody);
             plan._source = raw;
+            if (plan.AutoStage)
+            {
+                CheckControlPart(v, plan.ControlPartId);
+            }
             return plan;
+        }
+
+        /// <summary>auto_stage: the control part must stay on the root vessel through every later stage; otherwise KSP would
+        /// switch the active vessel to the dropped side after a separation (ModuleDecouple.WaitAndSwitchFocus).</summary>
+        private static void CheckControlPart(Vessel v, uint controlPartId)
+        {
+            for (int n = v.currentStage - 1; n >= 0; n--)
+            {
+                foreach (Part p in AutoStager.Cut(v, n))
+                {
+                    if (p.persistentId == controlPartId)
+                    {
+                        throw Invalid("auto_stage", "control part leaves the root vessel at stage " + n + " (control_part_jettisoned)");
+                    }
+                }
+            }
         }
 
         /// <summary>Parses a steps array; error paths index this array ("steps[i]..."). body: the vessel's body at submit time.</summary>

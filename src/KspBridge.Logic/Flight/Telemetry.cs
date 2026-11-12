@@ -104,7 +104,7 @@ namespace KspBridge.Flight
                 _situationName = v.situation.ToString();   // enum ToString allocates: only when the situation changes
             }
             Str["situation"] = _situationName;
-            Str["staging"] = "none";         // unit 8: AutoStager.StateName
+            Str["staging"] = AutoStager.StateName;   // last tick's state at (b); Coordinator refreshes it after (c)
         }
 
         /// <summary>Pitch (deg above the horizon), heading (deg from north) and roll (deg) of the control reference in the surface frame.</summary>
