@@ -80,7 +80,11 @@ namespace KspBridge
 
         public IDictionary<string, object> Status()
         {
-            Dictionary<string, object> status = new Dictionary<string, object> { ["editor"] = EditorScene.Status() };
+            Dictionary<string, object> status = new Dictionary<string, object>
+            {
+                ["editor"] = EditorScene.Status(),
+                ["flight"] = Coordinator.StatusSummary(),
+            };
             try
             {
                 status["input_locks"] = InputLocks.Describe();

@@ -646,6 +646,23 @@ namespace KspBridge.Flight
             ["epoch"] = FlightEvents.Epoch,
         };
 
+        /// <summary>get_status.flight: {active_vessel {id, name} | null, plan_state idle|running|completed|aborted, step | null};
+        /// null outside the flight scene.</summary>
+        public static Dictionary<string, object> StatusSummary()
+        {
+            if (!HighLogic.LoadedSceneIsFlight || FlightGlobals.fetch == null)
+            {
+                return null;
+            }
+            Vessel v = FlightGlobals.ActiveVessel;
+            return new Dictionary<string, object>
+            {
+                ["active_vessel"] = v == null ? null : new Dictionary<string, object> { ["id"] = v.persistentId, ["name"] = v.vesselName },
+                ["plan_state"] = _plan == null ? "idle" : StateName(_plan.State),
+                ["step"] = _plan == null ? null : (object)_step,
+            };
+        }
+
         private static string StateName(PlanState s) => s == PlanState.Running ? "running" : s == PlanState.Completed ? "completed" : "aborted";
 
         /// <summary>get_flight: field names match the condition variables; NaN (not known) is null.</summary>

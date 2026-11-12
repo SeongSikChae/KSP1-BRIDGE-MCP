@@ -153,7 +153,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 
 | 분류 | 도구 | 위치 |
 | --- | --- | --- |
-| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`) | Tools |
+| 상태 | `get_status` (씬, 활성 기체, 에디터 상태 `editor.ready`, 비행 요약 `flight`, 입력 잠금) | Tools |
 | 리로드 | `reload_mod` | Tools |
 | 리로드 | `reload_app` | 셸 |
 | 에디터 | `open_editor`, `new_craft`, `save_craft` | Tools |
@@ -162,11 +162,46 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 스테이징 | `set_stage` | Tools |
 | 검증 | `check_craft`, `render_craft` | Tools |
 | 발사 | `launch_craft` | Tools |
+| 비행 계획 | `submit_flight_plan`, `replace_flight_steps`, `abort_flight` | Tools |
+| 비행 조회 | `get_flight`, `get_flight_events` | Tools |
+| 시간 가속 | `set_time_warp` | Tools |
 
 기체 설계 도구는 VAB·SPH 에디터에서 동작합니다(`list_parts`·`get_part`·`list_crafts`는 세이브만 불러와 있으면 어느 씬에서나 됩니다).
 `open_editor`·`new_craft`·`launch_craft`는 바로 `{accepted}`를 돌려주므로 `get_status`로 완료(`editor.ready` 또는 `scene=FLIGHT`)를 확인합니다.
 부품은 `persistentId`(`get_craft`의 `id`)로 가리키고, 좌표는 루트 부품 기준(+Y = 로켓 위·비행기 기수)입니다. 편집 도구는 기체를 바꾼 호출마다 에디터 Undo 한 단계를 남기고 응답에 관련 구조 경고를 담습니다.
 설계 결정은 [기체 설계 설계 문서](docs/ksp-bridge/0002-기체설계-설계.md), 단위별 구현 결정은 [기체 설계 개발 문서](docs/ksp-bridge/0003-기체설계-개발.md)에 있습니다.
+
+### 비행 제어
+
+MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_flight_plan`으로 제출하면, Mod(Coordinator)가 물리 틱마다 단계를 실행하고 자세·스로틀을 제어합니다. 진행은 `get_flight`(현재 상태, 필드 이름 = 조건 변수 이름)와 `get_flight_events`(cursor `since`/`next`, `epoch`가 바뀌면 0부터 다시 읽음)로 확인합니다.
+
+| Mode | 하는 일 | 끝나는 때 |
+| --- | --- | --- |
+| `attitude` | 피치·방위(`pitch`, `heading`, `roll`?) 또는 기준 방향(`reference`)을 유지하고 `throttle`(기본 0)을 냄. 자세 인자가 없으면 스로틀만 | `until` 필수 |
+| `gravity_turn` | 고도에 따라 기울이며 상승하고, 예측 원지점이 목표에 가까워지면 스로틀을 줄임. `target_apoapsis` 필수(대기권보다 높게) | 대기권 밖에서 예측 원지점 ≥ 목표, 스로틀 0 |
+| `coast` | 스로틀 0, 기준 방향(기본 `prograde`, `none`이면 자세 제어 없음) 유지. 시간 조건이면 대기권 밖에서 레일 가속, 목표 15~10초 전에 해제 | `until` 필수 |
+| `circularize` | 원지점 전 시작 시각까지 기다렸다가(가속 포함) 원궤도화 연소. 시작 시각이나 원지점이 이미 지났으면 바로 연소, 자세 오차 5° 넘으면 스로틀 0 | 남은 Δv ≤ 잔여 추력 Δv + `tolerance`(0.5 m/s). 10 m/s 아래에서 방향을 고정한 뒤 Δv가 다시 커지거나 이심률이 5틱 동안 줄지 않아도 완료 |
+
+발사부터 궤도까지 한 계획으로 날리는 예입니다(첫 점화는 `on_start: ["stage"]`가 필요합니다).
+
+```json
+{
+  "auto_stage": true,
+  "steps": [
+    { "name": "상승", "mode": "gravity_turn", "target_apoapsis": 80000, "on_start": ["stage"], "timeout_s": 600 },
+    { "name": "원궤도화", "mode": "circularize", "timeout_s": 900 }
+  ]
+}
+```
+
+- 조건(`until`, `abort`)은 `{var, op, value, for_s?}`, `{all: [...]}`, `{any: [...]}`, 배열 `[...]`(= `all`)입니다. `op`는 `<`, `<=`, `>`, `>=`, `==`, `!=`이고, 문자열 변수(`situation`, `staging`)는 `==`, `!=`만 됩니다. 값을 모르는(null) 변수는 거짓입니다. 예: `{"var": "apoapsis", "op": ">=", "value": 150000}`.
+- **자동 스테이징**(`auto_stage: true`): 연소 종료 → 잔여 추력 감쇠(tailoff) → 분리 → 이격(settle) → 점화를 스스로 합니다. 병렬 부스터는 코어를 계속 태우고, 직렬 단은 스로틀을 0으로 두고 분리한 뒤 이격 거리만큼 떨어지면 점화합니다. 다 쓴 엔진을 떼어낼 수 없거나 남는 쪽에 엔진이 없으면 스테이지를 쓰지 않고 `out_of_stages`를 남깁니다. 점화할 다음 스테이지에 엔진이 없으면(페어링·낙하산 등) 그 스테이지를 쓰지 않고 `ignite_blocked`, 스테이지 작동이 확인되지 않으면 `stage_failed`입니다. 이 셋 뒤에 Mode가 추력을 원하면 `no_thrust`로 중단하고, 다시 시작하려면 `on_start: ["stage"]`가 필요합니다. 분리 뒤 조종 부품이 떨어져 나갈 구성은 제출 때 400 `invalid_plan`(메시지에 `control_part_jettisoned`)으로 거부합니다.
+- **스테이징 설정**(`staging_options`): `tailoff_ratio` 0.05, `max_tailoff_s` 5, `settle_distance` 2 m, `max_settle_s` 3.
+- **추력 없음**: Mode가 스로틀 > 0을 원하는데 작동 중인 엔진이 없고 기다릴 스테이징도 없을 때입니다(엔진 없는 `coast`는 해당 없음). 제출과 `replace_flight_steps`(현재 단계 포함)는 409 `no_thrust`, 실행 중이면 `plan_aborted {reason: no_thrust}`입니다.
+- 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
+- **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`.
+
+**reload 동작**: 계획 실행 중 `reload_mod`를 해도 계획이 끊기지 않습니다. 이전 Logic이 계획·이벤트·Mode 상태·스테이징 진행·직전 명령·SAS·자세 제어 적분값을 넘기고, 새 Logic이 계획을 다시 검증해 같은 단계에서 이어받습니다(`logic_reloaded {resumed: true}`, `plan.id`·`epoch` 유지, `seq` 이어짐). 계획이 건 시간 가속은 넘기기 전에 풀고(`warp_stopped`), 단계가 계속 가속을 원하면 새 Logic이 다시 겁니다(사용자가 취소한 가속은 그 단계에서 다시 걸지 않음). 이어받을 수 없으면(새 검증 규칙에서 실패, 활성 기체가 다름 등) `plan_aborted {reason: reload_incompatible}`로 중단합니다. 활성 기체가 계획의 기체면 스로틀 0과 SAS 복원을 하고, 다른 기체면 입력 스로틀만 0으로 둡니다. 이어받았는데 추력만 없으면 `no_thrust`로 중단합니다. 계획이 없으면 사용자의 스로틀·SAS·가속을 건드리지 않습니다. 비행 제어 설계는 [비행제어 설계 문서](docs/ksp-bridge/0005-비행제어-설계.md), 단위별 구현 결정은 [비행제어 개발 문서](docs/ksp-bridge/0006-비행제어-개발.md)에 있습니다.
 
 ## 테스트
 

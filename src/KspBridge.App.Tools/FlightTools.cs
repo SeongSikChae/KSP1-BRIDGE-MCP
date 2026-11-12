@@ -8,7 +8,7 @@ namespace KspBridge.App
     public sealed class FlightTools(KspBridgeClient client)
     {
         [McpServerTool(Name = "get_status", ReadOnly = true)]
-        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor), and input_locks [{id, mask (hex), controls}]: the game's current input locks, " +
+        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor), flight ({active_vessel {id, name} or null, plan_state idle|running|completed|aborted, step (index, null without a plan)} in the flight scene, null elsewhere; details in get_flight), and input_locks [{id, mask (hex), controls}]: the game's current input locks, " +
             "controls = blocked ControlTypes bits (e.g. CAMERACONTROLS for camera drag; aliases joined A|B, unnamed bits as hex).")]
         public Task<string> GetStatus(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/status", null, ct);
