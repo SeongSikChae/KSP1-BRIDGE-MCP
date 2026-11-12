@@ -59,6 +59,19 @@ namespace KspBridge
             return Coordinator.Stop(_context);   // never throws
         }
 
-        public IDictionary<string, object> Status() => new Dictionary<string, object> { ["editor"] = EditorScene.Status() };
+        public IDictionary<string, object> Status()
+        {
+            Dictionary<string, object> status = new Dictionary<string, object> { ["editor"] = EditorScene.Status() };
+            try
+            {
+                status["input_locks"] = InputLocks.Describe();
+            }
+            catch (Exception e)   // a lock-listing failure must not hide editor (open_editor polls editor.ready)
+            {
+                status["input_locks"] = null;
+                status["input_locks_error"] = e.GetType().Name + ": " + e.Message;
+            }
+            return status;
+        }
     }
 }
