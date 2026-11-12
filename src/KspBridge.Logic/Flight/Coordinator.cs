@@ -193,6 +193,7 @@ namespace KspBridge.Flight
             }
 
             // 2. After: failures abort, and Abort releases even before the Running switch.
+            Control.ManualControl.StopPulse("plan");   // the plan takes the controls (never throws)
             try
             {
                 if (Warp.Requested)

@@ -68,9 +68,11 @@ namespace KspBridge.App.Tests
             await tools.SetSas(true, "prograde", "orbit", ct);
             await tools.SetSas(false, ct: ct);
             await tools.SetRcs(true, ct);
+            await tools.RcsTranslate(2, z: 1, ct: ct);
 
             var r = handler.Requests;
-            Assert.HasCount(13, r);
+            Assert.HasCount(14, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/translate", (string?)"""{"seconds":2,"x":0,"y":0,"z":1}"""), r[13]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/rcs", (string?)"""{"on":true}"""), r[12]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/sas", (string?)"""{"on":true,"mode":"prograde","reference":"orbit"}"""), r[10]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/sas", (string?)"""{"on":false,"mode":null,"reference":null}"""), r[11]);

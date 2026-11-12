@@ -191,6 +191,7 @@ namespace KspBridge.Flight
             {
                 Coordinator.Abort("recover", null, null);
             }
+            Control.ManualControl.StopPulse("recover");   // outside Running: a plan and a pulse never run together
             Save();   // throws before anything is pending
             _pendingId = v.id;
             _loaded = false;
@@ -311,6 +312,7 @@ namespace KspBridge.Flight
             {
                 Coordinator.Abort("leave", null, null);
             }
+            Control.ManualControl.StopPulse("leave");
             Save();
             HighLogic.LoadScene(GameScenes.SPACECENTER);
             return new Dictionary<string, object> { ["accepted"] = true };
@@ -435,6 +437,7 @@ namespace KspBridge.Flight
             {
                 Coordinator.Abort("revert", null, null);
             }
+            Control.ManualControl.StopPulse("revert");
             if (editor)
             {
                 FlightDriver.RevertToPrelaunch(facility);

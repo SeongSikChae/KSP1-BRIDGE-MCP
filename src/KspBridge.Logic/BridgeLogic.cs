@@ -67,6 +67,7 @@ namespace KspBridge
         public void FixedUpdate()
         {
             Coordinator.Tick();
+            Flight.Control.ManualControl.Tick();   // never throws
             FlightReset.Tick();   // never throws
         }
 
@@ -89,7 +90,24 @@ namespace KspBridge
             {
                 UnityEngine.Debug.LogError("[KspBridge] flight reset unhook failed: " + e);
             }
-            return Coordinator.Stop(_context);   // never throws
+            IList<string> released = Coordinator.Stop(_context);   // never throws
+            try
+            {
+                IList<string> pulse = Flight.Control.ManualControl.Stop();   // the pulse is not handed over
+                if (pulse.Count > 0)
+                {
+                    released = new List<string>(released ?? new List<string>());
+                    foreach (string s in pulse)
+                    {
+                        released.Add(s);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] rcs pulse stop failed: " + e);
+            }
+            return released;
         }
 
         public IDictionary<string, object> Status()
@@ -116,6 +134,15 @@ namespace KspBridge
             {
                 status["reset"] = null;
                 status["reset_error"] = e.GetType().Name + ": " + e.Message;
+            }
+            try
+            {
+                status["translate"] = Flight.Control.ManualControl.Summary();   // any scene: leave/recover end in the space center
+            }
+            catch (Exception e)
+            {
+                status["translate"] = null;
+                status["translate_error"] = e.GetType().Name + ": " + e.Message;
             }
             return status;
         }

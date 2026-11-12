@@ -15,6 +15,7 @@ namespace KspBridge.Flight
             GameEvents.onGameSceneLoadRequested.Add(s.OnScene);
             GameEvents.onVesselChange.Add(s.OnVesselChange);
             GameEvents.onVesselWillDestroy.Add(s.OnVesselDestroy);
+            GameEvents.onPartCouple.Add(s.OnPartCouple);
             _hooked = s;
         }
 
@@ -29,6 +30,7 @@ namespace KspBridge.Flight
             GameEvents.onGameSceneLoadRequested.Remove(s.OnScene);
             GameEvents.onVesselChange.Remove(s.OnVesselChange);
             GameEvents.onVesselWillDestroy.Remove(s.OnVesselDestroy);
+            GameEvents.onPartCouple.Remove(s.OnPartCouple);
         }
 
         // Only a running plan is aborted: Abort releases control, which must not touch the user's throttle otherwise.
@@ -38,6 +40,7 @@ namespace KspBridge.Flight
             {
                 Coordinator.Abort("scene", null, null);
             }
+            Control.ManualControl.StopPulse("scene");   // independent of the plan check (a plan and a pulse never run together)
         }
 
         /// <summary>Always aborts, even when separation switched the vessel; a plan is never carried over to another vessel.</summary>
@@ -47,6 +50,7 @@ namespace KspBridge.Flight
             {
                 Coordinator.Abort("vessel_changed", null, null);
             }
+            Control.ManualControl.StopPulse("vessel_changed");
         }
 
         /// <summary>onVesselWillDestroy: Vessel.Die fires it first for every vessel. onVesselDestroy is not used because Die keeps
@@ -56,6 +60,20 @@ namespace KspBridge.Flight
             if (Coordinator.Running && v != null && v.persistentId == Coordinator.TargetVesselId)
             {
                 Coordinator.Abort("vessel_lost", null, null);
+            }
+            if (v != null && Control.ManualControl.IsPulseVessel(v))
+            {
+                Control.ManualControl.StopPulse("vessel_lost");
+            }
+        }
+
+        /// <summary>Docking: a pulse vessel that stays the dominant vessel gets no vessel change or destroy event.</summary>
+        private void OnPartCouple(GameEvents.FromToAction<Part, Part> a)
+        {
+            if ((a.from?.vessel != null && Control.ManualControl.IsPulseVessel(a.from.vessel))
+                || (a.to?.vessel != null && Control.ManualControl.IsPulseVessel(a.to.vessel)))
+            {
+                Control.ManualControl.StopPulse("docked");
             }
         }
     }

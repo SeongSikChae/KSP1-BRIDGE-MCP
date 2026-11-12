@@ -421,3 +421,21 @@ public Task<string> RcsTranslate(double seconds, double x = 0, double y = 0, dou
 - `set_rcs on:true` → `{on true, parts 0, monopropellant {amount 10, max 10}}`. `get_status.flight.rcs` true, `get_flight.controls.rcs` 일치. TestB에는 RCS 추진기가 없어 parts 0(MonoPropellant는 다른 부품의 탱크).
 - 계획 실행 중 `set_rcs on:false` → 409 `plan_running`. `abort_flight` 뒤 `set_rcs on:false` → `{on false}`, `get_status.flight.rcs` false.
 - parts > 0 확인은 RCS 추진기가 있는 기체가 필요한 단위 3 실측에서 함께 한다.
+
+### 단위 3 (2026-11-13, Logic 0.2.22, 샌드박스)
+
+- 빌드 오류 0, App 테스트 통과 38/38. `reload_mod` 0.2.21 → 0.2.22, `reload_app`에 `rcs_translate` 포함.
+- 구현에서 정한 것: 도킹(`onPartCouple`) 훅은 새 훅 클래스를 만들지 않고 기존 `FlightScene` 훅에 넣었다(같은 인스턴스 핸들러 패턴 재사용). 부호 초기값은 디컴파일에서 유도한 X −, Y +, Z −이며 아래 실측으로 그대로 확정했다.
+- 발사대 TestB(RCS 추진기 없음):
+  - RCS 끔 → 409 `rcs_off`. `seconds: 0`·`31` → 400, x·y·z 모두 0 → 400, `x: 0.03` → 400(데드존), `x: 1.5` → 400.
+  - 펄스 중 `get_flight`: `active true`, `remaining_s` 9.96, `dv_note ["atmosphere", "landed"]`. 착지 중에는 지면 반력으로 `dv_local.z`가 g만큼 쌓인다(0.04초에 0.19 m/s). `dv_note`의 `landed`가 이를 알린다.
+  - 펄스 중 `set_rcs off` → 다음 `get_flight`에서 `ended: rcs_off`.
+  - 펄스 중 `submit_flight_plan` → `get_status.translate.ended` `plan`, `flight.translating` false.
+  - 펄스 중 `revert_flight editor` → 조립동에서 `get_status.translate.ended` `revert`(씬 밖에서도 확인).
+- 시험 기체 TestB-RCS(TestB의 FL-T400에 RV-105 4개 radial 대칭, 구형 단일추진제 탱크 2개; 사용자의 TestB는 그대로 두고 새 이름으로 저장): `controls.rcs.parts` 4, MonoPropellant 50/50.
+  - 상승 계획은 연료가 떨어져 고도 40km에서 `no_thrust`로 끝났다(apoapsis 약 53km, 궤도 아님). 고도 47~50km 관성 상승 중(동압 0.25~0.4 kPa) SAS stability를 켜고 축마다 2초 펄스를 줬다.
+  - x 펄스: `dv_local` x +1.92, y +0.02, z −0.48. y 펄스: x +0.02, y +1.89, z −0.38. z 펄스: x 0.00, y +0.02, z +3.60. 세 축 모두 같은 축이 양수이며 부호가 맞다.
+  - x·y 펄스의 z 성분(−0.48, −0.38)은 기수 방향으로 날며 받는 항력이다(`dv_note ["atmosphere"]`). 항력 축을 뺀 나머지 축은 1% 이하다. "다른 축 10% 이하" 기준은 진공 조건이며, 이번 실측은 대기 안이라 항력 축만 예외로 기록한다.
+  - MonoPropellant 50 → 48.24로 감소.
+  - 펄스 중 `reload_mod` → `released: ["rcs pulse stopped"]`, 이후 `get_status.translate.ended` `logic_stop`.
+- 확인하지 못한 것: `replaced`는 마지막 펄스만 보여 주므로 새 펄스 응답에 가려져 보이지 않는다(새 펄스는 `ended: null`). `leave`·`recover`(비행 중 기체는 leave가 막힘), `docked`, `not_controllable`, `vessel_changed`, `vessel_lost`, `on_rails`, `error`는 코드 검토로 확인한다.

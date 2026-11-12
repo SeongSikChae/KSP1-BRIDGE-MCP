@@ -8,13 +8,13 @@ namespace KspBridge.App
     public sealed class FlightTools(KspBridgeClient client)
     {
         [McpServerTool(Name = "get_status", ReadOnly = true)]
-        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor), flight ({active_vessel {id, name} or null, plan_state idle|running|completed|aborted, step (index, null without a plan), sas, rcs (on/off)} in the flight scene, null elsewhere; details in get_flight), and input_locks [{id, mask (hex), controls}]: the game's current input locks, " +
+        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor), flight ({active_vessel {id, name} or null, plan_state idle|running|completed|aborted, step (index, null without a plan), sas, rcs (on/off), translating} in the flight scene, null elsewhere; details in get_flight), and input_locks [{id, mask (hex), controls}]: the game's current input locks, " +
             "controls = blocked ControlTypes bits (e.g. CAMERACONTROLS for camera drag; aliases joined A|B, unnamed bits as hex), " +
             "and reset {scene_ready (false from a scene load request until that scene is ready; FLIGHT only after its initial save), " +
             "requested_scene, loading_seconds (while loading; if it keeps growing, reload_mod), can_recover, can_revert_launch, " +
             "can_revert_editor, revert_editor_facility, revert_unavailable [reasons], recovery (last flight-scene recover_vessel " +
             "{state pending|done|failed, vessel, id, crew, funds, science, reputation, error})}; the can_* flags are judged only in a " +
-            "loaded flight scene and are false elsewhere.")]
+            "loaded flight scene and are false elsewhere; translate {active, vessel_id, ended} (last rcs_translate pulse in any scene, null before any).")]
         public Task<string> GetStatus(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/status", null, ct);
 
@@ -26,7 +26,7 @@ namespace KspBridge.App
         [McpServerTool(Name = "get_flight", ReadOnly = true)]
         [Description("Active vessel flight state: vessel, flight, orbit, propulsion, plan ({state:idle} without a plan; plan.warp = warp in effect: rails rate or a warp-to) " +
             "and time_warp {mode rails|physics, rate_index, rate, auto_warp (a warp-to pending or running)}, " +
-            "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}, rcs {on, parts, monopropellant {amount, max} or null}} (null with controls_error if it could not be read). " +
+            "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}, rcs {on, parts, monopropellant {amount, max} or null}, translate (last rcs_translate pulse, see rcs_translate; null before any)} (null with controls_error if it could not be read). " +
             "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
         public Task<string> GetFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
@@ -51,6 +51,21 @@ namespace KspBridge.App
             "eva_not_supported, not_controllable. Returns {on, parts (parts with RCS thrusters), monopropellant {amount, max} or null}.")]
         public Task<string> SetRcs([Description("true = on, false = off")] bool on, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/rcs", new { on }, ct);
+
+        [McpServerTool(Name = "rcs_translate", Destructive = true)]
+        [Description("RCS translation pulse on the active vessel for seconds (0, 30] of game time, then zero. Axes in [-1, 1] relative to the control part: " +
+            "x right, y top (dorsal), z nose; 0 or at least 0.05 in magnitude (RCS dead zone). Not while a flight plan runs (plan_running); a plan " +
+            "submitted during a pulse stops it. rcs_off when the RCS group is off (set_rcs first), on_rails during rails warp, eva_not_supported, " +
+            "not_controllable. A new pulse replaces the running one. get_flight.controls.translate shows {active, vessel_id, x, y, z, remaining_s, " +
+            "dv_local {x, y, z} (non-gravitational velocity change in the same axes, m/s), dv_note (landed, atmosphere, frame_changed: not RCS alone), " +
+            "ended (done, replaced, plan, scene, vessel_changed, vessel_lost, revert, leave, recover, on_rails, rcs_off, not_controllable, docked, " +
+            "error, logic_stop)}; get_status.translate keeps {active, vessel_id, ended} in any scene.")]
+        public Task<string> RcsTranslate([Description("Pulse length in seconds of game time, (0, 30]")] double seconds,
+            [Description("Right (+) / left (-), [-1, 1]")] double x = 0,
+            [Description("Top (+) / bottom (-), [-1, 1]")] double y = 0,
+            [Description("Nose (+) / tail (-), [-1, 1]")] double z = 0,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/translate", new { seconds, x, y, z }, ct);
 
         [McpServerTool(Name = "submit_flight_plan", Destructive = true)]
         [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?}]}. " +
