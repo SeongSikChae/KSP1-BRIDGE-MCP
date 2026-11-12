@@ -414,3 +414,10 @@ public Task<string> RcsTranslate(double seconds, double x = 0, double y = 0, dou
 - 계획 실행 중 `set_sas` → 409 `plan_running`. `get_status.flight.sas`는 계획 중 false(Controller가 끔).
 - `abort_flight` 뒤 SAS on, mode stability(계획 전 normal). 계획의 SAS 모드 복원은 단위 4 범위로, 지금은 기존 동작 그대로다.
 - `group_locked`·`not_controllable`·EVA는 MCP만으로 상황을 만들 수 없어 코드 검토로 확인한다(완료 전 독립 검토).
+
+### 단위 2 (2026-11-13, Logic 0.2.21, 발사대 TestB, 샌드박스)
+
+- 빌드 오류 0, App 테스트 통과 38/38. `reload_mod` 0.2.20 → 0.2.21, `reload_app`에 `set_rcs` 포함.
+- `set_rcs on:true` → `{on true, parts 0, monopropellant {amount 10, max 10}}`. `get_status.flight.rcs` true, `get_flight.controls.rcs` 일치. TestB에는 RCS 추진기가 없어 parts 0(MonoPropellant는 다른 부품의 탱크).
+- 계획 실행 중 `set_rcs on:false` → 409 `plan_running`. `abort_flight` 뒤 `set_rcs on:false` → `{on false}`, `get_status.flight.rcs` false.
+- parts > 0 확인은 RCS 추진기가 있는 기체가 필요한 단위 3 실측에서 함께 한다.

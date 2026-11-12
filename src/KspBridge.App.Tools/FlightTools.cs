@@ -8,7 +8,7 @@ namespace KspBridge.App
     public sealed class FlightTools(KspBridgeClient client)
     {
         [McpServerTool(Name = "get_status", ReadOnly = true)]
-        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor), flight ({active_vessel {id, name} or null, plan_state idle|running|completed|aborted, step (index, null without a plan), sas (on/off)} in the flight scene, null elsewhere; details in get_flight), and input_locks [{id, mask (hex), controls}]: the game's current input locks, " +
+        [Description("KspBridge mod status: current game scene, whether there is an active vessel, logic version (version), loader_version, load_count (logic loads since KSP start), logic_error when the logic failed to load, and editor ({facility, ready, craft, part_count} in the VAB/SPH, null elsewhere; poll until editor.ready after open_editor), flight ({active_vessel {id, name} or null, plan_state idle|running|completed|aborted, step (index, null without a plan), sas, rcs (on/off)} in the flight scene, null elsewhere; details in get_flight), and input_locks [{id, mask (hex), controls}]: the game's current input locks, " +
             "controls = blocked ControlTypes bits (e.g. CAMERACONTROLS for camera drag; aliases joined A|B, unnamed bits as hex), " +
             "and reset {scene_ready (false from a scene load request until that scene is ready; FLIGHT only after its initial save), " +
             "requested_scene, loading_seconds (while loading; if it keeps growing, reload_mod), can_recover, can_revert_launch, " +
@@ -26,7 +26,7 @@ namespace KspBridge.App
         [McpServerTool(Name = "get_flight", ReadOnly = true)]
         [Description("Active vessel flight state: vessel, flight, orbit, propulsion, plan ({state:idle} without a plan; plan.warp = warp in effect: rails rate or a warp-to) " +
             "and time_warp {mode rails|physics, rate_index, rate, auto_warp (a warp-to pending or running)}, " +
-            "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}} (null with controls_error if it could not be read). " +
+            "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}, rcs {on, parts, monopropellant {amount, max} or null}} (null with controls_error if it could not be read). " +
             "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
         public Task<string> GetFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
@@ -44,6 +44,13 @@ namespace KspBridge.App
             [Description("orbit, surface or target: navball speed display to use (on: true only)")] string? reference = null,
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/sas", new { on, mode, reference }, ct);
+
+        [McpServerTool(Name = "set_rcs", Destructive = true)]
+        [Description("Turn the RCS action group on or off on the active vessel, like the player's R key (not while a flight plan runs: plan_running; " +
+            "a plan uses the step key rcs instead). Errors leave the group unchanged: group_locked (action group cooldown or override), " +
+            "eva_not_supported, not_controllable. Returns {on, parts (parts with RCS thrusters), monopropellant {amount, max} or null}.")]
+        public Task<string> SetRcs([Description("true = on, false = off")] bool on, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/rcs", new { on }, ct);
 
         [McpServerTool(Name = "submit_flight_plan", Destructive = true)]
         [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?}]}. " +

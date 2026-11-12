@@ -246,16 +246,51 @@ namespace KspBridge.Flight.Control
             };
         }
 
+        /// <summary>set_rcs: the RCS action group. A refused change leaves the group as it was.</summary>
+        public static object SetRcs(Vessel v, RequestBody b)
+        {
+            RequireManual(v);
+            SetGroupChecked(v, KSPActionGroup.RCS, b.GetBool("on"));
+            return DescribeRcs(v);
+        }
+
+        public static Dictionary<string, object> DescribeRcs(Vessel v)
+        {
+            int parts = 0;
+            foreach (Part p in v.parts)
+            {
+                if (p.FindModuleImplementing<ModuleRCS>() != null)
+                {
+                    parts++;
+                }
+            }
+            object mono = null;
+            PartResourceDefinition mp = PartResourceLibrary.Instance?.GetDefinition("MonoPropellant");   // a mod may remove it
+            if (mp != null)
+            {
+                v.GetConnectedResourceTotals(mp.id, out double amount, out double max);
+                mono = max > 0 ? new Dictionary<string, object> { ["amount"] = amount, ["max"] = max } : null;
+            }
+            return new Dictionary<string, object>
+            {
+                ["on"] = v.ActionGroups[KSPActionGroup.RCS],
+                ["parts"] = parts,
+                ["monopropellant"] = mono,
+            };
+        }
+
         /// <summary>get_flight controls group.</summary>
         public static Dictionary<string, object> Describe(Vessel v) => new Dictionary<string, object>
         {
             ["sas"] = DescribeSas(v),
+            ["rcs"] = DescribeRcs(v),
         };
 
         /// <summary>Fields added to get_status.flight.</summary>
         public static void AddSummary(Vessel v, Dictionary<string, object> d)
         {
             d["sas"] = v.Autopilot.Enabled && v.ActionGroups[KSPActionGroup.SAS];
+            d["rcs"] = v.ActionGroups[KSPActionGroup.RCS];
         }
 
         private static void Safe(Action a)
