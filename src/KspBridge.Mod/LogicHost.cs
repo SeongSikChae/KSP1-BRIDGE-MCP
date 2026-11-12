@@ -32,12 +32,14 @@ namespace KspBridge
     {
         public MainThreadDispatcher Dispatcher;
         public Settings Settings;
+        /// <summary>JSON the stopping logic leaves for the next Start (reload_mod); the next logic clears it once it started.</summary>
+        public string Handover;
     }
 
     /// <summary>Loads, swaps and drives the logic assembly. Main thread only.</summary>
     public static class LogicHost
     {
-        public const string LoaderVersion = "0.0.2";
+        public const string LoaderVersion = "0.0.3";
 
         private static ILogic _logic;
         private static LogicContext _context;
@@ -172,6 +174,7 @@ namespace KspBridge
                         _logic = null;
                         _lastError = Describe(e2);
                         _server.SetRoutes(BaseRoutes().Concat(NotLoadedRoutes()).ToList());
+                        DropHandover();
                         restore = " (previous logic could not be restarted: " + _lastError + ")";
                     }
                 }
@@ -179,6 +182,7 @@ namespace KspBridge
             }
 
             _logic = next;
+            DropHandover();
             _loadCount++;
             _lastError = null;
             _server.SetRoutes(BaseRoutes().Concat(routes).ToList());
@@ -190,6 +194,36 @@ namespace KspBridge
                 ["released"] = released.Cast<object>().ToList(),
                 ["load_count"] = _loadCount,
             };
+        }
+
+        /// <summary>
+        /// Nobody took the handover: if a plan was running, leave no throttle behind and restore SAS to its state before the plan.
+        /// Without a plan key (no plan, minimal handover after a serialization failure) the user's manual throttle and SAS are left alone.
+        /// </summary>
+        private static void DropHandover()
+        {
+            if (_context.Handover == null) return;
+            try
+            {
+                // Minimal parse: only {..., plan: {..., sas_before: bool}}. Parse failure or no plan does nothing.
+                if (Json.Json.Parse(_context.Handover) is Dictionary<string, object> h
+                    && h.TryGetValue("plan", out object p) && p is Dictionary<string, object> plan)
+                {
+                    try { FlightInputHandler.state.mainThrottle = 0; } catch { }
+                    string sasNote = "sas untouched";
+                    if (plan.TryGetValue("sas_before", out object s) && s is bool sas)
+                    {
+                        FlightGlobals.ActiveVessel?.ActionGroups.SetGroup(KSPActionGroup.SAS, sas);
+                        sasNote = "sas " + sas;
+                    }
+                    Debug.Log("[KspBridge] handover dropped: throttle 0, " + sasNote);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] handover drop failed: " + e);
+            }
+            _context.Handover = null;
         }
 
         private static ILogic Create()
