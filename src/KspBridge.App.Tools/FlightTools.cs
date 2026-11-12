@@ -71,6 +71,27 @@ namespace KspBridge.App
         public Task<string> RevertFlight([Description("launch or editor")] string target, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/revert", new { target }, ct);
 
+        [McpServerTool(Name = "leave_flight", Destructive = true)]
+        [Description("Go to the space center like the flight scene's Space Center button: saves, the vessel stays where it is. A running " +
+            "flight plan is aborted only when leaving is allowed (plan_aborted reason leave). Returns {accepted} at once; poll get_status until " +
+            "reset.requested_scene is SPACECENTER and reset.scene_ready (scene already reads SPACECENTER while loading; if " +
+            "reset.loading_seconds keeps growing, reload_mod). leave_unavailable when the game does not allow it now (under thrust, in the " +
+            "air, moving over the surface, on a ladder, ...: the plan keeps running) or in this game; scene_loading; not_supported in " +
+            "mission games; recovery_pending.")]
+        public Task<string> LeaveFlight(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/leave", new { }, ct);
+
+        [McpServerTool(Name = "recover_vessel", Destructive = true)]
+        [Description("Recover vessels like the game, without the recovery result dialog. In the editor or space center: every vessel " +
+            "landed exactly at site; returns {recovered: [...]}, each {vessel, id (as get_flight), crew, funds, science, reputation}: the " +
+            "changes over the recovery (contract rewards included), null when the game has no such currency. Errors: save_disabled, " +
+            "scene_loading, recovery_pending, no_game, not_supported (mission games, or no space center loaded), scene_not_allowed " +
+            "(flight, tracking station and other scenes), 400 for a missing or unknown site.")]
+        public Task<string> RecoverVessel(
+            [Description("Launch site, e.g. LaunchPad, Runway; required outside the flight scene")] string? site = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/vessel/recover", new { site }, ct);
+
         [McpServerTool(Name = "set_time_warp", Destructive = true)]
         [Description("Set time warp like the player's keys (not part of a flight plan): rate_index 0 stops warp and cancels a warp-to; " +
             "1.. sets the rails rate (or the physics rate with physics: true; switching mode passes through rate 0). The game may cap the rate " +

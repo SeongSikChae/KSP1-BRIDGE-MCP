@@ -62,10 +62,16 @@ namespace KspBridge.App.Tests
             using JsonDocument steps = JsonDocument.Parse("""[{"mode":"attitude","throttle":0}]""");
             await tools.ReplaceFlightSteps(steps.RootElement, true, ct);
             await tools.RevertFlight("launch", ct);
+            await tools.LeaveFlight(ct);
+            await tools.RecoverVessel("LaunchPad", ct);
+            await tools.RecoverVessel(ct: ct);
 
             var r = handler.Requests;
-            Assert.HasCount(7, r);
+            Assert.HasCount(10, r);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/revert", (string?)"""{"target":"launch"}"""), r[6]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/leave", (string?)"{}"), r[7]);
+            Assert.AreEqual((HttpMethod.Post, "/api/vessel/recover", (string?)"""{"site":"LaunchPad"}"""), r[8]);
+            Assert.AreEqual((HttpMethod.Post, "/api/vessel/recover", (string?)"""{"site":null}"""), r[9]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/steps", (string?)"""{"steps":[{"mode":"attitude","throttle":0}],"include_current":true}"""), r[5]);
             Assert.AreEqual((HttpMethod.Get, "/api/status", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/flight", (string?)null), r[1]);

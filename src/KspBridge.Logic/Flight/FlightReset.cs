@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace KspBridge.Flight
@@ -114,6 +115,184 @@ namespace KspBridge.Flight
             {
                 throw new ApiException(409, "recovery_pending", "a vessel recovery is in progress (get_status reset.recovery)");
             }
+        }
+
+        private static void RequireSave()
+        {
+            if (!HighLogic.CurrentGame.Parameters.Flight.CanAutoSave)
+            {
+                throw new ApiException(409, "save_disabled", "this game does not allow saving the persistent file");
+            }
+        }
+
+        /// <summary>The public 3-argument save on every path: the start-scene overload is internal, and a stock game does not use
+        /// the start scene (Game.Updated uses it only for mission games, which RequireStockGame refuses).</summary>
+        private static void Save() => GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+
+        /// <summary>Logs instead of throwing, so a failing side step (marker refresh, save after a failure) hides nothing.</summary>
+        private static void Safe(Action a)
+        {
+            try
+            {
+                a();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] flight reset: " + e);
+            }
+        }
+
+        /// <summary>
+        /// Space center vessel markers: KSCVesselMarkers spawns them Awake + 15 frames (DelayedCallback(15, SpawnVesselMarkers)) and
+        /// listens to onVesselWillDestroy only, so a recovery (RecoverVesselFromFlight, DestroyImmediate) needs a refresh. Refreshing
+        /// (Clear + Spawn) before the first spawn would duplicate it, so the refresh waits until 30 frames after the scene became
+        /// ready, at least 1 frame like the game. Known difference: with a facility screen open (markers hidden) the refresh may draw
+        /// them again (display only).
+        /// </summary>
+        private static void RefreshKscMarkers()
+        {
+            if (HighLogic.LoadedScene != GameScenes.SPACECENTER)
+            {
+                return;
+            }
+            KSP.UI.Screens.KSCVesselMarkers m = KSP.UI.Screens.KSCVesselMarkers.fetch;
+            if (m == null)
+            {
+                return;
+            }
+            int wait = Math.Max(1, 30 - (Time.frameCount - _readyFrame));
+            m.StartCoroutine(CallbackUtil.DelayedCallback(wait, m.RefreshMarkers));
+        }
+
+        /// <summary>Same checks as the flight scene's Space Center and recover buttons (AltimeterSliderButtons).</summary>
+        private static void RequireLeave()
+        {
+            ClearToSaveStatus s = FlightGlobals.ClearToSave(false);   // no game log: the reason goes into the response
+            if (s != ClearToSaveStatus.CLEAR)
+            {
+                throw new ApiException(409, "leave_unavailable", "cannot leave now: " + s);
+            }
+            if (!HighLogic.CurrentGame.Parameters.Flight.CanLeaveToSpaceCenter)
+            {
+                throw new ApiException(409, "leave_unavailable", "leaving to the space center is disabled in this game");
+            }
+        }
+
+        /// <summary>Like the Space Center button: the vessel stays where it is. CanAutoSave is not checked, as the button does not
+        /// (nothing is recovered, so a failed save cannot bring a vessel back).</summary>
+        public static object Leave()
+        {
+            RequireNoPendingRecovery();
+            RequireSceneReady();
+            Guard.ActiveVessel();
+            RequireStockGame("leave_flight");
+            RequireLeave();
+            if (Coordinator.Running)
+            {
+                Coordinator.Abort("leave", null, null);
+            }
+            Save();
+            HighLogic.LoadScene(GameScenes.SPACECENTER);
+            return new Dictionary<string, object> { ["accepted"] = true };
+        }
+
+        /// <summary>recover_vessel. The flight scene is not read for site ("" included).</summary>
+        public static object Recover(RequestBody b)
+        {
+            RequireNoPendingRecovery();
+            RequireSceneReady();
+            RequireStockGame("recover_vessel");   // no_game before the scene check
+            GameScenes s = HighLogic.LoadedScene;
+            if (s == GameScenes.FLIGHT)
+            {
+                throw ApiException.SceneNotAllowed("recover_vessel");   // the active vessel's recovery comes with unit 4
+            }
+            if (s != GameScenes.EDITOR && s != GameScenes.SPACECENTER)
+            {
+                throw ApiException.SceneNotAllowed("recover_vessel");
+            }
+            string site = b.Has("site") ? b.GetString("site") : null;
+            if (string.IsNullOrWhiteSpace(site))
+            {
+                throw ApiException.BadRequest("site is required outside the flight scene");
+            }
+            return new Dictionary<string, object> { ["recovered"] = RecoverAtSite(site.Trim(), true) };
+        }
+
+        /// <summary>Launch sites only: facility launch sites (LaunchPad, Runway) or added launch sites. IsFacilityOrLaunchSite is
+        /// not used: it accepts any facility.</summary>
+        private static void RequireLaunchSite(string site)
+        {
+            PSystemSetup ps = PSystemSetup.Instance;
+            bool ok = ps.SpaceCenterFacilityLaunchSites.Any(f => f.name == site || f.facilityName == site) || ps.IsLaunchSite(site, out _);
+            if (!ok)
+            {
+                throw ApiException.BadRequest("unknown launch site '" + site + "'");
+            }
+        }
+
+        /// <summary>The changes over the recovery (contract rewards included); null when the game has no such currency. crew is read
+        /// before the recovery, which sends the crew back to the roster. id is the persistentId get_flight and get_status use.</summary>
+        private static Dictionary<string, object> Measure(ProtoVessel pv, Action recover)
+        {
+            double? f0 = Funding.Instance?.Funds;
+            float? s0 = ResearchAndDevelopment.Instance?.Science;
+            float? r0 = Reputation.Instance?.reputation;
+            List<string> crew = pv.GetVesselCrew().Select(c => c.name).ToList();
+            string name = pv.vesselName;
+            uint id = pv.persistentId;
+            recover();
+            return new Dictionary<string, object>
+            {
+                ["vessel"] = name,
+                ["id"] = id,
+                ["crew"] = crew,
+                ["funds"] = Funding.Instance?.Funds - f0,
+                ["science"] = ResearchAndDevelopment.Instance?.Science - s0,
+                ["reputation"] = Reputation.Instance?.reputation - r0,
+            };
+        }
+
+        /// <summary>
+        /// Recovers every vessel landed at site in the current scene, like KSCVesselMarkers.RecoverVessel (quick: no result dialog),
+        /// then saves. exact: landedAt must equal site (recover_vessel); otherwise the game's substring match (FindVesselsLandedAt,
+        /// as LaunchSiteClear) for clear_site. Once a recovery event may have gone out, the save runs even after an exception.
+        /// </summary>
+        internal static List<Dictionary<string, object>> RecoverAtSite(string site, bool exact)
+        {
+            RequireLaunchSite(site);
+            // VesselRecovery.OnVesselRecovered reads SpaceCenter.Instance.cb first and the event swallows the exception: recovering
+            // without it would delete the vessel without funds or crew handling.
+            if (SpaceCenter.Instance == null)
+            {
+                throw new ApiException(409, "not_supported", "vessel recovery needs the space center, which is not loaded in scene " + HighLogic.LoadedScene);
+            }
+            RequireSave();
+            FlightState state = HighLogic.CurrentGame.flightState;
+            List<ProtoVessel> found = ShipConstruction.FindVesselsLandedAt(state, site);
+            if (exact)
+            {
+                found = found.Where(pv => pv.landedAt == site).ToList();
+            }
+            List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
+            bool attempted = false;
+            try
+            {
+                foreach (ProtoVessel pv in found)
+                {
+                    attempted = true;
+                    results.Add(Measure(pv, () => ShipConstruction.RecoverVesselFromFlight(pv, state, true)));
+                }
+            }
+            finally
+            {
+                if (attempted)
+                {
+                    Save();   // the launch loads persistent
+                    Safe(RefreshKscMarkers);
+                }
+            }
+            return results;
         }
 
         public static object Revert(string target)

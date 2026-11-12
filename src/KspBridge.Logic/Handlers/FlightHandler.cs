@@ -29,6 +29,8 @@ namespace KspBridge.Handlers
             });
             yield return new Route("POST", "/api/flight/abort", (m, b, q) => Coordinator.UserAbort());
             yield return new Route("POST", "/api/flight/revert", (m, b, q) => FlightReset.Revert(b.GetString("target")));
+            yield return new Route("POST", "/api/flight/leave", (m, b, q) => FlightReset.Leave());
+            yield return new Route("POST", "/api/vessel/recover", (m, b, q) => FlightReset.Recover(b));
             yield return new Route("POST", "/api/time_warp", (m, b, q) =>
             {
                 Guard.ActiveVessel();
