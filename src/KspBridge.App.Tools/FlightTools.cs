@@ -60,6 +60,17 @@ namespace KspBridge.App
         public Task<string> AbortFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Post, "api/flight/abort", new { }, ct);
 
+        [McpServerTool(Name = "revert_flight", Destructive = true)]
+        [Description("Revert the flight like the pause menu: target launch (back to the moment after launch) or editor (back to the VAB/SPH " +
+            "the craft came from). A running flight plan is aborted first (plan_aborted reason revert). Returns {accepted, target, facility} " +
+            "at once; poll get_status until reset.requested_scene is the target scene (FLIGHT or EDITOR) and reset.scene_ready (scene " +
+            "already reads the new scene while loading; if reset.loading_seconds keeps growing, reload_mod). revert_unavailable with the " +
+            "reasons (no_post_init_state, restart_disabled, no_prelaunch_state, leave_to_editor_disabled, unknown_facility) when the game " +
+            "does not allow it. scene_loading while a scene loads; not_supported in mission games; recovery_pending while recover_vessel " +
+            "is in progress.")]
+        public Task<string> RevertFlight([Description("launch or editor")] string target, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/revert", new { target }, ct);
+
         [McpServerTool(Name = "set_time_warp", Destructive = true)]
         [Description("Set time warp like the player's keys (not part of a flight plan): rate_index 0 stops warp and cancels a warp-to; " +
             "1.. sets the rails rate (or the physics rate with physics: true; switching mode passes through rate 0). The game may cap the rate " +

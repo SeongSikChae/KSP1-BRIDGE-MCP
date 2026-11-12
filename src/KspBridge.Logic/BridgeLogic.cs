@@ -41,12 +41,14 @@ namespace KspBridge
             try
             {
                 FlightScene.Hook();
+                FlightReset.Hook();
             }
             catch
             {
                 try
                 {
                     FlightScene.Unhook();   // undo what was hooked; context.Handover stays for the previous logic's restart
+                    FlightReset.Unhook();
                 }
                 catch (Exception e)
                 {
@@ -75,6 +77,14 @@ namespace KspBridge
             {
                 UnityEngine.Debug.LogError("[KspBridge] flight unhook failed: " + e);
             }
+            try
+            {
+                FlightReset.Unhook();   // its state is not handed over (0011 design: reload_mod)
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] flight reset unhook failed: " + e);
+            }
             return Coordinator.Stop(_context);   // never throws
         }
 
@@ -93,6 +103,15 @@ namespace KspBridge
             {
                 status["input_locks"] = null;
                 status["input_locks_error"] = e.GetType().Name + ": " + e.Message;
+            }
+            try
+            {
+                status["reset"] = FlightReset.Status();
+            }
+            catch (Exception e)   // isolated like input_locks
+            {
+                status["reset"] = null;
+                status["reset_error"] = e.GetType().Name + ": " + e.Message;
             }
             return status;
         }
