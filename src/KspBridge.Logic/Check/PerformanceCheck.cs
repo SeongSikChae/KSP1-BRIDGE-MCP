@@ -78,7 +78,7 @@ namespace KspBridge.Check
         /// marks calcsDirty (onShipModified), the recalculation starts a few frames later and swaps the stage lists when it
         /// ends, so the old lists are served until then.
         /// </summary>
-        private static bool UpToDate(VesselDeltaV dv) =>
+        internal static bool UpToDate(VesselDeltaV dv) =>
             dv != null && dv.IsReady && !dv.SimulationRunning && !(CalcsDirty != null && (bool)CalcsDirty.GetValue(dv));
 
         /// <summary>The body by name (case-insensitive), or the home body when name is null; 400 for an unknown name.</summary>

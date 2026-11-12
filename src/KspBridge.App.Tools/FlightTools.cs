@@ -15,5 +15,11 @@ namespace KspBridge.App
         [Description("Reload the KspBridge logic DLL (GameData/KspBridge/PluginData/KspBridge.Logic.dll) without restarting KSP. The result lists the versions before/after. If the new DLL fails to load or start, the previous logic is kept.")]
         public Task<string> ReloadMod(CancellationToken ct)
             => client.SendAsync(HttpMethod.Post, "api/reload", new { }, ct);
+
+        [McpServerTool(Name = "get_flight", ReadOnly = true)]
+        [Description("Active vessel flight state: vessel, flight, orbit, propulsion and plan ({state:idle} without a plan). " +
+            "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
+        public Task<string> GetFlight(CancellationToken ct)
+            => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
     }
 }

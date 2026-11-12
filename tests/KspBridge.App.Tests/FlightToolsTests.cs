@@ -53,10 +53,12 @@ namespace KspBridge.App.Tests
             CancellationToken ct = CancellationToken.None;
 
             await tools.GetStatus(ct);
+            await tools.GetFlight(ct);
 
             var r = handler.Requests;
-            Assert.HasCount(1, r);
+            Assert.HasCount(2, r);
             Assert.AreEqual((HttpMethod.Get, "/api/status", (string?)null), r[0]);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight", (string?)null), r[1]);
         }
 
         [TestMethod]
