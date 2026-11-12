@@ -56,18 +56,18 @@ namespace KspBridge.Flight
             {
                 throw Invalid("steps", "must be a non-empty array");
             }
-            plan.Steps = ParseSteps(steps, "steps");
+            plan.Steps = ParseSteps(steps, "steps", v.mainBody);
             plan._source = raw;
             return plan;
         }
 
-        /// <summary>Parses a steps array; error paths index this array ("steps[i]...").</summary>
-        public static List<Step> ParseSteps(List<object> raw, string path)
+        /// <summary>Parses a steps array; error paths index this array ("steps[i]..."). body: the vessel's body at submit time.</summary>
+        public static List<Step> ParseSteps(List<object> raw, string path, CelestialBody body)
         {
             List<Step> steps = new List<Step>(raw.Count);
             for (int i = 0; i < raw.Count; i++)
             {
-                steps.Add(Step.Parse(raw[i], path + "[" + i + "]"));
+                steps.Add(Step.Parse(raw[i], path + "[" + i + "]", body));
             }
             return steps;
         }
@@ -152,7 +152,7 @@ namespace KspBridge.Flight
             /// <summary>The step object as given (reload handover).</summary>
             public Dictionary<string, object> Source;
 
-            public static Step Parse(object raw, string path)
+            public static Step Parse(object raw, string path, CelestialBody body)
             {
                 Dictionary<string, object> o = raw as Dictionary<string, object> ?? throw Invalid(path, "step must be an object");
                 Step step = new Step { Source = o };
@@ -164,10 +164,14 @@ namespace KspBridge.Flight
                         modeArgs = AttitudeMode.Args;
                         step.CreateMode = AttitudeMode.Parse(o, path);
                         break;
+                    case "gravity_turn":
+                        modeArgs = GravityTurnMode.Args;
+                        step.CreateMode = GravityTurnMode.Parse(o, path, body);
+                        break;
                     case null:
                         throw Invalid(path + ".mode", "required");
                     default:
-                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude)");
+                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn)");
                 }
                 foreach (string key in o.Keys)
                 {

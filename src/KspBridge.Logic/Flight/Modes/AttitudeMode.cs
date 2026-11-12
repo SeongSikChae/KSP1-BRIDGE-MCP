@@ -15,7 +15,7 @@ namespace KspBridge.Flight.Modes
             { "prograde", "retrograde", "surface_prograde", "normal", "antinormal", "radial_in", "radial_out" };
 
         private readonly double _throttle;
-        private readonly AttitudeTarget _target;   // null = no attitude control
+        private readonly AttitudeTarget? _target;   // null = no attitude control
 
         private AttitudeMode(double pitch, double heading, double roll, string reference, double throttle)
         {

@@ -5,9 +5,10 @@ namespace KspBridge.Flight.Modes
 {
     /// <summary>
     /// Attitude target of a mode: where the nose (ReferenceTransform up) points, optionally with a roll angle.
-    /// Immutable; modes with a fixed target create it once (no per-tick allocation).
+    /// A readonly struct: modes that compute a new target every tick (gravity_turn, circularize) allocate nothing.
+    /// "No target" is a null AttitudeTarget? (ModeCommand.Attitude).
     /// </summary>
-    public sealed class AttitudeTarget
+    public readonly struct AttitudeTarget
     {
         private enum Kind
         {
@@ -46,6 +47,10 @@ namespace KspBridge.Flight.Modes
         /// <summary>A fixed world direction (no roll).</summary>
         public static AttitudeTarget Vector(Vector3d worldDirection) =>
             new AttitudeTarget(Kind.Vector, double.NaN, double.NaN, double.NaN, null, worldDirection.normalized);
+
+        /// <summary>The direction `to`, but at most limitDeg away from `from` (rotated from `from` toward `to`). No roll.</summary>
+        public static AttitudeTarget RotateTowards(Vector3d from, Vector3d to, double limitDeg) =>
+            Vector(Vector3.RotateTowards(from.normalized, to.normalized, (float)(limitDeg * Math.PI / 180), 0f));
 
         public bool HasRoll => !double.IsNaN(_roll);
 

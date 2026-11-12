@@ -26,7 +26,7 @@ namespace KspBridge.Flight.Modes
     public struct ModeCommand
     {
         /// <summary>Attitude target; null = no attitude control.</summary>
-        public AttitudeTarget Attitude;
+        public AttitudeTarget? Attitude;
 
         /// <summary>Final throttle 0..1 (after the no-thrust wait and the stager override).</summary>
         public double Throttle;
@@ -37,7 +37,7 @@ namespace KspBridge.Flight.Modes
         /// <summary>Warp target UT requested by the mode; null = no warp.</summary>
         public double? WarpToUt;
 
-        public ModeCommand(AttitudeTarget attitude, double throttle)
+        public ModeCommand(AttitudeTarget? attitude, double throttle)
         {
             Attitude = attitude;
             Throttle = throttle;

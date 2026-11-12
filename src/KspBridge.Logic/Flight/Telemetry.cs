@@ -54,7 +54,7 @@ namespace KspBridge.Flight
         }
 
         /// <param name="target">Current attitude target (the last command's), for attitude_error.</param>
-        public void Capture(Vessel v, AttitudeTarget target, double ut)
+        public void Capture(Vessel v, AttitudeTarget? target, double ut)
         {
             Orbit o = v.orbit;
             CelestialBody body = v.mainBody;
@@ -76,7 +76,7 @@ namespace KspBridge.Flight
             Num["pitch"] = pitch;
             Num["heading"] = heading;
             Num["roll"] = roll;
-            Num["attitude_error"] = target != null && !AttitudeController.Suspended(v) ? AttitudeController.ErrorDeg(v, target) : double.NaN;
+            Num["attitude_error"] = target.HasValue && !AttitudeController.Suspended(v) ? AttitudeController.ErrorDeg(v, target.Value) : double.NaN;
             Num["dynamic_pressure"] = v.dynamicPressurekPa;
 
             Num["stage"] = v.currentStage;

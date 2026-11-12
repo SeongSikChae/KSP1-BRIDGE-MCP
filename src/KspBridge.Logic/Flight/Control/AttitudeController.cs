@@ -94,7 +94,7 @@ namespace KspBridge.Flight.Control
                 s.mainThrottle = throttle;
                 FlightInputHandler.state.mainThrottle = throttle;   // kept when the next tick copies the input state into ctrlState
 
-                if (c.Attitude == null)
+                if (!c.Attitude.HasValue)
                 {
                     return;   // attitude without attitude arguments: throttle only
                 }
@@ -103,7 +103,7 @@ namespace KspBridge.Flight.Control
                     _integral = Vector3.zero;   // attitude_error is not known either
                     return;
                 }
-                Steer(s, c.Attitude);
+                Steer(s, c.Attitude.Value);
             }
             catch (Exception e)
             {
