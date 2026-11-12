@@ -32,7 +32,9 @@ namespace KspBridge.App
             "max_throttle 1, max_aoa 5 deg, aoa_free_q 1 kPa; completes above the atmosphere once the apoapsis is reached at throttle 0); " +
             "coast (throttle 0, reference prograde by default or none for no attitude control, warp true; until required: with warp it time-warps on rails above the atmosphere " +
             "toward the time leaves of until (time_to_apoapsis|time_to_periapsis with < or <=, met|step_time with > or >=) and stops 15..10 s before; " +
-            "a player cancel is respected for the rest of the step; no plan warp while the player's own warp is on). " +
+            "a player cancel is respected for the rest of the step; no plan warp while the player's own warp is on); " +
+            "circularize (tolerance 0.5 m/s; waits, with warp, until the burn start before apoapsis, or burns at once when that time or the apoapsis has passed; " +
+            "burns along the Δv to the circular velocity at the current position, only while attitude_error <= 5 deg; completes by itself). " +
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
