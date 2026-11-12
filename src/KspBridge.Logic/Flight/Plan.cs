@@ -26,8 +26,11 @@ namespace KspBridge.Flight
         public uint VesselId;
         public uint ControlPartId;
 
-        /// <summary>The plan JSON as submitted (reload handover).</summary>
+        /// <summary>The plan JSON (reload handover); rewritten when steps are replaced.</summary>
         public string Raw;
+
+        /// <summary>The parsed plan object behind Raw; its "steps" list is kept in step with Steps.</summary>
+        private Dictionary<string, object> _source;
 
         /// <summary>400 invalid_plan whose message starts with the error path, e.g. "steps[2].until: unknown variable foo".</summary>
         public static ApiException Invalid(string path, string reason) => new ApiException(400, "invalid_plan", path + ": " + reason);
@@ -53,12 +56,53 @@ namespace KspBridge.Flight
             {
                 throw Invalid("steps", "must be a non-empty array");
             }
-            plan.Steps = new List<Step>(steps.Count);
-            for (int i = 0; i < steps.Count; i++)
-            {
-                plan.Steps.Add(Step.Parse(steps[i], "steps[" + i + "]"));
-            }
+            plan.Steps = ParseSteps(steps, "steps");
+            plan._source = raw;
             return plan;
+        }
+
+        /// <summary>Parses a steps array; error paths index this array ("steps[i]...").</summary>
+        public static List<Step> ParseSteps(List<object> raw, string path)
+        {
+            List<Step> steps = new List<Step>(raw.Count);
+            for (int i = 0; i < raw.Count; i++)
+            {
+                steps.Add(Step.Parse(raw[i], path + "[" + i + "]"));
+            }
+            return steps;
+        }
+
+        /// <summary>A copy whose steps are this plan's first keep steps followed by newSteps (Submit-style trial before replacing).</summary>
+        public Plan WithSteps(int keep, List<Step> newSteps)
+        {
+            Plan copy = (Plan)MemberwiseClone();
+            copy.Steps = Combine(Steps, keep, newSteps);
+            return copy;
+        }
+
+        /// <summary>Replaces the steps from index keep with newSteps and rewrites Raw (reload handover).</summary>
+        public void ReplaceSteps(int keep, List<Step> newSteps)
+        {
+            // Everything is computed first and assigned last, so a failure leaves Steps, _source and Raw as they were.
+            List<Step> steps = Combine(Steps, keep, newSteps);
+            List<object> rawSteps = new List<object>(steps.Count);
+            foreach (Step s in steps)
+            {
+                rawSteps.Add(s.Source);
+            }
+            Dictionary<string, object> source = new Dictionary<string, object>(_source) { ["steps"] = rawSteps };
+            string raw = Json.Json.Serialize(source);
+            Steps = steps;
+            _source = source;
+            Raw = raw;
+        }
+
+        private static List<Step> Combine(List<Step> steps, int keep, List<Step> newSteps)
+        {
+            List<Step> l = new List<Step>(keep + newSteps.Count);
+            l.AddRange(steps.GetRange(0, keep));
+            l.AddRange(newSteps);
+            return l;
         }
 
         internal static void UnknownKeys(Dictionary<string, object> o, string[] known, string path)
@@ -105,10 +149,13 @@ namespace KspBridge.Flight
             public double? TimeoutS;
             public Func<IFlightMode> CreateMode;
 
+            /// <summary>The step object as given (reload handover).</summary>
+            public Dictionary<string, object> Source;
+
             public static Step Parse(object raw, string path)
             {
                 Dictionary<string, object> o = raw as Dictionary<string, object> ?? throw Invalid(path, "step must be an object");
-                Step step = new Step();
+                Step step = new Step { Source = o };
                 step.Mode = o.TryGetValue("mode", out object m) ? m as string : null;
                 string[] modeArgs;
                 switch (step.Mode)

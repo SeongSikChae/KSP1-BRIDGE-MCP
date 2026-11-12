@@ -59,9 +59,12 @@ namespace KspBridge.App.Tests
             await tools.SubmitFlightPlan(plan.RootElement, ct);
             await tools.AbortFlight(ct);
             await tools.GetFlightEvents(5, 10, ct);
+            using JsonDocument steps = JsonDocument.Parse("""[{"mode":"attitude","throttle":0}]""");
+            await tools.ReplaceFlightSteps(steps.RootElement, true, ct);
 
             var r = handler.Requests;
-            Assert.HasCount(5, r);
+            Assert.HasCount(6, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/steps", (string?)"""{"steps":[{"mode":"attitude","throttle":0}],"include_current":true}"""), r[5]);
             Assert.AreEqual((HttpMethod.Get, "/api/status", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/flight", (string?)null), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/plan", (string?)"""{"plan":{"steps":[{"mode":"attitude","throttle":1}]}}"""), r[2]);

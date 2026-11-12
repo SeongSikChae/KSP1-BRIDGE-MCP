@@ -228,6 +228,84 @@ namespace KspBridge.Flight
             return PlanResult();
         }
 
+        /// <summary>
+        /// replace_flight_steps: replaces the steps after the current one, or from the current one (includeCurrent: the new first
+        /// step starts now, after a Submit-style trial of its first command). The Controller is not re-attached.
+        /// </summary>
+        public static object ReplaceSteps(Vessel v, List<Plan.Step> steps, bool includeCurrent)
+        {
+            if (!Running)
+            {
+                throw new ApiException(409, "no_plan", "no running flight plan");
+            }
+            if (v.persistentId != _plan.VesselId)
+            {
+                throw new ApiException(409, "vessel_mismatch", "the plan belongs to another vessel");
+            }
+            if (steps.Count == 0 && includeCurrent)
+            {
+                throw Plan.Invalid("steps", "must not be empty when include_current is true");
+            }
+            int keep = includeCurrent ? _step : _step + 1;   // empty steps + include_current:false = drop the remaining steps
+            List<FlightEvent> trial = null;
+            if (includeCurrent)
+            {
+                // Before changing anything: the new step's first command. On failure the plan and the stager stay as they were.
+                double ut = Planetarium.GetUniversalTime();
+                Plan trialPlan = _plan.WithSteps(keep, steps);
+                Dictionary<string, object> stagerBefore = AutoStager.Save();
+                IFlightMode mode;
+                ModeCommand first;
+                FlightEvents.BeginTrial();
+                try
+                {
+                    mode = BeginStep(v, trialPlan, _step);
+                    Capture(v, ut);
+                    _t.Num["step_time"] = 0;
+                    first = ComputeCommand(v, ut, trialPlan, mode, false);
+                    trial = FlightEvents.EndTrial();
+                }
+                catch (NoThrustException)
+                {
+                    FlightEvents.EndTrial();
+                    AutoStager.Load(stagerBefore);
+                    throw new ApiException(409, "no_thrust", "no operational engine and no staging pending (use on_start: [\"stage\"] to ignite)");
+                }
+                catch
+                {
+                    FlightEvents.EndTrial();
+                    AutoStager.Load(stagerBefore);
+                    throw;
+                }
+                try
+                {
+                    _plan.ReplaceSteps(keep, steps);
+                    _mode = mode;
+                    _stepStartUt = ut;
+                    Warp.Stop();        // like NextStep
+                    Warp.ClearLatch();
+                    Command = first;
+                }
+                catch (Exception e)
+                {
+                    FlightEvents.Commit(ref trial);
+                    Abort("error", null, e.Message);
+                    throw new ApiException(409, "plan_aborted", "steps replacement failed: " + e.Message);   // no steps_replaced
+                }
+            }
+            else
+            {
+                _plan.ReplaceSteps(keep, steps);
+            }
+            FlightEvents.Add("steps_replaced", _step, new Dictionary<string, object> { ["plan_id"] = _plan.Id, ["steps"] = _plan.Steps.Count });
+            if (includeCurrent && Running)
+            {
+                FlightEvents.Add("step_started", _step, StepData(_plan, _step));
+            }
+            FlightEvents.Commit(ref trial);
+            return PlanResult();
+        }
+
         public static object UserAbort()
         {
             if (!Running)

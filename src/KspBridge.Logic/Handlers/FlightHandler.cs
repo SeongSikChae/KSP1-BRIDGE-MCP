@@ -20,6 +20,13 @@ namespace KspBridge.Handlers
                 Vessel v = Guard.ActiveVessel();
                 return Coordinator.Submit(v, Plan.Parse(raw, Json.Json.Serialize(raw), v));
             });
+            yield return new Route("POST", "/api/flight/steps", (m, b, q) =>
+            {
+                Vessel v = Guard.ActiveVessel();
+                List<object> raw = b.GetRaw("steps") as List<object> ?? throw Plan.Invalid("steps", "must be an array");
+                bool includeCurrent = b.Has("include_current") && b.GetBool("include_current");
+                return Coordinator.ReplaceSteps(v, Plan.ParseSteps(raw, "steps"), includeCurrent);
+            });
             yield return new Route("POST", "/api/flight/abort", (m, b, q) => Coordinator.UserAbort());
             yield return new Route("GET", "/api/flight/events", (m, b, q) =>
                 Events.Since(ParseLong(q["since"], 0, "since"), (int)Math.Max(1, Math.Min(Events.Capacity, ParseLong(q["limit"], 100, "limit")))));

@@ -34,6 +34,14 @@ namespace KspBridge.App
         public Task<string> SubmitFlightPlan([Description("Flight plan JSON object")] JsonElement plan, CancellationToken ct)
             => client.SendAsync(HttpMethod.Post, "api/flight/plan", new { plan }, ct);
 
+        [McpServerTool(Name = "replace_flight_steps", Destructive = true)]
+        [Description("Replace the steps after the current one in the running flight plan (include_current: true replaces from the current step and starts it now). " +
+            "Same step format as submit_flight_plan; error paths index the new steps array (steps[i]...). Empty steps with include_current false drops the remaining steps. " +
+            "A staging sequence in progress finishes. 409 no_plan without a running plan. Returns {plan_id, state, steps, event_seq, epoch}.")]
+        public Task<string> ReplaceFlightSteps([Description("Steps array")] JsonElement steps,
+            [Description("Replace from the current step and start it now (default false)")] bool include_current = false, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/steps", new { steps, include_current }, ct);
+
         [McpServerTool(Name = "abort_flight", Destructive = true)]
         [Description("Abort the running flight plan: throttle 0, SAS back to its state before the plan, control released (event plan_aborted reason user). no_plan when nothing runs.")]
         public Task<string> AbortFlight(CancellationToken ct)
