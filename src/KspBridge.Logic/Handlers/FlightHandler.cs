@@ -28,6 +28,16 @@ namespace KspBridge.Handlers
                 return Coordinator.ReplaceSteps(v, Plan.ParseSteps(raw, "steps", v.mainBody), includeCurrent);
             });
             yield return new Route("POST", "/api/flight/abort", (m, b, q) => Coordinator.UserAbort());
+            yield return new Route("POST", "/api/time_warp", (m, b, q) =>
+            {
+                Guard.ActiveVessel();
+                double r = b.GetDouble("rate_index");
+                if (r != Math.Floor(r) || r < 0 || r > 100)
+                {
+                    throw ApiException.BadRequest("rate_index must be an integer in [0, 100]");   // 2.5 is refused, not truncated
+                }
+                return TimeWarpControl.Set((int)r, b.Has("physics") && b.GetBool("physics"));
+            });
             yield return new Route("GET", "/api/flight/events", (m, b, q) =>
                 Events.Since(ParseLong(q["since"], 0, "since"), (int)Math.Max(1, Math.Min(Events.Capacity, ParseLong(q["limit"], 100, "limit")))));
         }

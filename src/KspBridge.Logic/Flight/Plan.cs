@@ -186,10 +186,14 @@ namespace KspBridge.Flight
                         modeArgs = GravityTurnMode.Args;
                         step.CreateMode = GravityTurnMode.Parse(o, path, body);
                         break;
+                    case "coast":
+                        modeArgs = CoastMode.Args;
+                        step.CreateMode = CoastMode.Parse(o, path, step);
+                        break;
                     case null:
                         throw Invalid(path + ".mode", "required");
                     default:
-                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn)");
+                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn, coast)");
                 }
                 foreach (string key in o.Keys)
                 {

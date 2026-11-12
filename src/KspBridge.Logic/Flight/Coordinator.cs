@@ -345,13 +345,21 @@ namespace KspBridge.Flight
             Safe(() => FlightEvents.Add("plan_completed", _step, null));
         }
 
+        private static bool _logicStopping;   // Stop(LogicContext) in progress
+
         /// <summary>Common release for Abort, Complete and a failed Submit. Never throws, no state check.
         /// Order: throttle 0 → warp off → SAS restore → OnFlyByWire off.</summary>
         private static void Release()
         {
             Command = ModeCommand.Idle;
             Safe(() => AttitudeController.ZeroThrottle());
-            Safe(() => Warp.Stop());
+            Safe(() =>
+            {
+                if (!_logicStopping || Warp.Requested)   // reload: only a warp we requested; a user's warp stays
+                {
+                    Warp.Stop();
+                }
+            });
             Safe(() => AttitudeController.RestoreSas());   // before Detach clears the vessel
             Safe(() => AttitudeController.Detach());
             Safe(() => AutoStager.Reset(PlanVessel()));
@@ -374,7 +382,15 @@ namespace KspBridge.Flight
             }
             if (Running || AttitudeController.Target != null)
             {
-                Abort("error", null, "logic stopped");   // without a plan the user's manual throttle and SAS are left alone
+                _logicStopping = true;
+                try
+                {
+                    Abort("error", null, "logic stopped");   // without a plan the user's manual throttle and SAS are left alone
+                }
+                finally
+                {
+                    _logicStopping = false;
+                }
             }
             Safe(() => AutoStager.Clear(null));
             _plan = null;
@@ -423,7 +439,7 @@ namespace KspBridge.Flight
                     ["mode"] = s.Mode,
                     ["step_time"] = Running ? N(Planetarium.GetUniversalTime() - _stepStartUt) : null,
                     ["attitude_error"] = N(_view.Num["attitude_error"]),
-                    ["warp"] = false,   // unit 9: Warp.On
+                    ["warp"] = Warp.Active,
                     ["event_seq"] = FlightEvents.LastSeq,
                     ["epoch"] = FlightEvents.Epoch,
                 };
@@ -444,6 +460,7 @@ namespace KspBridge.Flight
                 ["propulsion"] = With(Group("stage", "stage_dv", "total_dv", "twr", "throttle", "thrust", "ignitable_engines"),
                     "staging", _view.Str["staging"]),
                 ["plan"] = plan,
+                ["time_warp"] = TimeWarpControl.Describe(),
             };
         }
 

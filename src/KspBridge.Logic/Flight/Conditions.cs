@@ -12,6 +12,23 @@ namespace KspBridge.Flight
         /// <summary>The condition as it was given, for plan_aborted.condition.</summary>
         public abstract object Describe();
 
+        /// <summary>UT at which waiting makes the condition true (coast warp target), or null: leaves that never become true
+        /// by waiting, or are already true or past, drop out; all = latest of the rest, any = earliest, nothing left = null.</summary>
+        public abstract double? WarpTargetUt(Telemetry t, double ut);
+
+        private static double? Combine(List<Condition> items, Telemetry t, double ut, bool all)
+        {
+            double? r = null;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i].WarpTargetUt(t, ut) is double w)
+                {
+                    r = r == null ? w : all ? Math.Max(r.Value, w) : Math.Min(r.Value, w);
+                }
+            }
+            return r;
+        }
+
         public static Condition Parse(object raw, string path)
         {
             if (raw is List<object> list)
@@ -71,6 +88,8 @@ namespace KspBridge.Flight
                 return result;
             }
 
+            public override double? WarpTargetUt(Telemetry t, double ut) => Combine(_items, t, ut, true);
+
             public override object Describe()
             {
                 List<object> l = new List<object>(_items.Count);
@@ -97,6 +116,8 @@ namespace KspBridge.Flight
                 }
                 return result;
             }
+
+            public override double? WarpTargetUt(Telemetry t, double ut) => Combine(_items, t, ut, false);
 
             public override object Describe()
             {
@@ -200,6 +221,41 @@ namespace KspBridge.Flight
                 _trueSince = ut;
             }
             return ut - _trueSince >= _forS;
+        }
+
+        /// <summary>Only variables that reach the value by waiting: decreasing ones (time_to_apoapsis, time_to_periapsis)
+        /// with &lt; and &lt;=, increasing ones (met, step_time) with &gt; and &gt;=.</summary>
+        public override double? WarpTargetUt(Telemetry t, double ut)
+        {
+            if (_isString)
+            {
+                return null;
+            }
+            bool down = _op == "<" || _op == "<=";
+            bool up = _op == ">" || _op == ">=";
+            double w;
+            switch (_var)
+            {
+                case "time_to_apoapsis":
+                case "time_to_periapsis":
+                    if (!down)
+                    {
+                        return null;
+                    }
+                    w = ut + t.Num[_var] - _num;
+                    break;
+                case "met":
+                case "step_time":   // ut - step_time = stepStartUt
+                    if (!up)
+                    {
+                        return null;
+                    }
+                    w = ut + (_num - t.Num[_var]);
+                    break;
+                default:
+                    return null;
+            }
+            return !double.IsNaN(w) && w > ut ? w : (double?)null;   // already true or past: drops out
         }
 
         private bool Compare(Telemetry t)
