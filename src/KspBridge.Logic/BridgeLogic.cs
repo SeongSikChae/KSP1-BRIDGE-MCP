@@ -1,4 +1,5 @@
 using KspBridge.Editor;
+using KspBridge.Flight;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -33,18 +34,29 @@ namespace KspBridge
         private IEnumerable<Route> StartCore(LogicContext context)
         {
             Stopped = false;
+            _context = context;   // Stop uses it
             Settings.Reload();
-            return Routes.Build(context.Dispatcher);
+            List<Route> routes = Routes.Build(context.Dispatcher);
+            FlightScene.Hook();
+            return routes;
         }
 
-        public void FixedUpdate()
-        {
-        }
+        private LogicContext _context;
+
+        public void FixedUpdate() => Coordinator.Tick();
 
         public IList<string> Stop()
         {
             Stopped = true;
-            return new List<string>();
+            try
+            {
+                FlightScene.Unhook();
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] flight unhook failed: " + e);
+            }
+            return Coordinator.Stop(_context);   // never throws
         }
 
         public IDictionary<string, object> Status() => new Dictionary<string, object> { ["editor"] = EditorScene.Status() };

@@ -70,8 +70,20 @@ namespace KspBridge.Check
             };
         }
 
-        private static readonly System.Reflection.FieldInfo CalcsDirty =
-            typeof(VesselDeltaV).GetField("calcsDirty", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        /// <summary>Reads the private calcsDirty flag without boxing (Telemetry calls UpToDate every physics tick); null if the field is missing.</summary>
+        private static readonly Func<VesselDeltaV, bool> CalcsDirty = CompileCalcsDirty();
+
+        private static Func<VesselDeltaV, bool> CompileCalcsDirty()
+        {
+            System.Reflection.FieldInfo f =
+                typeof(VesselDeltaV).GetField("calcsDirty", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            if (f == null || f.FieldType != typeof(bool))
+            {
+                return null;
+            }
+            System.Linq.Expressions.ParameterExpression p = System.Linq.Expressions.Expression.Parameter(typeof(VesselDeltaV), "dv");
+            return System.Linq.Expressions.Expression.Lambda<Func<VesselDeltaV, bool>>(System.Linq.Expressions.Expression.Field(p, f), p).Compile();
+        }
 
         /// <summary>
         /// The stage results describe the craft as it is now. IsReady stays true after the first calculation; an edit only
@@ -79,7 +91,7 @@ namespace KspBridge.Check
         /// ends, so the old lists are served until then.
         /// </summary>
         internal static bool UpToDate(VesselDeltaV dv) =>
-            dv != null && dv.IsReady && !dv.SimulationRunning && !(CalcsDirty != null && (bool)CalcsDirty.GetValue(dv));
+            dv != null && dv.IsReady && !dv.SimulationRunning && !(CalcsDirty != null && CalcsDirty(dv));
 
         /// <summary>The body by name (case-insensitive), or the home body when name is null; 400 for an unknown name.</summary>
         public static CelestialBody Body(string name)

@@ -1,68 +1,41 @@
 using KspBridge.Flight;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using Events = KspBridge.Flight.FlightEvents;   // KSP has a global FlightEvents type that would win over the using above
 
 namespace KspBridge.Handlers
 {
     /// <summary>Routes of the flight tools.</summary>
     public static class FlightHandler
     {
-        private static readonly Telemetry _t = new Telemetry();
-
         public static IEnumerable<Route> Routes()
         {
-            yield return new Route("GET", "/api/flight", (m, b, q) => Describe(Guard.ActiveVessel()));
+            yield return new Route("GET", "/api/flight", (m, b, q) => Coordinator.Describe(Guard.ActiveVessel()));
+            // The handler only gets the parsed body, so the App wraps the plan as {plan: {...}}; the parsed object is serialized
+            // again as the raw plan for the reload handover.
+            yield return new Route("POST", "/api/flight/plan", (m, b, q) =>
+            {
+                Dictionary<string, object> raw = b.GetObject("plan");
+                Vessel v = Guard.ActiveVessel();
+                return Coordinator.Submit(v, Plan.Parse(raw, Json.Json.Serialize(raw), v));
+            });
+            yield return new Route("POST", "/api/flight/abort", (m, b, q) => Coordinator.UserAbort());
+            yield return new Route("GET", "/api/flight/events", (m, b, q) =>
+                Events.Since(ParseLong(q["since"], 0, "since"), (int)Math.Max(1, Math.Min(Events.Capacity, ParseLong(q["limit"], 100, "limit")))));
         }
 
-        /// <summary>get_flight: field names match the condition variables; NaN (not known) is null.</summary>
-        private static object Describe(Vessel v)
+        private static long ParseLong(string text, long defaultValue, string name)
         {
-            _t.Capture(v, Planetarium.GetUniversalTime());
-            return new Dictionary<string, object>
+            if (string.IsNullOrEmpty(text))
             {
-                ["vessel"] = new Dictionary<string, object>
-                {
-                    ["id"] = v.persistentId,
-                    ["name"] = v.vesselName,
-                    ["situation"] = _t.Str["situation"],
-                    ["met"] = N("met"),
-                },
-                ["flight"] = Group("altitude", "altitude_radar", "vertical_speed", "surface_speed", "orbital_speed",
-                    "pitch", "heading", "roll", "dynamic_pressure"),
-                ["orbit"] = With(Group("apoapsis", "periapsis", "time_to_apoapsis", "time_to_periapsis", "eccentricity", "inclination"),
-                    "body", v.mainBody.bodyName),
-                ["propulsion"] = With(Group("stage", "stage_dv", "total_dv", "twr", "throttle", "thrust", "ignitable_engines"),
-                    "staging", _t.Str["staging"]),
-                // unit 3: Coordinator.Describe (plan id, step, mode, step_time, attitude_error, warp, event_seq, epoch)
-                ["plan"] = new Dictionary<string, object> { ["state"] = "idle" },
-            };
-        }
-
-        private static Dictionary<string, object> Group(params string[] names)
-        {
-            Dictionary<string, object> d = new Dictionary<string, object>();
-            foreach (string n in names)
-            {
-                d[n] = N(n);
+                return defaultValue;
             }
-            return d;
-        }
-
-        private static Dictionary<string, object> With(Dictionary<string, object> d, string key, object value)
-        {
-            d[key] = value;
-            return d;
-        }
-
-        /// <summary>The variable rounded for the response; null when not known (NaN) or not finite.</summary>
-        private static object N(string name)
-        {
-            double x = _t.Num[name];
-            if (double.IsNaN(x) || double.IsInfinity(x))
+            if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value) || value < 0)
             {
-                return null;
+                throw ApiException.BadRequest(name + " must be a non-negative integer");
             }
-            return Math.Round(x, 3);
+            return value;
         }
     }
 }

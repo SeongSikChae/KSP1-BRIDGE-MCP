@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 
 namespace KspBridge.App.Tests
 {
@@ -13,7 +14,7 @@ namespace KspBridge.App.Tests
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-                Requests.Add((request.Method, request.RequestUri!.AbsolutePath, body));
+                Requests.Add((request.Method, request.RequestUri!.PathAndQuery, body));
                 return respond(request);
             }
         }
@@ -54,11 +55,18 @@ namespace KspBridge.App.Tests
 
             await tools.GetStatus(ct);
             await tools.GetFlight(ct);
+            using JsonDocument plan = JsonDocument.Parse("""{"steps":[{"mode":"attitude","throttle":1}]}""");
+            await tools.SubmitFlightPlan(plan.RootElement, ct);
+            await tools.AbortFlight(ct);
+            await tools.GetFlightEvents(5, 10, ct);
 
             var r = handler.Requests;
-            Assert.HasCount(2, r);
+            Assert.HasCount(5, r);
             Assert.AreEqual((HttpMethod.Get, "/api/status", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/flight", (string?)null), r[1]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan", (string?)"""{"plan":{"steps":[{"mode":"attitude","throttle":1}]}}"""), r[2]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/abort", (string?)"{}"), r[3]);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/events?since=5&limit=10", (string?)null), r[4]);
         }
 
         [TestMethod]

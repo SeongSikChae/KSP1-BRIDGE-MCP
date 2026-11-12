@@ -1,5 +1,6 @@
 using ModelContextProtocol.Server;
 using System.ComponentModel;
+using System.Text.Json;
 
 namespace KspBridge.App
 {
@@ -21,5 +22,30 @@ namespace KspBridge.App
             "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
         public Task<string> GetFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
+
+        [McpServerTool(Name = "submit_flight_plan", Destructive = true)]
+        [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?}]}. " +
+            "Modes: attitude (pitch+heading [+roll] or reference prograde|retrograde|surface_prograde|normal|antinormal|radial_in|radial_out, throttle 0..1; until required). " +
+            "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
+            "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
+            "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
+            "Invalid plans fail with invalid_plan \"<path>: <reason>\"; no engine and nothing staging fails with no_thrust. " +
+            "Returns {plan_id, state, steps, event_seq, epoch}; follow progress with get_flight_events.")]
+        public Task<string> SubmitFlightPlan([Description("Flight plan JSON object")] JsonElement plan, CancellationToken ct)
+            => client.SendAsync(HttpMethod.Post, "api/flight/plan", new { plan }, ct);
+
+        [McpServerTool(Name = "abort_flight", Destructive = true)]
+        [Description("Abort the running flight plan: throttle 0, SAS back to its state before the plan, control released (event plan_aborted reason user). no_plan when nothing runs.")]
+        public Task<string> AbortFlight(CancellationToken ct)
+            => client.SendAsync(HttpMethod.Post, "api/flight/abort", new { }, ct);
+
+        [McpServerTool(Name = "get_flight_events", ReadOnly = true)]
+        [Description("Flight events with seq > since (oldest first). Returns {events, next, truncated, epoch}: pass next as the next since. " +
+            "truncated: events were dropped or the cursor is ahead of this session (next = 0, read again from 0). " +
+            "epoch identifies the event session (kept across reload_mod); if it changes, reset since to 0. " +
+            "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, step_started, step_completed, staged, stage_failed, plan_completed, plan_aborted {reason, condition, message}.")]
+        public Task<string> GetFlightEvents([Description("Return events after this seq (default 0)")] long since = 0,
+            [Description("Maximum events (1..500, default 100)")] int limit = 100, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, $"api/flight/events?since={since}&limit={limit}", null, ct);
     }
 }

@@ -1,4 +1,5 @@
 using KspBridge.Check;
+using KspBridge.Flight.Modes;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -28,6 +29,17 @@ namespace KspBridge.Flight
         private Vessel.Situations _situation;
         private string _situationName;
 
+        // Mode-only fields, not condition variables (not in get_flight either).
+
+        /// <summary>A staging sequence runs or an on_start stage request awaits confirmation: an engine may come soon.</summary>
+        public bool StagingPending;
+
+        /// <summary>Last tick's final command throttle (after overrides). circularize end gate.</summary>
+        public double PrevCommandThrottle;
+
+        /// <summary>Last tick's throttle as the mode produced it (before overrides). none → ignite entry.</summary>
+        public double PrevModeThrottle;
+
         public Telemetry()
         {
             foreach (string k in NumVars)
@@ -40,7 +52,8 @@ namespace KspBridge.Flight
             }
         }
 
-        public void Capture(Vessel v, double ut)
+        /// <param name="target">Current attitude target (the last command's), for attitude_error (unit 4).</param>
+        public void Capture(Vessel v, AttitudeTarget target, double ut)
         {
             Orbit o = v.orbit;
             CelestialBody body = v.mainBody;
@@ -77,11 +90,11 @@ namespace KspBridge.Flight
             double maxThrust = EngineModel.MaxThrustSum(v, (float)(v.staticPressurekPa * PhysicsGlobals.KpaToAtmospheres),
                 v.externalTemperature, v.atmDensity);
             Num["twr"] = v.totalMass > 0 && g > 0 ? maxThrust / (v.totalMass * g) : double.NaN;
-            Num["throttle"] = v.ctrlState.mainThrottle;   // unit 3: the commanded throttle
+            Num["throttle"] = v.ctrlState.mainThrottle;   // the commanded throttle: the Controller's Fly writes it while a plan runs
             Num["thrust"] = EngineModel.ThrustSum(v);
             Num["ignitable_engines"] = EngineModel.Ignitable(v);
 
-            Num["step_time"] = double.NaN;   // unit 3: set by the Coordinator
+            Num["step_time"] = double.NaN;   // the Coordinator sets it while a plan runs
             Num["met"] = v.missionTime;
 
             if (v.situation != _situation || _situationName == null)
