@@ -65,9 +65,13 @@ namespace KspBridge.App.Tests
             await tools.LeaveFlight(ct);
             await tools.RecoverVessel("LaunchPad", ct);
             await tools.RecoverVessel(ct: ct);
+            await tools.SetSas(true, "prograde", "orbit", ct);
+            await tools.SetSas(false, ct: ct);
 
             var r = handler.Requests;
-            Assert.HasCount(10, r);
+            Assert.HasCount(12, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/sas", (string?)"""{"on":true,"mode":"prograde","reference":"orbit"}"""), r[10]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/sas", (string?)"""{"on":false,"mode":null,"reference":null}"""), r[11]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/revert", (string?)"""{"target":"launch"}"""), r[6]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/leave", (string?)"{}"), r[7]);
             Assert.AreEqual((HttpMethod.Post, "/api/vessel/recover", (string?)"""{"site":"LaunchPad"}"""), r[8]);

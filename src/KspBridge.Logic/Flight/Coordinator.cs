@@ -655,12 +655,24 @@ namespace KspBridge.Flight
                 return null;
             }
             Vessel v = FlightGlobals.ActiveVessel;
-            return new Dictionary<string, object>
+            Dictionary<string, object> d = new Dictionary<string, object>
             {
                 ["active_vessel"] = v == null ? null : new Dictionary<string, object> { ["id"] = v.persistentId, ["name"] = v.vesselName },
                 ["plan_state"] = _plan == null ? "idle" : StateName(_plan.State),
                 ["step"] = _plan == null ? null : (object)_step,
             };
+            if (v != null)
+            {
+                try
+                {
+                    Control.ManualControl.AddSummary(v, d);
+                }
+                catch (Exception e)   // isolated like input_locks: the rest of the summary stays
+                {
+                    d["controls_error"] = e.GetType().Name + ": " + e.Message;
+                }
+            }
+            return d;
         }
 
         private static string StateName(PlanState s) => s == PlanState.Running ? "running" : s == PlanState.Completed ? "completed" : "aborted";
@@ -692,7 +704,17 @@ namespace KspBridge.Flight
                     ["epoch"] = FlightEvents.Epoch,
                 };
             }
-            return new Dictionary<string, object>
+            Dictionary<string, object> controls = null;
+            string controlsError = null;
+            try
+            {
+                controls = Control.ManualControl.Describe(v);
+            }
+            catch (Exception e)   // isolated: get_flight stays available
+            {
+                controlsError = e.GetType().Name + ": " + e.Message;
+            }
+            Dictionary<string, object> result = new Dictionary<string, object>
             {
                 ["vessel"] = new Dictionary<string, object>
                 {
@@ -709,7 +731,13 @@ namespace KspBridge.Flight
                     "staging", _view.Str["staging"]),
                 ["plan"] = plan,
                 ["time_warp"] = TimeWarpControl.Describe(),
+                ["controls"] = controls,
             };
+            if (controlsError != null)
+            {
+                result["controls_error"] = controlsError;
+            }
+            return result;
         }
 
         private static Dictionary<string, object> Group(params string[] names)

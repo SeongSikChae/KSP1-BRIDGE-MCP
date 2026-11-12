@@ -28,6 +28,7 @@ namespace KspBridge.Handlers
                 return Coordinator.ReplaceSteps(v, Plan.ParseSteps(raw, "steps", v.mainBody), includeCurrent);
             });
             yield return new Route("POST", "/api/flight/abort", (m, b, q) => Coordinator.UserAbort());
+            yield return new Route("POST", "/api/flight/sas", (m, b, q) => Flight.Control.ManualControl.SetSas(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/revert", (m, b, q) => FlightReset.Revert(b.GetString("target")));
             yield return new Route("POST", "/api/flight/leave", (m, b, q) => FlightReset.Leave());
             yield return new Route("POST", "/api/vessel/recover", (m, b, q) => FlightReset.Recover(b));

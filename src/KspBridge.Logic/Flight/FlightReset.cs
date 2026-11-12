@@ -229,7 +229,7 @@ namespace KspBridge.Flight
             }
         }
 
-        private static void RequireNoPendingRecovery()
+        internal static void RequireNoPendingRecovery()
         {
             if (_pendingId != null)
             {
