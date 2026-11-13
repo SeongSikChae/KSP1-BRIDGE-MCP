@@ -80,6 +80,40 @@ KSPBRIDGE
 
 - `port`: HTTP 서버 포트
 
+## KSP 실행 (모니터·해상도)
+
+모니터는 실행 인자로, 해상도·전체 화면은 KSP 설정 파일로 정합니다.
+
+### 모니터: 실행 인자 `-monitor N`
+
+`N`은 Unity가 매기는 1부터 시작하는 모니터 번호입니다. Windows 디스플레이 설정의 번호와 다를 수 있으니 한 번 띄워 확인합니다. Steam은 라이브러리 → KSP 속성 → 일반 → 시작 옵션에 적고, 직접 실행할 때는 인자로 넘깁니다.
+
+```powershell
+& "<KspDir>\KSP_x64.exe" -monitor 2
+```
+
+### 해상도·전체 화면: `<KspDir>\settings.cfg`
+
+```
+SCREEN_RESOLUTION_WIDTH = 2560
+SCREEN_RESOLUTION_HEIGHT = 1440
+FULLSCREEN = True
+```
+
+- `FULLSCREEN = True`면 `-monitor`로 고른 모니터를 채우고, `False`면 창 모드입니다.
+- KSP를 끈 상태에서 고칩니다.
+- 이 파일은 Mod 설정(`GameData\KspBridge\settings.cfg`)과 다른 파일입니다.
+
+### 실행 인자 해상도가 유지되지 않는 이유
+
+Unity 실행 인자 `-screen-width`, `-screen-height`, `-screen-fullscreen`은 첫 화면에만 쓰입니다. KSP 1.12.5(Unity 2019.4.18)는 시작 직후(`GameSettings.Start()`에서 10프레임 뒤) `settings.cfg` 값으로 `Screen.SetResolution(SCREEN_RESOLUTION_WIDTH, SCREEN_RESOLUTION_HEIGHT, FULLSCREEN)`을 다시 호출합니다.
+
+Unity는 마지막 실행의 모니터·크기를 레지스트리 `HKCU\Software\Squad\Kerbal Space Program`(`UnitySelectMonitor_h…`, `Screenmanager Resolution Width_h…` 등)에 저장해 다음 첫 화면에 씁니다. 그래서 보통은 `-monitor`만 넘기면 됩니다. `settings.cfg`를 손으로 고친 직후 첫 화면부터 같은 크기로 띄우려면 같은 값을 실행 인자로 함께 넘깁니다. `-screen-fullscreen`은 `FULLSCREEN = True`면 `1`, `False`면 `0`입니다.
+
+```
+-monitor 2 -screen-width 2560 -screen-height 1440 -screen-fullscreen 1
+```
+
 ## MCP 서버
 
 ### 배포
