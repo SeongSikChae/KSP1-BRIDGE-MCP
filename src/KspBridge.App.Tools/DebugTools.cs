@@ -32,7 +32,7 @@ namespace KspBridge.App
         [Description(Flag + "hold the flight plan's stage confirmation (staged event) until N seconds of game time after its first " +
             "stage request, without re-requesting a stage that already fired; the failure deadline grows by N too. Not handed over: " +
             "after reload_mod the new logic confirms at once. Returns get_status.debug.")]
-        public Task<string> StageDelay([Description("Seconds of game time, >= 0; 0 releases")] double seconds, CancellationToken ct = default)
+        public Task<string> StageDelay([Description("Seconds of game time, 0..60; 0 releases")] double seconds, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/debug/stage_delay", new { seconds }, ct);
 
         [McpServerTool(Name = "debug_engine_stop", Destructive = true)]
@@ -47,7 +47,8 @@ namespace KspBridge.App
 
         [McpServerTool(Name = "debug_throttle_hold", Destructive = true)]
         [Description(Flag + "write a fixed value to one engine's own throttle (currentThrottle) every physics tick, before the flight " +
-            "plan reads it, so it ignores the plan's throttle; throttle null releases. Released when the part leaves the active " +
+            "plan reads it, so it ignores the plan's throttle; needs a running flight plan (else 409 no_plan); throttle null releases. " +
+            "Released when the plan ends (completed or aborted), when the part leaves the active " +
             "vessel, by debug_clear, a scene change and reload_mod. Returns get_status.debug.")]
         public Task<string> ThrottleHold(
             [Description("Engine part id (persistentId); ignored when throttle is null")] long? part_id = null,

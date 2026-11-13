@@ -30,16 +30,16 @@ namespace KspBridge.Handlers
             yield return Post("stage_delay", b =>
             {
                 double s = b.GetDouble("seconds");
-                if (double.IsNaN(s) || double.IsInfinity(s) || s < 0)
+                if (!(s >= 0 && s <= MaxStageDelayS))
                 {
-                    throw ApiException.BadRequest("seconds must be a finite number >= 0 (0 releases)");
+                    throw ApiException.BadRequest("seconds must be 0.." + MaxStageDelayS + " (0 releases)");
                 }
                 DebugState.StageDelayS = s;
                 return DebugState.Status();
             });
             yield return Post("engine_stop", b =>
             {
-                ModuleEngines e = DebugState.Engine(Guard.ActiveVessel(), (uint)b.GetDouble("part_id"));
+                ModuleEngines e = DebugState.Engine(Guard.ActiveVessel(), PartId(b));
                 string mode = b.GetString("mode");
                 if (mode == "shutdown")
                 {
@@ -67,8 +67,13 @@ namespace KspBridge.Handlers
                     DebugState.ThrottleHold = null;
                     return DebugState.Status();
                 }
-                uint id = (uint)b.GetDouble("part_id");
+                uint id = PartId(b);
                 DebugState.Engine(Guard.ActiveVessel(), id);   // validate now
+                if (!Coordinator.Running)
+                {
+                    // the hold is for a plan's staging wait; Tick releases it when the plan ends
+                    throw new ApiException(409, "no_plan", "no running flight plan: submit one first, the hold ends with it");
+                }
                 DebugState.ThrottleHold = new DebugState.Hold(id, UnityEngine.Mathf.Clamp01((float)b.GetDouble("throttle")));
                 return DebugState.Status();
             });
@@ -100,6 +105,20 @@ namespace KspBridge.Handlers
                 throw ApiException.BadRequest(name + " must be an integer 0.." + max);
             }
             return (int)v;
+        }
+
+        /// <summary>Upper bound of debug_stage_delay: the failure deadline grows by it, so a plan never waits longer than this.</summary>
+        private const double MaxStageDelayS = 60;
+
+        /// <summary>A part persistentId: an integer 0..uint.MaxValue, else 400 (no silent truncation to another id).</summary>
+        private static uint PartId(RequestBody b)
+        {
+            double v = b.GetDouble("part_id");
+            if (!(v >= 0 && v <= uint.MaxValue) || v != Math.Floor(v))
+            {
+                throw ApiException.BadRequest("part_id must be an integer part id (persistentId) 0.." + uint.MaxValue);
+            }
+            return (uint)v;
         }
 
         private static ulong ParseMask(string s)

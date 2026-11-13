@@ -27,17 +27,20 @@ namespace KspBridge
         }
 
         /// <summary>
-        /// The only place that may touch context.Handover: on a 0.0.2 loader the field is missing and JIT of this method throws
-        /// MissingFieldException. Not inlined so that happens after the version check in Start, not before it.
+        /// context.Handover is touched only here and in what this method calls (DebugState.ConsumeStartFault): on a 0.0.2
+        /// loader the field is missing and JIT of the code touching it throws MissingFieldException. Not inlined so that
+        /// happens after the version check in Start, not before it.
         /// </summary>
         [MethodImpl(MethodImplOptions.NoInlining)]
         private IEnumerable<Route> StartCore(LogicContext context)
         {
-            Debugging.DebugState.ConsumeStartFault(context);   // before Stopped = false: a logic that refuses to start stays Stopped
+            Debugging.DebugState.LoadFlag();   // never throws; ConsumeStartFault needs the flag
+            // Before Stopped = false: a previous logic restarted after a failed reload (same assembly, Stopped true since its
+            // Stop) stays Stopped when it refuses too. A new assembly's Stopped is false, but its routes are never installed.
+            Debugging.DebugState.ConsumeStartFault(context);
             Stopped = false;
             // What can fail first; the hooks, the takeover and consuming the handover last.
             Settings.Reload();
-            Debugging.DebugState.LoadFlag();   // never throws
             List<Route> routes = Routes.Build(context.Dispatcher);
             HandoverState h = Handover.Parse(context.Handover);   // never throws: a bad handover is h.Incompatible / no epoch
             try
@@ -48,16 +51,10 @@ namespace KspBridge
             }
             catch
             {
-                try
-                {
-                    FlightScene.Unhook();   // undo what was hooked; context.Handover stays for the previous logic's restart
-                    FlightReset.Unhook();
-                    Debugging.DebugState.Unhook();
-                }
-                catch (Exception e)
-                {
-                    UnityEngine.Debug.LogError("[KspBridge] flight unhook after a failed hook failed: " + e);
-                }
+                // undo what was hooked, each on its own; context.Handover stays for the previous logic's restart
+                UnhookAfterFailedStart("flight scene", FlightScene.Unhook);
+                UnhookAfterFailedStart("flight reset", FlightReset.Unhook);
+                UnhookAfterFailedStart("debug", Debugging.DebugState.Unhook);
                 throw;
             }
             Coordinator.Resume(h);   // never throws
@@ -68,10 +65,23 @@ namespace KspBridge
 
         private LogicContext _context;
 
+        private static void UnhookAfterFailedStart(string what, Action unhook)
+        {
+            try
+            {
+                unhook();
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] " + what + " unhook after a failed hook failed: " + e);
+            }
+        }
+
         public void FixedUpdate()
         {
             Debugging.DebugState.Tick();   // never throws; before Coordinator.Tick reads currentThrottle
             Coordinator.Tick();
+            Debugging.DebugState.AfterTick();   // never throws; undoes this tick's hold write when the plan just ended
             Flight.Control.ManualControl.Tick();   // never throws
             FlightReset.Tick();   // never throws
         }

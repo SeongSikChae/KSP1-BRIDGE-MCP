@@ -61,14 +61,21 @@ namespace KspBridge.Debugging
             GameEvents.onGameSceneLoadRequested.Add(_hooked.OnScene);
         }
 
+        /// <summary>Releases the debug state even when removing the handler throws (the exception still reaches the caller).</summary>
         public static void Unhook()
         {
-            if (_hooked != null)
+            try
             {
-                GameEvents.onGameSceneLoadRequested.Remove(_hooked.OnScene);
-                _hooked = null;
+                if (_hooked != null)
+                {
+                    GameEvents.onGameSceneLoadRequested.Remove(_hooked.OnScene);
+                    _hooked = null;   // only after a successful Remove: a failed one can be retried by the next Unhook
+                }
             }
-            Clear();
+            finally
+            {
+                Clear();
+            }
         }
 
         /// <summary>debug_input_lock: the mask of the kspbridge_debug control lock, null when not set.</summary>
@@ -122,12 +129,23 @@ namespace KspBridge.Debugging
         public static void Tick()
         {
             Hold h = ThrottleHold;
-            if (h == null || !FlightGlobals.ready || FlightGlobals.ActiveVessel == null)
+            if (h == null)
             {
-                return;   // no vessel this tick: keep holding
+                return;
             }
             try
             {
+                if (!Flight.Coordinator.Running)
+                {
+                    // set only during a plan (the route checks): the plan completed or was aborted, stop driving the engine
+                    ThrottleHold = null;
+                    UnityEngine.Debug.Log("[KspBridge] debug throttle hold released: the flight plan ended");
+                    return;
+                }
+                if (!FlightGlobals.ready || FlightGlobals.ActiveVessel == null)
+                {
+                    return;   // no vessel this tick: keep holding
+                }
                 ModuleEngines e = FindEngine(FlightGlobals.ActiveVessel, h.PartId);
                 if (e == null)
                 {
@@ -135,7 +153,41 @@ namespace KspBridge.Debugging
                     UnityEngine.Debug.Log("[KspBridge] debug throttle hold released: engine part " + h.PartId + " not on the active vessel");
                     return;
                 }
+                _heldEngine = e;
+                _heldBefore = e.currentThrottle;
                 e.currentThrottle = h.Throttle;
+            }
+            catch (Exception ex)
+            {
+                ThrottleHold = null;
+                UnityEngine.Debug.LogError("[KspBridge] debug throttle hold released: " + ex);
+            }
+        }
+
+        // The engine written by this tick's Tick and its value before the write; AfterTick undoes the write when the plan ended
+        // in the same tick. Main thread only.
+        private static ModuleEngines _heldEngine;
+        private static float _heldBefore;
+
+        /// <summary>FixedUpdate, right after Coordinator.Tick: when the plan ended in this tick, put back the engine's value from
+        /// before this tick's write and release, so the hold value does not stay for the ending tick. Never throws.</summary>
+        public static void AfterTick()
+        {
+            ModuleEngines e = _heldEngine;
+            _heldEngine = null;
+            if (e == null || ThrottleHold == null)
+            {
+                return;
+            }
+            try
+            {
+                if (Flight.Coordinator.Running)
+                {
+                    return;
+                }
+                e.currentThrottle = _heldBefore;
+                ThrottleHold = null;
+                UnityEngine.Debug.Log("[KspBridge] debug throttle hold released: the flight plan ended in this tick (currentThrottle back to " + _heldBefore + ")");
             }
             catch (Exception ex)
             {
@@ -166,11 +218,12 @@ namespace KspBridge.Debugging
             return h;
         }
 
-        /// <summary>StartCore, first thing: a handed-over start failure is spent here. Never throws on a bad handover
-        /// (Handover.Parse handles that as Incompatible); throws only when a debug_fault asks for it.</summary>
+        /// <summary>StartCore, right after LoadFlag: a handed-over start failure is spent here. Never throws on a bad handover
+        /// (Handover.Parse handles that as Incompatible); throws only when a debug_fault asks for it and the flag is on
+        /// (with the flag off the start path is unchanged; Handover.Parse ignores the extra key).</summary>
         public static void ConsumeStartFault(LogicContext context)
         {
-            if (string.IsNullOrEmpty(context.Handover))
+            if (!Enabled || string.IsNullOrEmpty(context.Handover))
             {
                 return;
             }
@@ -210,15 +263,19 @@ namespace KspBridge.Debugging
             }
         }
 
-        /// <summary>Releases every debug state, the reload faults included.</summary>
+        /// <summary>Releases every debug state, the reload faults included. The plain fields first, so a failing lock removal
+        /// (the only game call, and only when a lock was set: none with the flag off) cannot leave them set.</summary>
         public static void Clear()
         {
-            SetInputLock(null);
             InputLocksError = false;
             AddPartTimeout = false;
             StageDelayS = 0;
             ThrottleHold = null;
             StartFailures = HandoverFailures = 0;
+            if (InputLockMask.HasValue)
+            {
+                SetInputLock(null);
+            }
         }
 
         /// <summary>get_status.debug: null with the flag off.</summary>
