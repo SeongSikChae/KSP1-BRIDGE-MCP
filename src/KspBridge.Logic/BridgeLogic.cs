@@ -69,6 +69,7 @@ namespace KspBridge
 
         public void FixedUpdate()
         {
+            Debugging.DebugState.Tick();   // never throws; before Coordinator.Tick reads currentThrottle
             Coordinator.Tick();
             Flight.Control.ManualControl.Tick();   // never throws
             FlightReset.Tick();   // never throws

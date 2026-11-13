@@ -84,6 +84,66 @@ namespace KspBridge.Debugging
         /// (volatile double does not compile).</summary>
         public static double StageDelayS;
 
+        public sealed class Hold
+        {
+            public readonly uint PartId;
+            public readonly float Throttle;
+
+            public Hold(uint partId, float throttle)
+            {
+                PartId = partId;
+                Throttle = throttle;
+            }
+        }
+
+        /// <summary>debug_throttle_hold: written to the engine's currentThrottle every FixedUpdate before Coordinator.Tick.</summary>
+        public static volatile Hold ThrottleHold;
+
+        /// <summary>The part's first ModuleEngines (multi-mode engines: first mode only); null when the part is not on the vessel
+        /// or has no engine. A plain loop: Tick calls it every physics tick.</summary>
+        public static ModuleEngines FindEngine(Vessel v, uint partId)
+        {
+            List<Part> parts = v.parts;
+            for (int i = 0; i < parts.Count; i++)
+            {
+                if (parts[i].persistentId == partId)
+                {
+                    return parts[i].FindModuleImplementing<ModuleEngines>();
+                }
+            }
+            return null;
+        }
+
+        /// <summary>For the routes: 404 instead of null.</summary>
+        public static ModuleEngines Engine(Vessel v, uint partId)
+            => FindEngine(v, partId) ?? throw ApiException.NotFound("engine part " + partId + " not found on the active vessel");
+
+        /// <summary>FixedUpdate, before Coordinator.Tick reads currentThrottle (AutoStager.KeptThrottleDown). Never throws.</summary>
+        public static void Tick()
+        {
+            Hold h = ThrottleHold;
+            if (h == null || !FlightGlobals.ready || FlightGlobals.ActiveVessel == null)
+            {
+                return;   // no vessel this tick: keep holding
+            }
+            try
+            {
+                ModuleEngines e = FindEngine(FlightGlobals.ActiveVessel, h.PartId);
+                if (e == null)
+                {
+                    ThrottleHold = null;
+                    UnityEngine.Debug.Log("[KspBridge] debug throttle hold released: engine part " + h.PartId + " not on the active vessel");
+                    return;
+                }
+                e.currentThrottle = h.Throttle;
+            }
+            catch (Exception ex)
+            {
+                ThrottleHold = null;
+                UnityEngine.Debug.LogError("[KspBridge] debug throttle hold released: " + ex);
+            }
+        }
+
         public static void SetInputLock(ulong? mask)
         {
             InputLockManager.RemoveControlLock(LockId);
@@ -101,6 +161,7 @@ namespace KspBridge.Debugging
             InputLocksError = false;
             AddPartTimeout = false;
             StageDelayS = 0;
+            ThrottleHold = null;
         }
 
         /// <summary>get_status.debug: null with the flag off.</summary>
@@ -113,6 +174,9 @@ namespace KspBridge.Debugging
             return new Dictionary<string, object>
             {
                 ["stage_delay_s"] = StageDelayS,
+                ["throttle_hold"] = ThrottleHold is Hold h
+                    ? new Dictionary<string, object> { ["part_id"] = (double)h.PartId, ["throttle"] = (double)h.Throttle }
+                    : null,
                 ["input_lock"] = InputLockMask.HasValue
                     ? new Dictionary<string, object> { ["id"] = LockId, ["mask"] = "0x" + InputLockMask.Value.ToString("X") }
                     : null,

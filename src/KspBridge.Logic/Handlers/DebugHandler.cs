@@ -1,4 +1,5 @@
 using KspBridge.Debugging;
+using KspBridge.Flight;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -34,6 +35,41 @@ namespace KspBridge.Handlers
                     throw ApiException.BadRequest("seconds must be a finite number >= 0 (0 releases)");
                 }
                 DebugState.StageDelayS = s;
+                return DebugState.Status();
+            });
+            yield return Post("engine_stop", b =>
+            {
+                ModuleEngines e = DebugState.Engine(Guard.ActiveVessel(), (uint)b.GetDouble("part_id"));
+                string mode = b.GetString("mode");
+                if (mode == "shutdown")
+                {
+                    e.Shutdown();
+                }
+                else if (mode == "flameout")
+                {
+                    e.Flameout("debug");
+                }
+                else
+                {
+                    throw ApiException.BadRequest("mode must be shutdown or flameout");
+                }
+                return new Dictionary<string, object>
+                {
+                    ["part_id"] = (double)e.part.persistentId,
+                    ["ignited"] = e.EngineIgnited,
+                    ["flameout"] = e.flameout,
+                };
+            });
+            yield return Post("throttle_hold", b =>
+            {
+                if (!b.Has("throttle"))
+                {
+                    DebugState.ThrottleHold = null;
+                    return DebugState.Status();
+                }
+                uint id = (uint)b.GetDouble("part_id");
+                DebugState.Engine(Guard.ActiveVessel(), id);   // validate now
+                DebugState.ThrottleHold = new DebugState.Hold(id, UnityEngine.Mathf.Clamp01((float)b.GetDouble("throttle")));
                 return DebugState.Status();
             });
             yield return Post("add_part_timeout", b =>
