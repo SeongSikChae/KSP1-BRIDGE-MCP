@@ -413,12 +413,16 @@ namespace KspBridge.Flight
         }
 
         /// <summary>
-        /// Queries the part's resources by the engine's propellant definitions (every propellant but ignoreForIsp must be above 0).
+        /// KSP's CheckDeprived at full throttle (decompile checked): every propellant but ignoreForIsp has at least
+        /// ratio × one full-throttle tick × ignitionThreshold above minResToLeave (and some left at all). thrustCurve engines also need
+        /// the curve at the remaining fraction ≥ flameoutBar. Queries the part's resources by the engine's propellant definitions:
         /// Propellant.totalResourceAvailable is only refreshed for ignited engines (FixedUpdate: if (EngineIgnited) UpdatePropellantStatus()),
         /// so it is not used.
         /// </summary>
         public static bool HasPropellant(ModuleEngines e)
         {
+            double need = NeedPerTick(e);
+            double fraction = 1;
             List<Propellant> props = e.propellants;
             for (int i = 0; i < props.Count; i++)
             {
@@ -427,13 +431,23 @@ namespace KspBridge.Flight
                 {
                     continue;
                 }
-                e.part.GetConnectedResourceTotals(p.id, p.GetFlowMode(), out double amount, out double _);
-                if (!(amount > 0))
+                e.part.GetConnectedResourceTotals(p.id, p.GetFlowMode(), out double amount, out double max);
+                if (!(amount > 0) || !(amount - p.minResToLeave >= p.ratio * need * e.ignitionThreshold))
                 {
                     return false;
                 }
+                if (!p.ignoreForThrustCurve)
+                {
+                    fraction = Math.Min(fraction, max > 0 ? amount / max : 0);
+                }
             }
-            return true;
+            return !e.useThrustCurve || e.thrustCurve.Evaluate((float)fraction) >= e.flameoutBar;
         }
+
+        /// <summary>Propellant volume one full-throttle physics tick asks for (RequiredPropellantMass without FuelUsage).
+        /// flowMultiplier above 1 (velocity curves) raises KSP's need, so it counts; below 1 it is held at 1 (never under KSP's bar).</summary>
+        private static double NeedPerTick(ModuleEngines e) =>
+            e.maxFuelFlow * e.thrustPercentage / 100 * Math.Max(1.0, e.flowMultiplier) * e.multFlow * TimeWarp.fixedDeltaTime
+            * e.mixtureDensityRecip;
     }
 }
