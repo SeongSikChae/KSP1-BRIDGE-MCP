@@ -144,6 +144,62 @@ namespace KspBridge.Debugging
             }
         }
 
+        /// <summary>debug_reload_fault: set by the tool, spent by the next Coordinator.Stop, released by Clear. Main thread only.</summary>
+        public static int StartFailures, HandoverFailures;
+
+        /// <summary>Coordinator.Stop, first thing: read and reset at once, so neither the Stop order nor the restarted previous
+        /// logic (same assembly, same statics) can see them again.</summary>
+        public static void TakeReloadFault(out int start, out int handover)
+        {
+            start = StartFailures;
+            handover = HandoverFailures;
+            StartFailures = HandoverFailures = 0;
+        }
+
+        /// <summary>Marks the handover so the next StartCore fails startFailures times (the loader hands the same string on).</summary>
+        public static Dictionary<string, object> Tag(Dictionary<string, object> h, int startFailures)
+        {
+            if (startFailures > 0)
+            {
+                h["debug_fault"] = new Dictionary<string, object> { ["start_failures"] = (double)startFailures };
+            }
+            return h;
+        }
+
+        /// <summary>StartCore, first thing: a handed-over start failure is spent here. Never throws on a bad handover
+        /// (Handover.Parse handles that as Incompatible); throws only when a debug_fault asks for it.</summary>
+        public static void ConsumeStartFault(LogicContext context)
+        {
+            if (string.IsNullOrEmpty(context.Handover))
+            {
+                return;
+            }
+            Dictionary<string, object> h;
+            try
+            {
+                h = Json.Json.Parse(context.Handover) as Dictionary<string, object>;
+            }
+            catch
+            {
+                return;
+            }
+            if (h == null || !(h.TryGetValue("debug_fault", out object f) && f is Dictionary<string, object> fault)
+                || !(fault.TryGetValue("start_failures", out object n) && n is double left && left >= 1))
+            {
+                return;
+            }
+            if (left > 1)
+            {
+                fault["start_failures"] = left - 1;
+            }
+            else
+            {
+                h.Remove("debug_fault");
+            }
+            context.Handover = Json.Json.Serialize(h);   // the loader restarts the previous logic with this string
+            throw new InvalidOperationException("debug: logic start failure injected (" + (left - 1) + " left)");
+        }
+
         public static void SetInputLock(ulong? mask)
         {
             InputLockManager.RemoveControlLock(LockId);
@@ -162,6 +218,7 @@ namespace KspBridge.Debugging
             AddPartTimeout = false;
             StageDelayS = 0;
             ThrottleHold = null;
+            StartFailures = HandoverFailures = 0;
         }
 
         /// <summary>get_status.debug: null with the flag off.</summary>
@@ -182,6 +239,11 @@ namespace KspBridge.Debugging
                     : null,
                 ["input_locks_error"] = InputLocksError,
                 ["add_part_timeout"] = AddPartTimeout,
+                ["reload_fault"] = new Dictionary<string, object>
+                {
+                    ["start_failures"] = (double)StartFailures,
+                    ["handover_failures"] = (double)HandoverFailures,
+                },
             };
         }
     }

@@ -55,6 +55,18 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/debug/throttle_hold", new { part_id, throttle }, ct);
 
+        [McpServerTool(Name = "debug_reload_fault", Destructive = true)]
+        [Description(Flag + "make the next reload_mod fail: start_failures 1 = the new logic fails to start (the loader restarts " +
+            "the previous one), 2 = the previous logic fails to restart too (double failure: the loader drops the handover, " +
+            "get_status.logic_error); handover_failures 1..3 = the handover serialization fails up to that stage (1: plan aborted, " +
+            "events kept; 2: only the event cursor kept; 3: nothing handed over, new epoch). Spent by that reload; start_failures " +
+            ">= 1 with handover_failures 3 is refused. Both 0 releases. Returns get_status.debug.")]
+        public Task<string> ReloadFault(
+            [Description("0..2")] int start_failures = 0,
+            [Description("0..3")] int handover_failures = 0,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/debug/reload_fault", new { start_failures, handover_failures }, ct);
+
         [McpServerTool(Name = "debug_add_part_timeout", Destructive = true)]
         [Description(Flag + "make add_part onto a parent fail with error timeout, as when the main thread does not answer " +
             "(the spawned parts are discarded later, KSP.log 'discarded N loose part(s) after a timeout'). Root placement is not " +

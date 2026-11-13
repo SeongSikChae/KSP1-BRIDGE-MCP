@@ -295,6 +295,7 @@ KSPBRIDGE_DEBUG
 | `debug_stage_delay` | 비행 계획의 스테이지 확인(`staged`)을 첫 요청 뒤 `seconds`초(게임 시간)까지 미룸. 이미 작동한 스테이지는 다시 요청하지 않고, 실패 판정 기한도 그만큼 늘어남. `0`이면 해제. `reload_mod`로 넘기지 않음 |
 | `debug_engine_stop` | 활성 기체의 엔진 하나를 바로 정지: `mode` `shutdown`(점화 꺼짐) 또는 `flameout`(점화 상태로 연소 정지). 응답 `{part_id, ignited, flameout}`. `debug_clear`로 되돌리지 않음 |
 | `debug_throttle_hold` | 엔진 하나의 자체 스로틀(`currentThrottle`)을 물리 틱마다 `throttle`(0~1)로 고정해 계획의 스로틀을 무시하게 함. `throttle` null이면 해제. 부품이 활성 기체를 떠나도 해제 |
+| `debug_reload_fault` | 다음 `reload_mod` 한 번을 실패시킴. `start_failures` 1: 새 Logic 시작 실패(로더가 이전 Logic 재시작), 2: 이전 Logic 재시작도 실패(이중 실패, `get_status.logic_error`). `handover_failures` 1~3: 핸드오버 직렬화를 그 단계까지 실패(1: 계획 중단·이벤트 유지, 2: 이벤트 커서만, 3: 아무것도 넘기지 않음·epoch 변경). `start_failures` ≥ 1과 `handover_failures` 3은 함께 쓸 수 없음. 둘 다 0이면 해제 |
 | `debug_add_part_timeout` | `on` true면 부모에 붙이는 `add_part`가 메인 스레드 무응답처럼 `timeout`으로 실패. 만들어진 부품은 나중에 치워지고 KSP.log에 `discarded N loose part(s) after a timeout`. 루트 배치는 영향 없음 |
 
 - 설계는 [디버그도구 설계 문서](docs/ksp-bridge/0019-디버그도구-설계.md), 단위별 구현과 실측은 [디버그도구 개발 문서](docs/ksp-bridge/0020-디버그도구-개발.md)에 있습니다.

@@ -428,6 +428,7 @@ namespace KspBridge.Flight
         public static IList<string> Stop(LogicContext context)
         {
             List<string> released = new List<string>();
+            Debugging.DebugState.TakeReloadFault(out int startFail, out int handoverFail);   // debug_reload_fault, spent here
             if (!Running && AttitudeController.Target != null)
             {
                 // A half-done state (attached without a running plan): nothing to hand over, release as before.
@@ -455,7 +456,11 @@ namespace KspBridge.Flight
                 {
                     Safe(() => UnityEngine.Debug.Log("[KspBridge] handover out: " + CommandLog() + " integral " + IntegralLog()));
                 }
-                context.Handover = Json.Json.Serialize(Handover.Capture());
+                if (handoverFail >= 1)
+                {
+                    throw new InvalidOperationException("debug: handover stage 1 failure injected");
+                }
+                context.Handover = Json.Json.Serialize(Debugging.DebugState.Tag(Handover.Capture(), startFail));
                 if (handedPlan)
                 {
                     released.Add("flight plan " + _plan.Id + " handed over");
@@ -480,16 +485,27 @@ namespace KspBridge.Flight
                 }
                 try
                 {
-                    context.Handover = Json.Json.Serialize(Handover.CaptureEvents());
+                    if (handoverFail >= 2)
+                    {
+                        throw new InvalidOperationException("debug: handover stage 2 failure injected");
+                    }
+                    context.Handover = Json.Json.Serialize(Debugging.DebugState.Tag(Handover.CaptureEvents(), startFail));
                 }
                 catch
                 {
-                    Safe(() => context.Handover = Json.Json.Serialize(new Dictionary<string, object>
+                    Safe(() =>
                     {
-                        ["format"] = (double)Handover.Format,
-                        ["epoch"] = FlightEvents.Epoch,
-                        ["seq"] = (double)FlightEvents.LastSeq,
-                    }));
+                        if (handoverFail >= 3)
+                        {
+                            throw new InvalidOperationException("debug: handover stage 3 failure injected");
+                        }
+                        context.Handover = Json.Json.Serialize(Debugging.DebugState.Tag(new Dictionary<string, object>
+                        {
+                            ["format"] = (double)Handover.Format,
+                            ["epoch"] = FlightEvents.Epoch,
+                            ["seq"] = (double)FlightEvents.LastSeq,
+                        }, startFail));
+                    });
                 }
             }
             Safe(() => AttitudeController.Detach());       // OnFlyByWire only: throttle and SAS stay for the next logic

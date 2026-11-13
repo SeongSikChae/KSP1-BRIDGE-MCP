@@ -72,11 +72,34 @@ namespace KspBridge.Handlers
                 DebugState.ThrottleHold = new DebugState.Hold(id, UnityEngine.Mathf.Clamp01((float)b.GetDouble("throttle")));
                 return DebugState.Status();
             });
+            yield return Post("reload_fault", b =>
+            {
+                int start = Count(b, "start_failures", 2);
+                int handover = Count(b, "handover_failures", 3);
+                if (start >= 1 && handover == 3)
+                {
+                    // stage 3 fails the minimal handover too, so no string carries the start failure to the next logic
+                    throw ApiException.BadRequest("start_failures needs a handover: use handover_failures 0..2 with it");
+                }
+                DebugState.StartFailures = start;
+                DebugState.HandoverFailures = handover;
+                return DebugState.Status();
+            });
             yield return Post("add_part_timeout", b =>
             {
                 DebugState.AddPartTimeout = b.GetBool("on");
                 return DebugState.Status();
             });
+        }
+
+        private static int Count(RequestBody b, string name, int max)
+        {
+            double v = b.GetDouble(name, 0);
+            if (!(v >= 0 && v <= max) || v != Math.Floor(v))
+            {
+                throw ApiException.BadRequest(name + " must be an integer 0.." + max);
+            }
+            return (int)v;
         }
 
         private static ulong ParseMask(string s)

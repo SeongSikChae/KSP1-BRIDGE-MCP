@@ -33,6 +33,7 @@ namespace KspBridge
         [MethodImpl(MethodImplOptions.NoInlining)]
         private IEnumerable<Route> StartCore(LogicContext context)
         {
+            Debugging.DebugState.ConsumeStartFault(context);   // before Stopped = false: a logic that refuses to start stays Stopped
             Stopped = false;
             // What can fail first; the hooks, the takeover and consuming the handover last.
             Settings.Reload();
