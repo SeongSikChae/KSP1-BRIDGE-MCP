@@ -13,5 +13,19 @@ namespace KspBridge.App
         [Description(Flag + "release every debug state (a scene change and reload_mod also do). Returns get_status.debug.")]
         public Task<string> Clear(CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/debug/clear", new { }, ct);
+
+        [McpServerTool(Name = "debug_input_lock", Destructive = true)]
+        [Description(Flag + "set the game control lock 'kspbridge_debug' to a ControlTypes mask (shown in get_status.input_locks), " +
+            "or remove it with mask null. Replaces the previous mask. Returns get_status.debug.")]
+        public Task<string> InputLock(
+            [Description("ControlTypes mask as a hex string like \"0x8\" (0x0 allowed: a lock with no controls); null removes the lock")] string? mask = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/debug/input_lock", new { mask }, ct);
+
+        [McpServerTool(Name = "debug_input_locks_error", Destructive = true)]
+        [Description(Flag + "make listing the input locks fail, so get_status returns input_locks null with input_locks_error " +
+            "(other fields unchanged). Returns get_status.debug.")]
+        public Task<string> InputLocksError([Description("true to inject the failure, false to stop")] bool on, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/debug/input_locks_error", new { on }, ct);
     }
 }

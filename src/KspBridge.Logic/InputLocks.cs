@@ -24,6 +24,10 @@ namespace KspBridge
 
         public static List<object> Describe()
         {
+            if (Debugging.DebugState.InputLocksError)
+            {
+                throw new InvalidOperationException("debug: injected input lock listing failure");
+            }
             KeyValuePair<ulong, string>[] bits = Bits();
             List<object> locks = new List<object>();
             foreach (KeyValuePair<string, ulong> l in InputLockManager.lockStack.OrderBy(p => p.Key, StringComparer.Ordinal))

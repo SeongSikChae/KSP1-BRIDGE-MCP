@@ -290,6 +290,8 @@ KSPBRIDGE_DEBUG
 | 도구 | 하는 일 |
 | --- | --- |
 | `debug_clear` | 디버그 상태를 모두 풀고 `get_status.debug`를 돌려줌 |
+| `debug_input_lock` | 게임 입력 잠금 `kspbridge_debug`를 `mask`(hex 문자열, 예 `"0x8"`, `"0x0"` 허용)로 걸거나, `mask` null로 풂. `get_status.input_locks`에 그대로 보임 |
+| `debug_input_locks_error` | `on` true면 입력 잠금 목록 읽기를 실패시킴: `get_status.input_locks` null과 `input_locks_error` 문자열, 다른 항목은 그대로 |
 
 - 설계는 [디버그도구 설계 문서](docs/ksp-bridge/0019-디버그도구-설계.md), 단위별 구현과 실측은 [디버그도구 개발 문서](docs/ksp-bridge/0020-디버그도구-개발.md)에 있습니다.
 

@@ -71,9 +71,27 @@ namespace KspBridge.Debugging
             Clear();
         }
 
+        /// <summary>debug_input_lock: the mask of the kspbridge_debug control lock, null when not set.</summary>
+        public static ulong? InputLockMask;
+
+        /// <summary>debug_input_locks_error: InputLocks.Describe throws.</summary>
+        public static volatile bool InputLocksError;
+
+        public static void SetInputLock(ulong? mask)
+        {
+            InputLockManager.RemoveControlLock(LockId);
+            InputLockMask = mask;
+            if (mask.HasValue)
+            {
+                InputLockManager.SetControlLock((ControlTypes)mask.Value, LockId);
+            }
+        }
+
         /// <summary>Releases every debug state, the reload faults included.</summary>
         public static void Clear()
         {
+            SetInputLock(null);
+            InputLocksError = false;
         }
 
         /// <summary>get_status.debug: null with the flag off.</summary>
@@ -83,7 +101,13 @@ namespace KspBridge.Debugging
             {
                 return null;
             }
-            return new Dictionary<string, object>();
+            return new Dictionary<string, object>
+            {
+                ["input_lock"] = InputLockMask.HasValue
+                    ? new Dictionary<string, object> { ["id"] = LockId, ["mask"] = "0x" + InputLockMask.Value.ToString("X") }
+                    : null,
+                ["input_locks_error"] = InputLocksError,
+            };
         }
     }
 }
