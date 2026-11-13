@@ -26,6 +26,16 @@ namespace KspBridge.Handlers
                 DebugState.InputLocksError = b.GetBool("on");
                 return DebugState.Status();
             });
+            yield return Post("stage_delay", b =>
+            {
+                double s = b.GetDouble("seconds");
+                if (double.IsNaN(s) || double.IsInfinity(s) || s < 0)
+                {
+                    throw ApiException.BadRequest("seconds must be a finite number >= 0 (0 releases)");
+                }
+                DebugState.StageDelayS = s;
+                return DebugState.Status();
+            });
             yield return Post("add_part_timeout", b =>
             {
                 DebugState.AddPartTimeout = b.GetBool("on");

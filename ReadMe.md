@@ -292,6 +292,7 @@ KSPBRIDGE_DEBUG
 | `debug_clear` | 디버그 상태를 모두 풀고 `get_status.debug`를 돌려줌 |
 | `debug_input_lock` | 게임 입력 잠금 `kspbridge_debug`를 `mask`(hex 문자열, 예 `"0x8"`, `"0x0"` 허용)로 걸거나, `mask` null로 풂. `get_status.input_locks`에 그대로 보임 |
 | `debug_input_locks_error` | `on` true면 입력 잠금 목록 읽기를 실패시킴: `get_status.input_locks` null과 `input_locks_error` 문자열, 다른 항목은 그대로 |
+| `debug_stage_delay` | 비행 계획의 스테이지 확인(`staged`)을 첫 요청 뒤 `seconds`초(게임 시간)까지 미룸. 이미 작동한 스테이지는 다시 요청하지 않고, 실패 판정 기한도 그만큼 늘어남. `0`이면 해제. `reload_mod`로 넘기지 않음 |
 | `debug_add_part_timeout` | `on` true면 부모에 붙이는 `add_part`가 메인 스레드 무응답처럼 `timeout`으로 실패. 만들어진 부품은 나중에 치워지고 KSP.log에 `discarded N loose part(s) after a timeout`. 루트 배치는 영향 없음 |
 
 - 설계는 [디버그도구 설계 문서](docs/ksp-bridge/0019-디버그도구-설계.md), 단위별 구현과 실측은 [디버그도구 개발 문서](docs/ksp-bridge/0020-디버그도구-개발.md)에 있습니다.

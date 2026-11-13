@@ -6,7 +6,7 @@ namespace KspBridge
 {
     public static class Routes
     {
-        public const string Version = "0.2.28";
+        public const string Version = "0.2.29";
 
         public static List<Route> Build(MainThreadDispatcher dispatcher)
         {

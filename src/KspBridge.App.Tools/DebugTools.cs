@@ -28,6 +28,13 @@ namespace KspBridge.App
         public Task<string> InputLocksError([Description("true to inject the failure, false to stop")] bool on, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/debug/input_locks_error", new { on }, ct);
 
+        [McpServerTool(Name = "debug_stage_delay", Destructive = true)]
+        [Description(Flag + "hold the flight plan's stage confirmation (staged event) until N seconds of game time after its first " +
+            "stage request, without re-requesting a stage that already fired; the failure deadline grows by N too. Not handed over: " +
+            "after reload_mod the new logic confirms at once. Returns get_status.debug.")]
+        public Task<string> StageDelay([Description("Seconds of game time, >= 0; 0 releases")] double seconds, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/debug/stage_delay", new { seconds }, ct);
+
         [McpServerTool(Name = "debug_add_part_timeout", Destructive = true)]
         [Description(Flag + "make add_part onto a parent fail with error timeout, as when the main thread does not answer " +
             "(the spawned parts are discarded later, KSP.log 'discarded N loose part(s) after a timeout'). Root placement is not " +

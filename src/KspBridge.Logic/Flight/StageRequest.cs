@@ -25,6 +25,7 @@ namespace KspBridge.Flight
         private double _firstUt = double.NaN;
         private double _lastSendUt = double.NaN;
         private int _tries;
+        private double _firstSendUt = double.NaN;   // debug_stage_delay only: not handed over (a new logic has no delay)
 
         /// <summary>True once ActivateNextStage was sent for this request.</summary>
         public bool Sent => _tries > 0;
@@ -39,8 +40,13 @@ namespace KspBridge.Flight
                 _firstUt = ut;
                 _stageBefore = v.currentStage;
             }
+            double hold = Debugging.DebugState.StageDelayS;   // 0 normally
             if (v.currentStage < _stageBefore)
             {
+                if (hold > 0 && !double.IsNaN(_firstSendUt) && ut - _firstSendUt < hold)
+                {
+                    return Result.Waiting;   // debug: confirmation held; never re-request a stage that already fired
+                }
                 UnityEngine.Debug.Log("[KspBridge] stage request confirmed: stage " + _stageBefore + " -> " + v.currentStage + " ut " + ut + " (sent ut " + _lastSendUt + ")");
                 return Result.Done;
             }
@@ -49,8 +55,8 @@ namespace KspBridge.Flight
                 return Result.Waiting;
             }
             bool expired = _tries >= MaxTries
-                ? ut - _lastSendUt > ConfirmS              // not confirmed even after the re-request
-                : ut - _firstUt > ConfirmS * MaxTries;      // cooldown or a lock kept us from even sending
+                ? ut - _lastSendUt > ConfirmS + hold              // not confirmed even after the re-request
+                : ut - _firstUt > ConfirmS * MaxTries + hold;      // cooldown or a lock kept us from even sending
             if (expired)
             {
                 return Result.Failed;
@@ -60,6 +66,10 @@ namespace KspBridge.Flight
             {
                 StageManager.ActivateNextStage();
                 _lastSendUt = ut;
+                if (double.IsNaN(_firstSendUt))
+                {
+                    _firstSendUt = ut;
+                }
                 _tries++;
                 UnityEngine.Debug.Log("[KspBridge] stage request sent: stage " + v.currentStage + " ut " + ut + " try " + _tries);
             }

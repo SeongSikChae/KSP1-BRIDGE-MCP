@@ -80,6 +80,10 @@ namespace KspBridge.Debugging
         /// <summary>debug_add_part_timeout: add_part's Finish wait is 0. Read on the HTTP thread (add_part runs there).</summary>
         public static volatile bool AddPartTimeout;
 
+        /// <summary>debug_stage_delay: StageRequest holds its confirmation this long after the first send. Main thread only
+        /// (volatile double does not compile).</summary>
+        public static double StageDelayS;
+
         public static void SetInputLock(ulong? mask)
         {
             InputLockManager.RemoveControlLock(LockId);
@@ -96,6 +100,7 @@ namespace KspBridge.Debugging
             SetInputLock(null);
             InputLocksError = false;
             AddPartTimeout = false;
+            StageDelayS = 0;
         }
 
         /// <summary>get_status.debug: null with the flag off.</summary>
@@ -107,6 +112,7 @@ namespace KspBridge.Debugging
             }
             return new Dictionary<string, object>
             {
+                ["stage_delay_s"] = StageDelayS,
                 ["input_lock"] = InputLockMask.HasValue
                     ? new Dictionary<string, object> { ["id"] = LockId, ["mask"] = "0x" + InputLockMask.Value.ToString("X") }
                     : null,
