@@ -272,6 +272,27 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 
 **reload 동작**: 계획 실행 중 `reload_mod`를 해도 계획이 끊기지 않습니다. 이전 Logic이 계획·이벤트·Mode 상태·스테이징 진행·직전 명령·SAS(상태·모드)·RCS(계획 전 상태와 변경 여부)·자세 제어 적분값을 넘기고, 새 Logic이 계획을 다시 검증해 같은 단계에서 이어받습니다(`logic_reloaded {resumed: true}`, `plan.id`·`epoch` 유지, `seq` 이어짐). 계획이 건 시간 가속은 넘기기 전에 풀고(`warp_stopped`), 단계가 계속 가속을 원하면 새 Logic이 다시 겁니다(사용자가 취소한 가속은 그 단계에서 다시 걸지 않음). 이어받을 수 없으면(새 검증 규칙에서 실패, 활성 기체가 다름 등) `plan_aborted {reason: reload_incompatible}`로 중단합니다. 활성 기체가 계획의 기체면 스로틀 0과 SAS 복원을 하고, 다른 기체면 입력 스로틀만 0으로 둡니다. 이어받았는데 추력만 없으면 `no_thrust`로 중단합니다. 계획이 없으면 사용자의 스로틀·SAS·가속을 건드리지 않습니다. 비행 제어 설계는 [비행제어 설계 문서](docs/ksp-bridge/0005-비행제어-설계.md), 단위별 구현 결정은 [비행제어 개발 문서](docs/ksp-bridge/0006-비행제어-개발.md)에 있습니다.
 
+### 디버그 도구
+
+평소에는 재현하기 어려운 경로(스테이징 지연, 엔진 정지, add_part 대기 초과, 입력 잠금, reload 실패 등)를 검증하려고 일부러 고장을 넣는 도구입니다. 기본은 꺼져 있고, 꺼져 있으면 모든 디버그 도구가 409 `debug_disabled`이며 다른 도구 동작은 바뀌지 않습니다.
+
+켜는 법: `<KspDir>\GameData\KspBridge\debug.cfg`를 아래 내용으로 만들고 `reload_mod`를 합니다. 빌드는 이 파일을 배포하지 않으므로 다시 빌드해도 유지됩니다. 끄려면 파일을 지우거나 `enabled = false`로 바꾸고 `reload_mod`를 합니다.
+
+```
+KSPBRIDGE_DEBUG
+{
+    enabled = true
+}
+```
+
+상태는 `get_status.debug`에 있습니다(꺼져 있으면 `null`). `debug_clear`, 씬 전환, `reload_mod`가 디버그 상태를 모두 풉니다.
+
+| 도구 | 하는 일 |
+| --- | --- |
+| `debug_clear` | 디버그 상태를 모두 풀고 `get_status.debug`를 돌려줌 |
+
+- 설계는 [디버그도구 설계 문서](docs/ksp-bridge/0019-디버그도구-설계.md), 단위별 구현과 실측은 [디버그도구 개발 문서](docs/ksp-bridge/0020-디버그도구-개발.md)에 있습니다.
+
 ## 테스트
 
 ```bash

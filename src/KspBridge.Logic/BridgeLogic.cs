@@ -36,12 +36,14 @@ namespace KspBridge
             Stopped = false;
             // What can fail first; the hooks, the takeover and consuming the handover last.
             Settings.Reload();
+            Debugging.DebugState.LoadFlag();   // never throws
             List<Route> routes = Routes.Build(context.Dispatcher);
             HandoverState h = Handover.Parse(context.Handover);   // never throws: a bad handover is h.Incompatible / no epoch
             try
             {
                 FlightScene.Hook();
                 FlightReset.Hook();
+                Debugging.DebugState.Hook();   // only when debug.cfg enables it
             }
             catch
             {
@@ -49,6 +51,7 @@ namespace KspBridge
                 {
                     FlightScene.Unhook();   // undo what was hooked; context.Handover stays for the previous logic's restart
                     FlightReset.Unhook();
+                    Debugging.DebugState.Unhook();
                 }
                 catch (Exception e)
                 {
@@ -91,6 +94,14 @@ namespace KspBridge
                 UnityEngine.Debug.LogError("[KspBridge] flight reset unhook failed: " + e);
             }
             IList<string> released = Coordinator.Stop(_context);   // never throws
+            try
+            {
+                Debugging.DebugState.Unhook();
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] debug unhook failed: " + e);
+            }
             try
             {
                 IList<string> pulse = Flight.Control.ManualControl.Stop();   // the pulse is not handed over
@@ -143,6 +154,15 @@ namespace KspBridge
             {
                 status["translate"] = null;
                 status["translate_error"] = e.GetType().Name + ": " + e.Message;
+            }
+            try
+            {
+                status["debug"] = Debugging.DebugState.Status();   // null with the flag off
+            }
+            catch (Exception e)
+            {
+                status["debug"] = null;
+                status["debug_error"] = e.GetType().Name + ": " + e.Message;
             }
             return status;
         }

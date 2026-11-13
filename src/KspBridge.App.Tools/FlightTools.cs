@@ -14,7 +14,8 @@ namespace KspBridge.App
             "requested_scene, loading_seconds (while loading; if it keeps growing, reload_mod), can_recover, can_revert_launch, " +
             "can_revert_editor, revert_editor_facility, revert_unavailable [reasons], recovery (last flight-scene recover_vessel " +
             "{state pending|done|failed, vessel, id, crew, funds, science, reputation, error})}; the can_* flags are judged only in a " +
-            "loaded flight scene and are false elsewhere; translate {active, vessel_id, ended} (last rcs_translate pulse in any scene, null before any).")]
+            "loaded flight scene and are false elsewhere; translate {active, vessel_id, ended} (last rcs_translate pulse in any scene, null before any); " +
+            "debug (debug tool state, null unless GameData/KspBridge/debug.cfg enables the debug tools).")]
         public Task<string> GetStatus(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/status", null, ct);
 
