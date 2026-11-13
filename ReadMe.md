@@ -237,6 +237,12 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 - **RCS 사용**(모든 단계 공통 키 `rcs`): `true`·`false`면 그 단계가 시작될 때 RCS 그룹을 그 값으로 맞춥니다. 켜 두면 RCS 토크가 자세 제어에 더해집니다(진공에서 휠 토크가 작은 기체에 유용). 계획이 RCS를 바꾼 뒤 `rcs`를 생략한 단계가 시작되면 계획 전 상태로 되돌리고, 계획이 끝날 때도 되돌립니다. 단계 중에는 강제하지 않으므로 그 사이 키로 바꾼 RCS는 다음 단계 시작이나 계획 종료 때 다시 맞춰집니다. 스로틀 연동(`useThrottle`)이 켜진 RCS 부품은 RCS가 켜져 있으면 추진 중 스로틀에 따라 분사합니다(스톡 동작).
 - 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태와 모드로, RCS를 계획이 바꿨으면 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
 - **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`, `revert`(`revert_flight`), `recover`(`recover_vessel`), `leave`(`leave_flight`).
+- **부품 진단 이벤트**: 계획 실행 여부와 관계없이, 로드된 기체(떨어져 나간 잔해 포함) 부품의 소멸과 원인을 `get_flight_events`와 KSP.log(`[KspBridge] part_...` 줄)에 같은 내용으로 남깁니다. `active`는 활성 기체 소속인지이고, 계획이 없을 때 `step`은 0입니다.
+  - `part_lost`: 부품이 사라지기 직전 상태(기체 동압 `q_kpa`, `g`, 온도·한계). 회수·잔해 정리·EVA 탑승처럼 기체째 없어지는 경우는 남지 않습니다.
+  - `part_collision`: 충돌(`kind` `part`·`crash`·`splashdown`, 상대 `other`, 상대 속도 `speed` m/s, `crash_tolerance`). 충돌로 부서진 부품은 `part_lost` 바로 뒤에 옵니다(KSP가 부품을 터뜨린 뒤 충돌 이벤트를 보냄).
+  - `part_limit`: 과열·과압·과G(`kind` `overheat`·`pressure`·`g`, `msg` "현재 / 한계").
+  - `part_joint_break`: 하중으로 접합부가 끊김(`parent`, 끊은 힘 `force`). 디커플러·도킹 해제 같은 정상 분리는 남지 않습니다.
+  - KSP 자체 로그는 충돌 내용을 `VERBOSE_DEBUG_LOG`가 켜져 있을 때만 남기므로, 원인 확인은 이 이벤트로 합니다.
 
 ### 리셋·회수
 
