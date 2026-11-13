@@ -43,8 +43,8 @@ namespace KspBridge.Flight
         /// <summary>Never throws. A wrong format or unreadable plan gives Incompatible (with whatever plan facts could be read).</summary>
         public static HandoverState Parse(string json)
         {
-            HandoverState s = new HandoverState();
-            if (string.IsNullOrEmpty(json))
+            HandoverState s = new HandoverState { Present = !string.IsNullOrEmpty(json) };
+            if (!s.Present)
             {
                 return s;
             }
@@ -131,6 +131,8 @@ namespace KspBridge.Flight
 
     public sealed class HandoverState
     {
+        /// <summary>A handover string was passed; false when the logic starts without one (first load after KSP start, or a reload after the loader dropped the handover).</summary>
+        public bool Present;
         public string Epoch;
         public List<object> Events;
         public long Seq;

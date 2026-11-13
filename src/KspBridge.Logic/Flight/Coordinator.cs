@@ -514,7 +514,11 @@ namespace KspBridge.Flight
             Safe(() => FlightEvents.Restore(h.Events, h.Seq, h.Epoch));
             if (h.Plan == null)
             {
-                Safe(() => FlightEvents.Add("logic_reloaded", -1, Reloaded(false)));
+                // No handover (first load after KSP start, or after a dropped handover): no reload event (and Planetarium may not exist yet).
+                if (h.Present)
+                {
+                    Safe(() => FlightEvents.Add("logic_reloaded", -1, Reloaded(false)));
+                }
                 return;
             }
             HandedPlan hp = h.Plan;
