@@ -39,7 +39,7 @@ namespace KspBridge
     /// <summary>Loads, swaps and drives the logic assembly. Main thread only.</summary>
     public static class LogicHost
     {
-        public const string LoaderVersion = "0.0.3";
+        public const string LoaderVersion = "0.0.4";
 
         private static ILogic _logic;
         private static LogicContext _context;
@@ -197,7 +197,8 @@ namespace KspBridge
         }
 
         /// <summary>
-        /// Nobody took the handover: if a plan was running, leave no throttle behind and restore SAS to its state before the plan.
+        /// Nobody took the handover: if a plan was running, leave no throttle behind and restore the plan vessel's SAS group
+        /// and the RCS the plan changed. Only a loaded vessel whose persistentId is the plan's vessel_id is touched.
         /// Without a plan key (no plan, minimal handover after a serialization failure) the user's manual throttle and SAS are left alone.
         /// </summary>
         private static void DropHandover()
@@ -205,18 +206,63 @@ namespace KspBridge
             if (_context.Handover == null) return;
             try
             {
-                // Minimal parse: only {..., plan: {..., sas_before: bool}}. Parse failure or no plan does nothing.
+                // Minimal parse: only {..., plan: {vessel_id, sas_before, rcs_before, rcs_touched}}. Parse failure or no plan does nothing.
                 if (Json.Json.Parse(_context.Handover) is Dictionary<string, object> h
                     && h.TryGetValue("plan", out object p) && p is Dictionary<string, object> plan)
                 {
-                    try { FlightInputHandler.state.mainThrottle = 0; } catch { }
-                    string sasNote = "sas untouched";
-                    if (plan.TryGetValue("sas_before", out object s) && s is bool sas)
+                    string note = "throttle 0";
+                    // Like Logic Coordinator.Safe: each failed step is logged as an error with its stack and the rest still run.
+                    void Fail(string what, Exception ex)
                     {
-                        FlightGlobals.ActiveVessel?.ActionGroups.SetGroup(KSPActionGroup.SAS, sas);
-                        sasNote = "sas " + sas;
+                        Debug.LogError("[KspBridge] handover drop step failed (" + what + "): " + ex);
+                        note += ", " + what + " failed";
                     }
-                    Debug.Log("[KspBridge] handover dropped: throttle 0, " + sasNote);
+                    try { FlightInputHandler.state.mainThrottle = 0; } catch (Exception e) { note = "input throttle not zeroed"; Fail("throttle", e); }
+                    // Json numbers are double; persistentId (uint) converts to double exactly.
+                    plan.TryGetValue("vessel_id", out object id);
+                    Vessel v = null;
+                    if (id == null) note += ", plan vessel_id missing";
+                    else if (!(id is double d)) note += ", plan vessel_id not a number (" + id.GetType().Name + " " + id + ")";
+                    else
+                    {
+                        try
+                        {
+                            v = FlightGlobals.VesselsLoaded?.FirstOrDefault(x => x != null && x.persistentId == d);
+                            if (v == null) note += ", plan vessel " + d.ToString("R") + " not loaded";
+                        }
+                        catch (Exception e) { Fail("vessel lookup", e); }
+                    }
+                    if (v == null) note += ", vessel throttle/sas/rcs untouched";
+                    else
+                    {
+                        try { v.ctrlState.mainThrottle = 0; } catch (Exception e) { Fail("vessel throttle", e); }
+                        try
+                        {
+                            if (plan.TryGetValue("sas_before", out object s) && s is bool sas)
+                            {
+                                v.ActionGroups.SetGroup(KSPActionGroup.SAS, sas);
+                                note += ", sas " + sas;
+                            }
+                            else note += ", sas untouched";
+                        }
+                        catch (Exception e) { Fail("sas", e); }
+                        try
+                        {
+                            if (plan.TryGetValue("rcs_touched", out object t) && t is bool touched && touched
+                                && plan.TryGetValue("rcs_before", out object r) && r is bool rcs && v.ActionGroups[KSPActionGroup.RCS] != rcs)
+                            {
+                                if (Overridden(v, KSPActionGroup.RCS)) note += ", rcs held by action group override " + v.GroupOverride;
+                                else
+                                {
+                                    v.ActionGroups.SetGroup(KSPActionGroup.RCS, rcs);
+                                    note += v.ActionGroups[KSPActionGroup.RCS] == rcs ? ", rcs " + rcs : ", rcs did not change (cooldown)";
+                                }
+                            }
+                            else note += ", rcs untouched";
+                        }
+                        catch (Exception e) { Fail("rcs", e); }
+                    }
+                    Debug.Log("[KspBridge] handover dropped: " + note);
                 }
             }
             catch (Exception e)
@@ -224,6 +270,14 @@ namespace KspBridge
                 Debug.LogError("[KspBridge] handover drop failed: " + e);
             }
             _context.Handover = null;
+        }
+
+        // Same as Logic ManualControl.Overridden (the loader does not reference Logic).
+        private static bool Overridden(Vessel v, KSPActionGroup g)
+        {
+            int n = v.GroupOverride;
+            return GameSettings.ADDITIONAL_ACTION_GROUPS && n > 0 && v.OverrideDefault != null && n <= v.OverrideDefault.Length
+                && (v.OverrideDefault[n - 1] || (v.OverrideActionControl[n - 1] & g) != 0);
         }
 
         private static ILogic Create()

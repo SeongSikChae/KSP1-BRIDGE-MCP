@@ -66,7 +66,7 @@ dotnet build KspBridge.slnx
 | `KspBridge.Logic.dll` | `GameData\KspBridge\PluginData` | `reload_mod` 도구 호출 |
 
 `PluginData`에 두기 때문에 KSP가 Logic을 자동 로드하지 않고, Mod의 로더가 로드합니다.
-Mod와 Logic 사이 인터페이스(`ILogic`)가 바뀌면 Mod의 `LoaderVersion`이 올라가며, 이때는 Mod·Logic을 함께 배포하고 KSP를 한 번 재시작해야 합니다(기체 설계 기능 추가 때 `ILogic.Status`가 생겨 `LoaderVersion` 0.0.2). 그 뒤 Logic만 바뀌면 `reload_mod`로 충분합니다.
+Mod와 Logic 사이 인터페이스(`ILogic`)나 로더 동작이 바뀌면 Mod의 `LoaderVersion`이 올라가며, 이때는 KSP를 끈 상태에서 Mod를 배포하고 KSP를 한 번 재시작해야 합니다(인터페이스가 바뀌면 Logic도 함께 배포. 기체 설계 기능 추가 때 `ILogic.Status`가 생겨 `LoaderVersion` 0.0.2). 그 뒤 Logic만 바뀌면 `reload_mod`로 충분합니다.
 KSP 실행 중에는 `Plugins\KspBridge.Mod.dll`이 잠겨 있을 수 있습니다. 그때 Mod를 바꾸려면 KSP를 끄고 빌드합니다.
 
 ### Mod 설정 (`settings.cfg`)
@@ -267,7 +267,7 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 - **SAS 모드**: 사용 가능 여부는 게임의 판정(`CanSetMode`)만 따릅니다. 쓸 수 없으면 409 `sas_mode_unavailable`(메시지에 지금 고를 수 있는 모드), SAS 자체가 없으면 `sas_unavailable`입니다. 모드의 기준 프레임은 navball 속도 표시 모드(`speed_mode`)를 따르고, 게임이 고도·목표 접근에 따라 표시 모드를 스스로 바꿀 수 있으므로 `reference`는 유지가 보장되지 않습니다. 오류가 나면 SAS와 속도 표시는 바뀌지 않습니다.
 - **액션 그룹**: 그룹 쿨다운이나 추가 액션 그룹 오버라이드로 바꿀 수 없으면 409 `group_locked`입니다. EVA는 `eva_not_supported`, 조종할 수 없는 기체는 `not_controllable`입니다.
 - **병진 펄스**: RCS가 꺼져 있으면 409 `rcs_off`(먼저 `set_rcs`), 레일 가속 중이면 `on_rails`입니다. 새 펄스는 진행 중인 펄스를 대신하고, 펄스 중 `submit_flight_plan`이 오면 펄스를 멈춥니다. `controls.translate.dv_local`은 펄스 동안의 비중력 속도 변화(m/s, 같은 축)이고, 착지·대기·프레임 변경이 섞이면 `dv_note`(`landed`, `atmosphere`, `frame_changed`)로 알립니다. 종료 사유 `ended`: `done`, `replaced`, `plan`, `scene`, `vessel_changed`, `vessel_lost`, `revert`, `leave`, `recover`, `on_rails`, `rcs_off`, `not_controllable`, `docked`, `error`, `logic_stop`. 우주센터로 간 뒤에도 `get_status.translate`로 확인합니다. 펄스는 `reload_mod`에서 넘기지 않고 멈춥니다(`released`에 "rcs pulse stopped").
-- **알려진 제약**: 계획 중 KSP를 종료하거나 `reload_mod`의 새 로직과 이전 로직이 모두 시작하지 못하면, 로더는 SAS만 복원하고 RCS는 복원하지 않습니다. 이 Logic보다 이전 Logic으로 되돌리면 단계 키 `rcs`가 있는 계획은 이어받지 못하고(`reload_incompatible`), 이때 계획이 바꾼 RCS는 복원되지 않습니다. 추가 액션 그룹 오버라이드가 RCS를 잡고 있으면 계획은 RCS를 바꾸거나 복원하지 않습니다. `set_sas` 오류 뒤 SAS 그룹을 되돌리지 못한 드문 경우(쿨다운)는 오류 메시지에 "SAS group left ..."로 알립니다.
+- **알려진 제약**: 계획 중 `reload_mod`의 새 로직과 이전 로직이 모두 시작하지 못하면, 로더는 스로틀을 0으로 두고, 계획 기체가 로드돼 있을 때만 그 기체의 SAS 켜짐 여부와 계획이 바꾼 RCS를 복원합니다. SAS 모드는 복원하지 않습니다. 계획 중 KSP를 종료하면 스로틀·SAS·RCS를 복원하지 않습니다. 이 Logic보다 이전 Logic으로 되돌리면 단계 키 `rcs`가 있는 계획은 이어받지 못하고(`reload_incompatible`), 이때 계획이 바꾼 RCS는 복원되지 않습니다. 추가 액션 그룹 오버라이드가 RCS를 잡고 있으면 계획은 RCS를 바꾸거나 복원하지 않습니다. `set_sas` 오류 뒤 SAS 그룹을 되돌리지 못한 드문 경우(쿨다운)는 오류 메시지에 "SAS group left ..."로 알립니다.
 - 설계는 [SASRCS 설계 문서](docs/ksp-bridge/0014-SASRCS-설계.md), 단위별 구현과 실측은 [SASRCS 개발 문서](docs/ksp-bridge/0015-SASRCS-개발.md)에 있습니다.
 
 **reload 동작**: 계획 실행 중 `reload_mod`를 해도 계획이 끊기지 않습니다. 이전 Logic이 계획·이벤트·Mode 상태·스테이징 진행·직전 명령·SAS(상태·모드)·RCS(계획 전 상태와 변경 여부)·자세 제어 적분값을 넘기고, 새 Logic이 계획을 다시 검증해 같은 단계에서 이어받습니다(`logic_reloaded {resumed: true}`, `plan.id`·`epoch` 유지, `seq` 이어짐). 계획이 건 시간 가속은 넘기기 전에 풀고(`warp_stopped`), 단계가 계속 가속을 원하면 새 Logic이 다시 겁니다(사용자가 취소한 가속은 그 단계에서 다시 걸지 않음). 이어받을 수 없으면(새 검증 규칙에서 실패, 활성 기체가 다름 등) `plan_aborted {reason: reload_incompatible}`로 중단합니다. 활성 기체가 계획의 기체면 스로틀 0과 SAS 복원을 하고, 다른 기체면 입력 스로틀만 0으로 둡니다. 이어받았는데 추력만 없으면 `no_thrust`로 중단합니다. 계획이 없으면 사용자의 스로틀·SAS·가속을 건드리지 않습니다. 비행 제어 설계는 [비행제어 설계 문서](docs/ksp-bridge/0005-비행제어-설계.md), 단위별 구현 결정은 [비행제어 개발 문서](docs/ksp-bridge/0006-비행제어-개발.md)에 있습니다.
