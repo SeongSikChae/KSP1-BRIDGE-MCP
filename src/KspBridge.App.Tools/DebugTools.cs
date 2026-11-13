@@ -27,5 +27,12 @@ namespace KspBridge.App
             "(other fields unchanged). Returns get_status.debug.")]
         public Task<string> InputLocksError([Description("true to inject the failure, false to stop")] bool on, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/debug/input_locks_error", new { on }, ct);
+
+        [McpServerTool(Name = "debug_add_part_timeout", Destructive = true)]
+        [Description(Flag + "make add_part onto a parent fail with error timeout, as when the main thread does not answer " +
+            "(the spawned parts are discarded later, KSP.log 'discarded N loose part(s) after a timeout'). Root placement is not " +
+            "affected. Returns get_status.debug.")]
+        public Task<string> AddPartTimeout([Description("true to inject the timeout, false to stop")] bool on, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/debug/add_part_timeout", new { on }, ct);
     }
 }

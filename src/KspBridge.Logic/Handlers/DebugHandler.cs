@@ -26,6 +26,11 @@ namespace KspBridge.Handlers
                 DebugState.InputLocksError = b.GetBool("on");
                 return DebugState.Status();
             });
+            yield return Post("add_part_timeout", b =>
+            {
+                DebugState.AddPartTimeout = b.GetBool("on");
+                return DebugState.Status();
+            });
         }
 
         private static ulong ParseMask(string s)

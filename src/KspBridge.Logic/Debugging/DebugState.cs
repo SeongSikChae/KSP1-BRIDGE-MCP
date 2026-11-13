@@ -77,6 +77,9 @@ namespace KspBridge.Debugging
         /// <summary>debug_input_locks_error: InputLocks.Describe throws.</summary>
         public static volatile bool InputLocksError;
 
+        /// <summary>debug_add_part_timeout: add_part's Finish wait is 0. Read on the HTTP thread (add_part runs there).</summary>
+        public static volatile bool AddPartTimeout;
+
         public static void SetInputLock(ulong? mask)
         {
             InputLockManager.RemoveControlLock(LockId);
@@ -92,6 +95,7 @@ namespace KspBridge.Debugging
         {
             SetInputLock(null);
             InputLocksError = false;
+            AddPartTimeout = false;
         }
 
         /// <summary>get_status.debug: null with the flag off.</summary>
@@ -107,6 +111,7 @@ namespace KspBridge.Debugging
                     ? new Dictionary<string, object> { ["id"] = LockId, ["mask"] = "0x" + InputLockMask.Value.ToString("X") }
                     : null,
                 ["input_locks_error"] = InputLocksError,
+                ["add_part_timeout"] = AddPartTimeout,
             };
         }
     }

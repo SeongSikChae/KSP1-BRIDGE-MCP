@@ -91,7 +91,9 @@ namespace KspBridge.Editor
                     }
                     System.Threading.Thread.Sleep(20);
                 }
-                return dispatcher.Invoke(() => Finish(pending), MainThreadTimeout);
+                // debug_add_part_timeout: cancelled before it runs → 504 timeout, as when the main thread does not answer
+                TimeSpan finishTimeout = Debugging.DebugState.AddPartTimeout ? TimeSpan.Zero : MainThreadTimeout;
+                return dispatcher.Invoke(() => Finish(pending), finishTimeout);
             }
             catch (ApiException e) when (e.Code == "timeout")
             {
@@ -759,6 +761,7 @@ namespace KspBridge.Editor
                 try
                 {
                     dispatcher.Invoke(() => { DiscardAll(null, null, pending.Children, false); return null; }, TimeSpan.FromMinutes(10));
+                    Debug.Log("[KspBridge] discarded " + pending.Children.Count + " loose part(s) after a timeout");
                 }
                 catch (Exception e)
                 {
