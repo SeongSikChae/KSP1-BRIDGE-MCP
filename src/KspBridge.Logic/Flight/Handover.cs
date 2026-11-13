@@ -38,6 +38,7 @@ namespace KspBridge.Flight
             ["epoch"] = FlightEvents.Epoch,
             ["events"] = FlightEvents.Save(),
             ["seq"] = (double)FlightEvents.LastSeq,
+            ["dropped_seq"] = (double)FlightEvents.DroppedSeq,
         };
 
         /// <summary>Never throws. A wrong format or unreadable plan gives Incompatible (with whatever plan facts could be read).</summary>
@@ -81,6 +82,8 @@ namespace KspBridge.Flight
                 s.Seq = 0;
                 s.Error = "handover header unreadable: " + e.Message;
             }
+            // Read apart from the header: a bad value only loses the truncation hint (null = the restore's fallback), never the events.
+            s.DroppedSeq = formatOk && h.TryGetValue("dropped_seq", out object ds) && ds is double dsv ? (long?)(long)dsv : null;
             if (!h.TryGetValue("plan", out object p) || !(p is Dictionary<string, object> plan))
             {
                 return s;
@@ -136,6 +139,8 @@ namespace KspBridge.Flight
         public string Epoch;
         public List<object> Events;
         public long Seq;
+        /// <summary>Largest event seq the previous logic lost; null from an older logic or an unreadable value (Restore falls back).</summary>
+        public long? DroppedSeq;
         public HandedPlan Plan;
         public bool Incompatible;
         public string Error;

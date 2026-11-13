@@ -527,7 +527,7 @@ namespace KspBridge.Flight
         /// </summary>
         public static void Resume(HandoverState h)
         {
-            Safe(() => FlightEvents.Restore(h.Events, h.Seq, h.Epoch));
+            Safe(() => FlightEvents.Restore(h.Events, h.Seq, h.Epoch, h.DroppedSeq));
             if (h.Plan == null)
             {
                 // No handover (first load after KSP start, or after a dropped handover): no reload event (and Planetarium may not exist yet).

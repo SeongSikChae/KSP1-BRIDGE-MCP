@@ -129,7 +129,8 @@ namespace KspBridge.Flight
 
         private static void Emit(string type, Dictionary<string, object> data)
         {
-            FlightEvents.Add(type, Coordinator.StepIndex, data);
+            // StepIndex keeps the last step after a plan ends, so -1 ("no step", as logic_reloaded) unless a plan is running.
+            FlightEvents.AddPart(type, Coordinator.Running ? Coordinator.StepIndex : -1, data);
             UnityEngine.Debug.Log("[KspBridge] " + type + " " + Format(data));
         }
 

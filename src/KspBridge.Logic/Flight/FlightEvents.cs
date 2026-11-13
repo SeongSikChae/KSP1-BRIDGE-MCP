@@ -24,34 +24,63 @@ namespace KspBridge.Flight
     }
 
     /// <summary>
-    /// Flight event ring buffer (500) with an ever-increasing seq. A trial (Submit's first command calculation) collects its
-    /// events aside; the caller commits them on success or drops them on failure. Main thread only.
+    /// Flight events with an ever-increasing seq in two rings (500 each): plan events and part diagnostics, so a vessel
+    /// breaking apart never pushes plan events out. Reads merge both by seq. A trial (Submit's first command calculation)
+    /// collects its plan events aside; the caller commits them on success or drops them on failure. Main thread only.
     /// </summary>
     public static class FlightEvents
     {
         public const int Capacity = 500;
 
-        private static readonly FlightEvent[] _buf = new FlightEvent[Capacity];
-        private static int _start;
-        private static int _count;
+        /// <summary>One ring of events; overwriting the oldest raises DroppedSeq.</summary>
+        private sealed class Ring
+        {
+            private readonly FlightEvent[] _buf = new FlightEvent[Capacity];
+            private int _start;
+            public int Count;
+
+            /// <summary>i-th oldest event.</summary>
+            public FlightEvent At(int i) => _buf[(_start + i) % Capacity];
+
+            public void Put(FlightEvent e)
+            {
+                if (Count < Capacity)
+                {
+                    _buf[(_start + Count) % Capacity] = e;
+                    Count++;
+                    return;
+                }
+                DroppedSeq = Math.Max(DroppedSeq, _buf[_start].Seq);
+                _buf[_start] = e;
+                _start = (_start + 1) % Capacity;
+            }
+
+            public void Clear()
+            {
+                Array.Clear(_buf, 0, Capacity);
+                _start = 0;
+                Count = 0;
+            }
+        }
+
+        private static readonly Ring _plan = new Ring();    // every event except the part diagnostics
+        private static readonly Ring _parts = new Ring();   // part diagnostics (PartTypes)
         private static List<FlightEvent> _trial;
 
+        /// <summary>Types that go to the part ring (also when restored from a handover).</summary>
+        private static readonly HashSet<string> PartTypes = new HashSet<string> { "part_lost", "part_collision", "part_limit", "part_joint_break" };
+
         public static long LastSeq { get; private set; }
+
+        /// <summary>Largest seq lost by overwriting either ring, or before the restored window; since &lt; DroppedSeq means truncated.</summary>
+        public static long DroppedSeq { get; private set; }
 
         /// <summary>Event session id: new when the buffer starts fresh (a logic start without handover).</summary>
         public static string Epoch { get; private set; } = Guid.NewGuid().ToString("N");
 
         public static void Add(string type, int step, Dictionary<string, object> data)
         {
-            Vessel v = HighLogic.LoadedSceneIsFlight && FlightGlobals.fetch != null ? FlightGlobals.ActiveVessel : null;   // also called outside flight (missed scene hook)
-            FlightEvent e = new FlightEvent
-            {
-                Ut = Planetarium.GetUniversalTime(),
-                Met = v != null ? v.missionTime : double.NaN,
-                Type = type,
-                Step = step,
-                Data = data,
-            };
+            FlightEvent e = Create(type, step, data);
             if (_trial != null)
             {
                 _trial.Add(e);
@@ -60,6 +89,27 @@ namespace KspBridge.Flight
             {
                 Push(e);
             }
+        }
+
+        /// <summary>Part diagnostics: own ring, never part of a trial (unlike plan events they do not recur on the next Tick).</summary>
+        public static void AddPart(string type, int step, Dictionary<string, object> data)
+        {
+            FlightEvent e = Create(type, step, data);
+            e.Seq = ++LastSeq;
+            _parts.Put(e);
+        }
+
+        private static FlightEvent Create(string type, int step, Dictionary<string, object> data)
+        {
+            Vessel v = HighLogic.LoadedSceneIsFlight && FlightGlobals.fetch != null ? FlightGlobals.ActiveVessel : null;   // also called outside flight (missed scene hook)
+            return new FlightEvent
+            {
+                Ut = Planetarium.GetUniversalTime(),
+                Met = v != null ? v.missionTime : double.NaN,
+                Type = type,
+                Step = step,
+                Data = data,
+            };
         }
 
         /// <summary>Following Adds go to a trial list without seq until EndTrial.</summary>
@@ -90,25 +140,32 @@ namespace KspBridge.Flight
         private static void Push(FlightEvent e)
         {
             e.Seq = ++LastSeq;
-            if (_count < Capacity)
+            _plan.Put(e);
+        }
+
+        /// <summary>Both rings oldest first, merged by seq (two cursors; each ring is in seq order).</summary>
+        private static IEnumerable<FlightEvent> Merged()
+        {
+            int i = 0, j = 0;
+            while (i < _plan.Count || j < _parts.Count)
             {
-                _buf[(_start + _count) % Capacity] = e;
-                _count++;
-            }
-            else
-            {
-                _buf[_start] = e;
-                _start = (_start + 1) % Capacity;
+                if (j >= _parts.Count || (i < _plan.Count && _plan.At(i).Seq < _parts.At(j).Seq))
+                {
+                    yield return _plan.At(i++);
+                }
+                else
+                {
+                    yield return _parts.At(j++);
+                }
             }
         }
 
-        /// <summary>Handover: the buffer oldest first ({seq, ut, met, type, step, data}; met NaN becomes null).</summary>
+        /// <summary>Handover: both rings merged oldest first ({seq, ut, met, type, step, data}; met NaN becomes null).</summary>
         public static List<object> Save()
         {
-            List<object> l = new List<object>(_count);
-            for (int i = 0; i < _count; i++)
+            List<object> l = new List<object>(_plan.Count + _parts.Count);
+            foreach (FlightEvent e in Merged())
             {
-                FlightEvent e = At(i);
                 l.Add(new Dictionary<string, object>
                 {
                     ["seq"] = (double)e.Seq,
@@ -122,22 +179,24 @@ namespace KspBridge.Flight
             return l;
         }
 
-        /// <summary>Logic stop: empties the buffer, seq and trial (the handover carries them; a restarted logic restores them).</summary>
+        /// <summary>Logic stop: empties both rings, seq, dropped seq and trial (the handover carries them; a restarted logic restores them).</summary>
         public static void Clear()
         {
-            Array.Clear(_buf, 0, Capacity);
-            _start = 0;
-            _count = 0;
+            _plan.Clear();
+            _parts.Clear();
             _trial = null;
             LastSeq = 0;
+            DroppedSeq = 0;
         }
 
-        /// <summary>Logic start: buffer, seq and epoch from the handover. No epoch (no handover, unreadable) = a new session id.
-        /// An unreadable event is skipped; seq still continues from the handed-over value.</summary>
-        public static void Restore(List<object> events, long seq, string epoch)
+        /// <summary>Logic start: rings, seq and epoch from the handover. No epoch (no handover, unreadable) = a new session id.
+        /// An unreadable event is skipped; seq still continues from the handed-over value. droppedSeq null (older logic):
+        /// the smallest restored seq − 1, the single-ring rule.</summary>
+        public static void Restore(List<object> events, long seq, string epoch, long? droppedSeq)
         {
             Clear();
             Epoch = string.IsNullOrEmpty(epoch) ? Guid.NewGuid().ToString("N") : epoch;
+            long first = 0, last = 0;
             if (events != null)
             {
                 foreach (object o in events)
@@ -163,23 +222,14 @@ namespace KspBridge.Flight
                     {
                         continue;   // a malformed event is skipped; seq still continues from the handed-over value
                     }
-                    if (_count < Capacity)
-                    {
-                        _buf[(_start + _count) % Capacity] = e;
-                        _count++;
-                    }
-                    else
-                    {
-                        _buf[_start] = e;
-                        _start = (_start + 1) % Capacity;
-                    }
+                    (PartTypes.Contains(type) ? _parts : _plan).Put(e);
+                    first = first == 0 ? e.Seq : Math.Min(first, e.Seq);
+                    last = Math.Max(last, e.Seq);
                 }
             }
-            LastSeq = Math.Max(seq, _count > 0 ? At(_count - 1).Seq : 0);
+            DroppedSeq = Math.Max(DroppedSeq, droppedSeq ?? (first > 0 ? first - 1 : 0));
+            LastSeq = Math.Max(seq, last);
         }
-
-        /// <summary>i-th oldest event.</summary>
-        private static FlightEvent At(int i) => _buf[(_start + i) % Capacity];
 
         /// <summary>Events with seq &gt; since, oldest first: {events, next, truncated, epoch}.</summary>
         public static Dictionary<string, object> Since(long since, int limit)
@@ -191,9 +241,12 @@ namespace KspBridge.Flight
             }
             List<object> events = new List<object>();
             long next = since;
-            for (int i = 0; i < _count && events.Count < limit; i++)
+            foreach (FlightEvent e in Merged())
             {
-                FlightEvent e = At(i);
+                if (events.Count >= limit)
+                {
+                    break;
+                }
                 if (e.Seq <= since)
                 {
                     continue;
@@ -201,7 +254,7 @@ namespace KspBridge.Flight
                 events.Add(e.ToDictionary());
                 next = e.Seq;
             }
-            bool truncated = _count > 0 && since < At(0).Seq - 1;   // events older than the buffer were dropped
+            bool truncated = since < DroppedSeq;   // events after the cursor were dropped
             return Result(events, next, truncated);
         }
 
