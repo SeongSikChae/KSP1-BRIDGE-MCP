@@ -157,7 +157,7 @@ namespace KspBridge.App
             "epoch identifies the event session (kept across reload_mod); if it changes, reset since to 0. " +
             "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, steps_replaced, step_started, step_completed, stage_burnout, staged {stage, reason}, " +
             "staging_completed {stage, tailoff_s, settle_s, ignited}, out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, plan_completed, plan_aborted {reason, condition, message}; " +
-            "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out):" +
+            "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
             "part_collision {part, part_id, vessel_id, active, kind part|crash|splashdown, other, speed m/s, crash_tolerance} (a collision that destroys the part comes right after its part_lost), " +
             "part_limit {part, part_id, vessel_id, active, kind overheat|pressure|g, msg \"current / limit\"}, part_joint_break {part, part_id, vessel_id, active, parent, parent_id, force} (physical breaks only, not decouplers).")]
