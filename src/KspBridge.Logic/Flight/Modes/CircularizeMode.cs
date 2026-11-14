@@ -27,14 +27,19 @@ namespace KspBridge.Flight.Modes
         /// <summary>Attitude error (deg) above which the mode does not burn.</summary>
         internal const double AttitudeGateDeg = 5;   // shared with ExecuteNodeMode (constants only)
 
-        /// <summary>Angular rate (rad/s) above which a wait step does not request warp yet (design 0048 decision 1).</summary>
-        internal const double WarpAlignRate = 0.02;
+        /// <summary>Angular rate (rad/s) above which a wait step does not request warp yet (design 0048 decision 1): still turning
+        /// (the controller slews at up to 0.5 rad/s). Measured revision: 0.02 never passed under a 0.08 rad/s, ~0.5° jitter.</summary>
+        internal const double WarpAlignRate = 0.15;
+
+        /// <summary>attitude_error must stay within AttitudeGateDeg this long (s) before a wait step requests warp.</summary>
+        internal const double WarpAlignHoldS = 2;
 
         /// <summary>Unaligned this long (s) while a warp is still worth it: warp_unavailable align_wait.</summary>
         internal const double AlignWaitS = 30;
 
         private readonly double _tolerance;
         private double _alignSince = double.NaN;   // wait start while unaligned (WarpGate)
+        private double _inGateSince = double.NaN;  // attitude_error within the gate since (WarpGate)
         private bool _burning;
         private Vector3d? _lockedDir;   // Orbit frame (orbit.pos / orbit.vel)
         private double _prevDv = double.PositiveInfinity;
@@ -56,25 +61,29 @@ namespace KspBridge.Flight.Modes
 
         public bool Done { get; private set; }
 
-        /// <summary>Wait steps request warp only once aligned (rails warp keeps the inertial attitude, so the burn direction stays
-        /// aligned through it). Our running warp counts as aligned: attitude_error is NaN on rails, and dropping WarpToUt would
-        /// make the Coordinator stop it.</summary>
-        internal static bool WarpAligned(Vessel v, Telemetry t)
-        {
-            if (Warp.Requested)
-            {
-                return true;
-            }
-            double err = t.Num["attitude_error"];
-            return !double.IsNaN(err) && err <= AttitudeGateDeg && v.angularVelocity.magnitude <= WarpAlignRate;
-        }
-
-        /// <summary>WarpToUt for a wait step: the target once aligned, else null; reports align_wait after AlignWaitS unaligned
-        /// while 15 s or more are left (Warp.Request's own floor).</summary>
-        internal static double? WarpGate(Vessel v, Telemetry t, double targetUt, ref double alignSince)
+        /// <summary>WarpToUt for a wait step: the target once aligned, else null. Aligned = attitude_error within AttitudeGateDeg
+        /// for WarpAlignHoldS and the angular rate at most WarpAlignRate (rails warp keeps the attitude of that moment, so the
+        /// burn direction stays within the gate through it). Our running warp counts as aligned: attitude_error is NaN on rails,
+        /// and dropping WarpToUt would make the Coordinator stop it. Reports align_wait after AlignWaitS unaligned while 15 s or
+        /// more are left (Warp.Request's own floor).</summary>
+        internal static double? WarpGate(Vessel v, Telemetry t, double targetUt, ref double alignSince, ref double inGateSince)
         {
             double ut = Planetarium.GetUniversalTime();
-            if (WarpAligned(v, t))
+            if (Warp.Requested)
+            {
+                alignSince = double.NaN;
+                return targetUt;
+            }
+            double err = t.Num["attitude_error"];
+            if (double.IsNaN(err) || err > AttitudeGateDeg)
+            {
+                inGateSince = double.NaN;
+            }
+            else if (double.IsNaN(inGateSince))
+            {
+                inGateSince = ut;
+            }
+            if (!double.IsNaN(inGateSince) && ut - inGateSince >= WarpAlignHoldS && v.angularVelocity.magnitude <= WarpAlignRate)
             {
                 alignSince = double.NaN;
                 return targetUt;
@@ -85,7 +94,7 @@ namespace KspBridge.Flight.Modes
             }
             else if (ut - alignSince > AlignWaitS && targetUt - ut >= 15)
             {
-                Warp.AlignWait();
+                Warp.AlignWait(t.Num["attitude_error"], v.angularVelocity.magnitude);
             }
             return null;
         }
@@ -113,7 +122,7 @@ namespace KspBridge.Flight.Modes
                 double start = utAp - burn / 2 - EngineModel.SpoolUpS(v) / 2;
                 if (!pastAp && ut < start)
                 {
-                    return new ModeCommand(AttitudeTarget.Vector(Horizontal(v)), 0) { WarpToUt = WarpGate(v, t, start, ref _alignSince) };
+                    return new ModeCommand(AttitudeTarget.Vector(Horizontal(v)), 0) { WarpToUt = WarpGate(v, t, start, ref _alignSince, ref _inGateSince) };
                 }
                 _burning = true;   // start already passed or apoapsis passed: burn now (no WarpToUt, the Coordinator releases warp)
                 Log("burn start: past_ap=" + pastAp + " tta=" + F(o.timeToAp, 1) + " dv_ap=" + F(dvAp, 2) + " burn=" + F(burn, 2) +

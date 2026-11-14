@@ -223,11 +223,17 @@ namespace KspBridge.Flight
             _untilUt = double.NaN;
         }
 
-        /// <summary>A wait step stayed unaligned too long (design 0048 decision 1): warp_unavailable align_wait.</summary>
-        public static void AlignWait() => Unavailable("align_wait");
+        /// <summary>A wait step stayed unaligned too long (design 0048 decision 1): warp_unavailable align_wait with the attitude
+        /// error (deg, null when unknown) and the angular rate (rad/s) of that tick, so the failing gate is visible over MCP.</summary>
+        public static void AlignWait(double attitudeErrorDeg, double angularRate) =>
+            Unavailable("align_wait", new Dictionary<string, object>
+            {
+                ["attitude_error"] = double.IsNaN(attitudeErrorDeg) ? null : (object)System.Math.Round(attitudeErrorDeg, 3),
+                ["angular_rate"] = System.Math.Round(angularRate, 4),
+            });
 
         /// <summary>Why a coast step waits without our warp; once per step and reason, so the cause is visible over MCP.</summary>
-        private static void Unavailable(string reason)
+        private static void Unavailable(string reason, Dictionary<string, object> extra = null)
         {
             if (_unavailable == reason)
             {
@@ -235,7 +241,7 @@ namespace KspBridge.Flight
             }
             _unavailable = reason;
             Debug.Log("[KspBridge] warp not requested: " + reason);
-            Event("warp_unavailable", reason);
+            Event("warp_unavailable", reason, extra);
         }
 
         private static void Event(string type, string reason, Dictionary<string, object> extra = null)

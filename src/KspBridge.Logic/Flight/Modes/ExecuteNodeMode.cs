@@ -42,6 +42,7 @@ namespace KspBridge.Flight.Modes
         private double _prevDv = double.PositiveInfinity;
         private bool _gated;   // log only
         private double _alignSince = double.NaN;   // wait start while unaligned (CircularizeMode.WarpGate)
+        private double _inGateSince = double.NaN;  // attitude_error within the gate since (CircularizeMode.WarpGate)
 
         private ExecuteNodeMode(double tolerance, double lateLimit)
         {
@@ -96,7 +97,7 @@ namespace KspBridge.Flight.Modes
                 double start = n.UT - bt / 2 - EngineModel.SpoolUpS(v) / 2;
                 if (ut < start)
                 {
-                    return new ModeCommand(aim, 0) { WarpToUt = CircularizeMode.WarpGate(v, t, start, ref _alignSince) };
+                    return new ModeCommand(aim, 0) { WarpToUt = CircularizeMode.WarpGate(v, t, start, ref _alignSince, ref _inGateSince) };
                 }
                 double late = ut - start;
                 if (late > _lateLimit)

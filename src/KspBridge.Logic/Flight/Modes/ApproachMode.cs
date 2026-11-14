@@ -45,6 +45,7 @@ namespace KspBridge.Flight.Modes
         private double _closestDist = double.NaN;
         private Vector3d _closestRelV;              // predicted relative velocity at the closest approach (world)
         private double _alignSince = double.NaN;   // wait start while unaligned (CircularizeMode.WarpGate)
+        private double _inGateSince = double.NaN;  // attitude_error within the gate since (CircularizeMode.WarpGate)
         private double _holdStart = double.NaN;
         private bool _waypointDone;
         private readonly List<string> _reported = new List<string>();
@@ -115,7 +116,7 @@ namespace KspBridge.Flight.Modes
         }
 
         private ModeCommand WaitCommand(Vessel v, Telemetry t, double wake) =>
-            new ModeCommand(AttitudeTarget.Vector(-_closestRelV.normalized), 0) { WarpToUt = CircularizeMode.WarpGate(v, t, wake, ref _alignSince) };
+            new ModeCommand(AttitudeTarget.Vector(-_closestRelV.normalized), 0) { WarpToUt = CircularizeMode.WarpGate(v, t, wake, ref _alignSince, ref _inGateSince) };
 
         public ModeCommand Update(Vessel v, Telemetry t)
         {

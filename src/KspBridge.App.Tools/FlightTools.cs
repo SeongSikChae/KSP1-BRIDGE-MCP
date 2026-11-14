@@ -187,7 +187,7 @@ namespace KspBridge.App
             "coast (throttle 0, reference prograde by default or none for no attitude control, warp true; until required: with warp it time-warps on rails above the atmosphere " +
             "toward the time leaves of until (time_to_apoapsis|time_to_periapsis with < or <=, met|step_time with > or >=) and stops 15..10 s before; " +
             "a player cancel is respected for the rest of the step; no plan warp while the player's own warp is on); " +
-            "circularize (tolerance 0.5 m/s; waits, warping once aligned (attitude_error <= 5 deg and angular rate <= 0.02 rad/s), until the burn start before apoapsis, or burns at once when that time or the apoapsis has passed; " +
+            "circularize (tolerance 0.5 m/s; waits, warping once aligned (attitude_error <= 5 deg for 2 s and angular rate <= 0.15 rad/s), until the burn start before apoapsis, or burns at once when that time or the apoapsis has passed; " +
             "burns along the Δv to the circular velocity at the current position, only while attitude_error <= 5 deg; completes by itself); " +
             "land (margin 0.8, final_altitude 20 m, final_speed 2 m/s, gear_altitude 500 m or false; from a descent: ground height is the radar altitude " +
             "minus the vessel bottom; starts the burn when the vertical stopping distance at margin × full thrust reaches the ground and the axis is within 15 deg " +
@@ -303,7 +303,7 @@ namespace KspBridge.App
             "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage, pause_s}, " +
             "out_of_stages, ignite_blocked, stage_failed, warp_started {rate, until_ut, resumed?}, warp_stopped {rate, until_ut, ended_by plan|unexpected, remaining_s} (plan warps only; " +
             "an unexpected end allows one re-request per step, a second one in the step is taken as a user cancel), " +
-            "warp_unavailable {reason player_warp|not_supported|mode_switch_refused|align_wait (wait step not aligned for 30 s)}, " +
+            "warp_unavailable {reason player_warp|not_supported|mode_switch_refused|align_wait (wait step not aligned for 30 s; with attitude_error and angular_rate of that tick)}, " +
             "landing_infeasible {reason accel|dv, a_req, a_max, a_max_basis best|actual, dv_need, dv_left, altitude} (land; once per step and reason; " +
             "altitude = ground height of the vessel bottom, not the sea-level altitude; dv_need/dv_left are null for accel, a_req is null below final_altitude), " +
             "touchdown {vertical_speed (up positive, negative when descending), horizontal_speed, situation} (land; first ground contact, or the first tick when submitted already landed), landed {tilt_deg, tipped (tilt > 45), time_since_touchdown_s} (land; on completion), " +
