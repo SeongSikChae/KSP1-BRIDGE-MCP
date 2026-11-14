@@ -221,10 +221,14 @@ namespace KspBridge.Flight
                         modeArgs = CircularizeMode.Args;
                         step.CreateMode = CircularizeMode.Parse(o, path);
                         break;
+                    case "land":
+                        modeArgs = LandMode.Args;
+                        step.CreateMode = LandMode.Parse(o, path);
+                        break;
                     case null:
                         throw Invalid(path + ".mode", "required");
                     default:
-                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn, coast, circularize)");
+                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn, coast, circularize, land)");
                 }
                 foreach (string key in o.Keys)
                 {
