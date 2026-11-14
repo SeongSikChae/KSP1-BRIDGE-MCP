@@ -114,6 +114,27 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task PartControlToolsMapToHttpRequests()
+        {
+            (FlightTools tools, RecordingHandler handler) = Create();
+            CancellationToken ct = CancellationToken.None;
+
+            await tools.GetActionGroups(ct);
+            await tools.SetActionGroup("Light", "toggle", ct);
+            await tools.SetVesselPartField(456, "ModuleEngines", "thrustPercentage", JsonDocument.Parse("50").RootElement, ct: ct);
+            await tools.SetVesselPartField(456, "ModuleParachute", "automateSafeDeploy", JsonDocument.Parse("0").RootElement, 2, ct);
+            await tools.SetResourceFlow(456, "LiquidFuel", false, ct);
+
+            var r = handler.Requests;
+            Assert.HasCount(5, r);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/action_groups", (string?)null), r[0]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/action_group", (string?)"""{"group":"Light","action":"toggle"}"""), r[1]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/part_field", (string?)"""{"part_id":456,"module":"ModuleEngines","field":"thrustPercentage","value":50,"module_index":null}"""), r[2]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/part_field", (string?)"""{"part_id":456,"module":"ModuleParachute","field":"automateSafeDeploy","value":0,"module_index":2}"""), r[3]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/resource_flow", (string?)"""{"part_id":456,"resource":"LiquidFuel","enabled":false}"""), r[4]);
+        }
+
+        [TestMethod]
         public async Task ManeuverNodeToolsMapToHttpRequests()
         {
             (FlightTools tools, RecordingHandler handler) = Create();

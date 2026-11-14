@@ -310,6 +310,9 @@ namespace KspBridge.App
             "rcs_unavailable {reason rcs_off|no_thrusters|no_propellant} (approach, dock), dock_attempt {attempt, forced (debug_dock_reject), contact_speed, lateral_error}, " +
             "docked {vessel_id, name, parts, attempts} (dock), soi_changed {vessel_id, from, to} (any vessel; step -1 without a plan), " +
             "part_event {part_id, part, module, index, event, counterparts, vessel_changed, separated, error} (invoke_part_event; step -1 without a plan), " +
+            "action_group {group, action, before, on, changed, actions, error} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error} " +
+            "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow) (only calls that change something; " +
+            "error set only for action_failed / field_failed; step -1 without a plan), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
@@ -321,10 +324,15 @@ namespace KspBridge.App
 
         [McpServerTool(Name = "get_vessel_parts", ReadOnly = true)]
         [Description("Parts of the active vessel as the flight part action window shows them: {vessel, id, parts [{id (part_id), name, title, " +
-            "modules [{index (module_index), module (\"Part\" = part-level, index null), fields [{field, title, value, units, error?}], " +
+            "modules [{index (module_index), module (\"Part\" = part-level, index null), fields [{field, title, value, units, error?, editable " +
+            "(set_vessel_part_field can change it now), min?, max?, step? (sliders), options? (choice titles; an int field takes the index), " +
+            "option_values? (text field: the values to send)}], " +
             "events [{event, title, available, reason (input_locked | no_control | not_active_vessel | null)}], state? (deploy_state " +
-            "RETRACTED|EXTENDED|RETRACTING|EXTENDING|BROKEN for deployable parts such as antennas and solar panels; state, docked_part_id for docking ports)}], " +
-            "resources [{resource, amount, max, flow_enabled}]}]}. Only enabled modules; advanced tweakables only when the game setting is on. " +
+            "RETRACTED|EXTENDED|RETRACTING|EXTENDING|BROKEN for deployable parts such as antennas and solar panels; state, docked_part_id for docking ports; " +
+            "parachutes deployment_state STOWED|ACTIVE|SEMIDEPLOYED|DEPLOYED|CUT, safe_state SAFE|RISKY|UNSAFE|NONE; lights on; landing legs and gear " +
+            "wheel_state (Deployed, Retracted, Deploying..., Retracting..., Inoperable), position 0..1; engines ignited, flameout, staged, thrust_limit)}], " +
+            "resources [{resource, amount, max, flow_enabled, flow_toggleable (set_resource_flow can change it)}]}]}. Modules with a state are listed even without " +
+            "fields or events. Only enabled modules; advanced tweakables only when the game setting is on. " +
             "Errors: not_in_flight, no_active_vessel, bad_request, part_not_found.")]
         public Task<string> GetVesselParts(
             [Description("Only this part (persistentId)")] double? part_id = null,
@@ -368,5 +376,51 @@ namespace KspBridge.App
             "settings) or no CommNet node on the vessel yet: only antenna (null without a node), the rest null. Errors: not_in_flight, no_active_vessel.")]
         public Task<string> GetCommNet(CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Get, "api/flight/commnet", null, ct);
+
+        [McpServerTool(Name = "get_action_groups", ReadOnly = true)]
+        [Description("Action groups of the active vessel: {vessel, id, override (ADDITIONAL_ACTION_GROUPS override number, 0 = none), groups [{group, on, " +
+            "cooldown (s), settable (set_action_group can change it), locked (settable groups: key input locked or held by an override; else null), " +
+            "actions [{part_id, part, module, index, action, title}] (what the group fires)}]}. Errors: not_in_flight, no_active_vessel.")]
+        public Task<string> GetActionGroups(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/flight/action_groups", null, ct);
+
+        [McpServerTool(Name = "set_action_group", Destructive = true)]
+        [Description("Fire an action group of the active vessel like its key: Custom01..Custom10, Light, Gear, Brakes, Abort (SAS: set_sas, RCS: set_rcs; " +
+            "Stage is not set here). action toggle | on | off; on/off that already holds does nothing (changed false). Allowed while a flight plan runs; " +
+            "if the group splits the vessel so the active vessel changes, the plan stops with vessel_changed; a land plan does not redeploy gear turned off " +
+            "here after it deployed it. Returns {group, action, before, on, changed, cooldown, actions (fired; empty when unchanged), vessel_changed}; slow " +
+            "changes (gear) finish later, check get_vessel_parts. Errors: not_in_flight, no_active_vessel, eva_not_supported, bad_request, group_locked " +
+            "(input locked or no control, held by an override, or cooldown), action_failed (an action threw; the group may already have changed: read " +
+            "get_action_groups before retrying).")]
+        public Task<string> SetActionGroup([Description("Group name, e.g. Light, Gear, Custom01")] string group,
+            [Description("toggle, on or off")] string action, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/action_group", new { group, action }, ct);
+
+        [McpServerTool(Name = "set_vessel_part_field", Destructive = true)]
+        [Description("Change a flight part action window value of the active vessel (fields get_vessel_parts lists with editable true), like the game " +
+            "slider/toggle: e.g. ModuleEngines thrustPercentage (thrust limit), ModuleParachute deployAltitude or automateSafeDeploy (advanced tweakables; " +
+            "index into options), then invoke_part_event Deploy for a parachute that opens only when safe. Symmetry counterparts get the value only when " +
+            "the control does so in flight (thrustPercentage does not). value is a number, true/false, an option index (int field) or an option_values " +
+            "text (text field), within min/max. Returns {part_id, part, module, index, field, old, value, changed, values [{part_id, value}]}. " +
+            "Errors: not_in_flight, no_active_vessel, bad_request, part_not_found, module_not_found, field_not_found, ambiguous_module (give module_index), " +
+            "field_not_editable (also a disabled module), field_locked (input locked or no control), field_failed (a game callback threw; the message lists " +
+            "parts already changed: read get_vessel_parts before retrying).")]
+        public Task<string> SetVesselPartField(
+            [Description("Part id (persistentId) from get_vessel_parts")] double part_id,
+            [Description("Module name, or \"Part\" for part-level fields")] string module,
+            [Description("Field name (not the title), e.g. thrustPercentage")] string field,
+            [Description("New value: number, true/false or text")] JsonElement value,
+            [Description("Module index from get_vessel_parts; needed when the part has several enabled modules of this name")] int? module_index = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/part_field", new { part_id, module, field, value, module_index }, ct);
+
+        [McpServerTool(Name = "set_resource_flow", Destructive = true)]
+        [Description("Lock or unlock the flow of one resource in one part of the active vessel (the part action window flow button; no symmetry). " +
+            "Only resources get_vessel_parts shows with flow_toggleable true. Returns {part_id, part, resource, before, flow_enabled}. " +
+            "Errors: not_in_flight, no_active_vessel, bad_request, part_not_found, resource_not_found, flow_not_toggleable, flow_locked (input locked or no control).")]
+        public Task<string> SetResourceFlow([Description("Part id (persistentId) from get_vessel_parts")] double part_id,
+            [Description("Resource name, e.g. LiquidFuel")] string resource,
+            [Description("true = flow enabled, false = locked")] bool enabled, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/resource_flow", new { part_id, resource, enabled }, ct);
     }
 }
