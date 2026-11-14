@@ -56,7 +56,8 @@ namespace KspBridge.Flight.Modes
         /// <summary>How long (s) after turning on the Gear group the bottom keeps being re-measured.</summary>
         private const double GearSettleS = 5;
 
-        /// <summary>Max tilt from vertical (deg) per m/s of horizontal speed above 1 m/s (decision 10).</summary>
+        /// <summary>Max tilt from vertical (deg) per m/s of horizontal speed (decision 10; no dead band, so a slow drift is
+        /// still cancelled before touchdown).</summary>
         private const double TiltPerMs = 5;
 
         /// <summary>Final-segment speed gain (1/s).</summary>
@@ -76,6 +77,9 @@ namespace KspBridge.Flight.Modes
 
         /// <summary>Seconds the vessel must stay landed and still to complete.</summary>
         private const double StillS = 2;
+
+        /// <summary>Angular speed (rad/s) below which a landed vessel counts as still (a slow tip-over is not still).</summary>
+        private const double StillAngVel = 0.05;
 
         /// <summary>Tilt (deg) from vertical above which the landed event reports tipped.</summary>
         private const double TippedDeg = 45;
@@ -131,7 +135,8 @@ namespace KspBridge.Flight.Modes
             }
             if (_touched)
             {
-                _stillSince = landed && v.srfSpeed < StillSpeed ? (double.IsNaN(_stillSince) ? ut : _stillSince) : double.NaN;
+                bool still = landed && v.srfSpeed < StillSpeed && v.angularVelocity.magnitude < StillAngVel;
+                _stillSince = still ?(double.IsNaN(_stillSince) ? ut : _stillSince) : double.NaN;
                 if (!double.IsNaN(_stillSince) && ut - _stillSince >= StillS && !Done)
                 {
                     double tilt = Vector3d.Angle(v.ReferenceTransform.up, up);
@@ -143,6 +148,14 @@ namespace KspBridge.Flight.Modes
                         ["time_since_touchdown_s"] = R(ut - _touchUt),
                     });
                     Done = true;
+                }
+                if (ut - _touchUt <= 10 && ut - _diagUt >= DiagS)   // post-touchdown telemetry (tip-over investigation)
+                {
+                    _diagUt = ut;
+                    Log("ground: t=" + F(ut - _touchUt, 2) + " tilt=" + F(Vector3d.Angle(v.ReferenceTransform.up, up), 1) +
+                        " slope=" + F(Vector3d.Angle(v.terrainNormal, up), 1) + " ang_vel=" + F(v.angularVelocity.magnitude, 3) +
+                        " vv=" + F(v.verticalSpeed, 2) + " vh=" + F(vh, 2) + " srf=" + F(v.srfSpeed, 2) + " sit=" + v.situation +
+                        " h=" + F(h, 2));
                 }
                 return new ModeCommand(AttitudeTarget.Vector(up), 0);
             }
@@ -160,7 +173,7 @@ namespace KspBridge.Flight.Modes
             }
 
             // attitude: up, tilted toward surface retrograde by at most max_tilt(vh)
-            double maxTilt = Clamp((vh - 1) * TiltPerMs, 0, 90);
+            double maxTilt = Clamp(vh * TiltPerMs, 0, 90);
             AttitudeTarget att = AttitudeTarget.RotateTowards(up, -v.srf_velocity, maxTilt);
 
             double maxAccel = EngineModel.MaxAccel(v);
