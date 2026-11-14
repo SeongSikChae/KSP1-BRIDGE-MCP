@@ -134,14 +134,24 @@ namespace KspBridge.Flight
             {
                 return "not_active_vessel";
             }
-            bool ships = InputLockManager.IsUnlocked(ControlTypes.ACTIONS_SHIP);
-            bool full = !e.requireFullControl || InputLockManager.IsUnlocked(ControlTypes.TWEAKABLES_FULLONLY);
+            bool ships = Unlocked(ControlTypes.ACTIONS_SHIP);
+            bool full = !e.requireFullControl || Unlocked(ControlTypes.TWEAKABLES_FULLONLY);
             if ((ships && p.vessel.IsControllable && full) || e.guiActiveUncommand)
             {
                 return null;
             }
             return !ships || !full ? "input_locked" : "no_control";
         }
+
+        /// <summary>
+        /// InputLockManager.IsUnlocked without flightDriver_ApplicationFocus: FlightDriver.OnApplicationFocus sets that lock only
+        /// to block the player's keys while the game window is in the background, which is how an agent usually calls (same as
+        /// launch_craft leaving out EditorDriver_AppFocus).
+        /// </summary>
+        private static bool Unlocked(ControlTypes control) =>
+            !InputLockManager.lockStack.Any(l => l.Key != FocusLock && (l.Value & (ulong)control) != 0);
+
+        private const string FocusLock = "flightDriver_ApplicationFocus";
 
         internal static Dictionary<string, object> DescribeModule(Part p, PartModule m, int index)
         {
