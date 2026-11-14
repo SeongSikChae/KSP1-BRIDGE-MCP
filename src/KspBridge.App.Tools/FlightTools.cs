@@ -347,7 +347,7 @@ namespace KspBridge.App
             "steered (none without a plan or attitude target, while suspended; cleared on reload, scene change, when a plan starts and when another vessel records; only the vessel that recorded sees them; " +
             "kept after a plan ends). Returns {window_s, samples, tick_s, throttle_mean, q_mean, axes {pitch, roll, yaw: {err_rms_deg, err_max_deg, " +
             "osc_hz, osc_amp_deg, osc_peak_ratio, err_offset_deg, input_sat_ratio, alpha_model, alpha_gain, alpha_r2, accel_bias, lag_ticks, lag_r2, " +
-            "want_slope_at_amp, torque {wheel, gimbal, surface, rcs, other}}}, series?}. osc_*: strongest 0.2..5 Hz component of the detrended attitude " +
+            "want_slope_at_amp, ff_rms, torque {wheel, gimbal, surface, rcs, other}}}, series?}. osc_*: strongest 0.2..5 Hz component of the detrended attitude " +
             "error over the longest run without rate-limited slews or gaps (null if under 5 s; osc_hz null and osc_amp_deg 0 for a flat error, e.g. roll " +
             "without a roll target); osc_peak_ratio = peak / median spectrum; err_offset_deg = the mean error it oscillates around. Limits: attitude " +
             "error is low-frequency heavy, so a high peak ratio alone does not prove an oscillation; a deceleration after a slew can show as a 0.2..0.5 Hz " +
@@ -355,9 +355,11 @@ namespace KspBridge.App
             "are not resolved. Check doubtful values against series. alpha_model = available torque / MOI (rad/s²); alpha_gain = measured / modelled " +
             "angular acceleration (1 = model right, <1 = torque overestimated), fitted with an intercept accel_bias (rad/s², steady disturbance), alpha_r2 " +
             "its fit (low = an axis with too little input to judge); lag_ticks = extra physics ticks from input to response (0 = none), lag_r2 the fit " +
-            "for 1..10 ticks (flat = lag not resolvable); want_slope_at_amp = target-rate gain (1/s) at the oscillation's operating point. null where " +
-            "data is too short or flat, and the fit values also when the input stays saturated one way. torque = mean available torque per provider " +
-            "kind (kN·m). step (1..50) adds series [{t, throttle, q, pitch/roll/yaw {err_deg, omega, want, input}}] every step ticks (5 = about 10 Hz; " +
+            "for 1..10 ticks (flat = lag not resolvable); want_slope_at_amp = slope (1/s) of the target-rate curve the controller uses (linear zone " +
+            "Kp/3 near zero error, then the stopping curve, 0 at the rate limit) at the oscillation's operating point; ff_rms = RMS of the target-rate " +
+            "feedforward added to want (rad/s). null where data is too short or flat, and the fit values also when the input stays saturated one way. " +
+            "torque = mean available torque per provider kind (kN·m; a reaction wheel that is off or without electric charge counts 0). step (1..50) adds " +
+            "series [{t, throttle, q, pitch/roll/yaw {err_deg, omega, want, input, ff}}] every step ticks (5 = about 10 Hz; " +
             "1 is about 1000 entries for 20 s). {samples: 0} without data for the active vessel. not_in_flight outside the flight scene.")]
         public Task<string> GetControllerTrace(
             [Description("Window in seconds, 1..20 (default 10)")] double seconds = 10,
