@@ -290,7 +290,7 @@ namespace KspBridge.Flight
                     }
                     if (_request == null && PausedEngine(v))
                     {
-                        Completed(v, t, ut);   // a paused engine with propellant: never fire the next stage over it; none enters paused (#13)
+                        Completed(v, t, ut, overPause: true);   // a paused engine with propellant: never fire the next stage over it; none enters paused (#13)
                         break;
                     }
                     if (_request == null)
@@ -324,7 +324,7 @@ namespace KspBridge.Flight
             _since = ut;
         }
 
-        private static void Completed(Vessel v, Telemetry t, double ut)
+        private static void Completed(Vessel v, Telemetry t, double ut, bool overPause = false)
         {
             bool hadSequence = _burnoutUt > 0;
             FlightEvents.Add("staging_completed", Coordinator.StepIndex, new Dictionary<string, object>
@@ -333,7 +333,8 @@ namespace KspBridge.Flight
                 ["tailoff_s"] = hadSequence ? Math.Round(_separateUt - _burnoutUt, 3) : 0.0,
                 ["settle_s"] = hadSequence && !_parallel && _settleUt > 0 ? Math.Round(ut - _settleUt, 3) : 0.0,
                 ["held_s"] = Math.Round(_heldS, 3),
-                ["ignited"] = t.PrevModeThrottle > 0,   // the mode wanted thrust last tick (false while coasting up)
+                ["ignited"] = !overPause && t.PrevModeThrottle > 0,   // the mode wanted thrust last tick (false while coasting up);
+                                                                      // false when it ended over a flameout pause: nothing lit (#13)
             });
             ResetSequence(ut);
         }
@@ -467,7 +468,12 @@ namespace KspBridge.Flight
 
         /// <summary>Coordinator: with no working engine the throttle stays as the mode wants while a paused engine waits for KSP to
         /// relight it (in paused or inside a running sequence); otherwise staging holds it at 0.</summary>
-        public static bool KeepsThrottle(Vessel v) => _state == StagingState.Paused || PausedEngine(v);
+        public static bool KeepsThrottle(Vessel v) =>
+            _state == StagingState.Paused || (_state != StagingState.None && PausedEngine(v));   // an on_start request alone keeps holding 0
+
+        /// <summary>Plan warp: staging runs tick by tick, so never on rails while a sequence or an on_start request runs; a flameout
+        /// pause alone only waits for thrust (#13).</summary>
+        public static bool BlocksWarp => (_state != StagingState.None && _state != StagingState.Paused) || _onStart != null || _onStartQueued;
 
         /// <summary>Burnout by fuel only (never by throttle): ≥ 1 spent engine and no lit unflamed engine, or a spent engine in J_next.</summary>
         private static bool BurnedOut(Vessel v)
