@@ -47,6 +47,7 @@ namespace KspBridge
             {
                 FlightScene.Hook();
                 FlightReset.Hook();
+                VesselSwitch.Hook();
                 PartLossLog.Hook();
                 Debugging.DebugState.Hook();   // only when debug.cfg enables it
             }
@@ -55,6 +56,7 @@ namespace KspBridge
                 // undo what was hooked, each on its own; context.Handover stays for the previous logic's restart
                 UnhookAfterFailedStart("flight scene", FlightScene.Unhook);
                 UnhookAfterFailedStart("flight reset", FlightReset.Unhook);
+                UnhookAfterFailedStart("vessel switch", VesselSwitch.Unhook);
                 UnhookAfterFailedStart("part loss", PartLossLog.Unhook);
                 UnhookAfterFailedStart("debug", Debugging.DebugState.Unhook);
                 throw;
@@ -86,6 +88,7 @@ namespace KspBridge
             Debugging.DebugState.AfterTick();   // never throws; undoes this tick's hold write when the plan just ended
             Flight.Control.ManualControl.Tick();   // never throws
             FlightReset.Tick();   // never throws
+            VesselSwitch.Tick();  // never throws
         }
 
         public IList<string> Stop()
@@ -106,6 +109,14 @@ namespace KspBridge
             catch (Exception e)
             {
                 UnityEngine.Debug.LogError("[KspBridge] flight reset unhook failed: " + e);
+            }
+            try
+            {
+                VesselSwitch.Unhook();   // its state is not handed over (0035 design decision 3)
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] vessel switch unhook failed: " + e);
             }
             try
             {

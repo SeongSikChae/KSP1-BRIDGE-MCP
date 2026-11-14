@@ -45,6 +45,7 @@ namespace KspBridge.Handlers
             });
             yield return new Route("POST", "/api/flight/target", (m, b, q) => Flight.Targeting.Set(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/plan_maneuver", (m, b, q) => Flight.Maneuver.ManeuverPlanner.Plan(Guard.ActiveVessel(), b));
+            yield return new Route("POST", "/api/flight/switch", (m, b, q) => VesselSwitch.Switch(b));
             yield return new Route("POST", "/api/flight/revert", (m, b, q) => FlightReset.Revert(b.GetString("target")));
             yield return new Route("POST", "/api/flight/leave", (m, b, q) => FlightReset.Leave());
             yield return new Route("POST", "/api/vessel/recover", (m, b, q) => FlightReset.Recover(b));

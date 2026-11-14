@@ -221,6 +221,9 @@ namespace KspBridge.Flight
             }
         }
 
+        /// <summary>No scene load is in progress (FLIGHT counts as loaded only after onFlightReady).</summary>
+        internal static bool SceneReady => !_sceneLoading;
+
         internal static void RequireSceneReady()
         {
             if (_sceneLoading)
@@ -529,6 +532,7 @@ namespace KspBridge.Flight
                 ["revert_unavailable"] = flight ? launch.Concat(editor).Distinct().ToList() : null,
                 // a copy: the response is serialized on the HTTP thread (HttpServer) while Fail edits _recovery on the main thread
                 ["recovery"] = _recovery == null ? null : new Dictionary<string, object>(_recovery),
+                ["switch"] = VesselSwitch.StatusCopy(),   // a copy as well
             };
         }
     }

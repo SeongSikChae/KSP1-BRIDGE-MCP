@@ -7,14 +7,20 @@ namespace KspBridge.Flight
     {
         /// <summary>0 stops (a pending or running warp-to too, like the stop key); otherwise switches rails/physics at rate 0
         /// and sets the rate. Returns the state right after; the game may cap the rate (altitude, acceleration).</summary>
+        /// <summary>Like the stop key: a pending or running warp-to and any rails or physics rate (set_time_warp 0, switch_vessel).</summary>
+        internal static void StopAll(TimeWarp w)
+        {
+            w.setAutoWarp = false;   // a WarpTo that has not started yet (CancelAutoWarp acts only once it runs)
+            w.CancelAutoWarp();
+            TimeWarp.SetRate(0, true);
+        }
+
         public static object Set(int rateIndex, bool physics)
         {
             TimeWarp w = TimeWarp.fetch ?? throw new ApiException(409, "not_available", "time warp is not available");
             if (rateIndex == 0)
             {
-                w.setAutoWarp = false;   // a WarpTo that has not started yet (CancelAutoWarp acts only once it runs)
-                w.CancelAutoWarp();
-                TimeWarp.SetRate(0, true);
+                StopAll(w);
                 return Describe();
             }
             if (Warp.Pending)
