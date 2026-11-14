@@ -63,6 +63,7 @@ namespace KspBridge.Flight
         private static double _since;                     // UT the current state was entered
         private static double _burnoutUt, _separateUt, _settleUt;
         private static double _heldUt;                     // UT the dynamic-pressure wait began (0: none)
+        private static double _heldS;                      // length of that wait once it ended (staging_completed.held_s)
         private static int _ticks;
         private static bool _parallel;
         private static double _lastUt = double.NegativeInfinity;
@@ -175,6 +176,10 @@ namespace KspBridge.Flight
                             {
                                 _since = ut;             // serial from here: the throttle-down wait starts now
                                 _ticks = 0;
+                                if (_heldUt > 0)
+                                {
+                                    EndHold(v, ut, "serial");   // the wait ends here; held_s excludes the serial throttle-down and settle
+                                }
                             }
                         }
                         if (_parallel && !HeldForQ(v, o, ut))
@@ -272,7 +277,7 @@ namespace KspBridge.Flight
                 ["stage"] = v.currentStage,
                 ["tailoff_s"] = hadSequence ? Math.Round(_separateUt - _burnoutUt, 3) : 0.0,
                 ["settle_s"] = hadSequence && !_parallel && _settleUt > 0 ? Math.Round(ut - _settleUt, 3) : 0.0,
-                ["held_s"] = _heldUt > 0 ? Math.Round(ut - _heldUt, 3) : 0.0,
+                ["held_s"] = Math.Round(_heldS, 3),
                 ["ignited"] = t.PrevModeThrottle > 0,   // the mode wanted thrust last tick (false while coasting up)
             });
             ResetSequence(ut);
@@ -285,7 +290,7 @@ namespace KspBridge.Flight
             _parallel = false;
             _before = null;
             _burnoutUt = _separateUt = _settleUt = 0;
-            _heldUt = 0;
+            _heldUt = _heldS = 0;
         }
 
         private static void EndWithLatch(Vessel v, string kind, double ut)
@@ -317,23 +322,40 @@ namespace KspBridge.Flight
             double q = v.dynamicPressurekPa;
             if (!(q > o.MaxSeparateQ))
             {
+                if (_heldUt > 0)
+                {
+                    _heldS = ut - _heldUt;   // the wait ends on the tick the request is made
+                }
                 return true;
             }
             if (_heldUt == 0)
             {
                 _heldUt = ut;
-                QEvent("separation_held", v, q);
+                FlightEvents.Add("separation_held", Coordinator.StepIndex, new Dictionary<string, object>
+                {
+                    ["stage"] = v.currentStage,
+                    ["q_kpa"] = Math.Round(q, 3),
+                });
             }
             if (ut - _heldUt < o.MaxSeparateQWaitS)
             {
                 return false;
             }
-            QEvent("separation_forced", v, q);
+            EndHold(v, ut, "timeout");
             return true;
         }
 
-        private static void QEvent(string type, Vessel v, double q) =>
-            FlightEvents.Add(type, Coordinator.StepIndex, new Dictionary<string, object> { ["stage"] = v.currentStage, ["q_kpa"] = Math.Round(q, 3) });
+        /// <summary>The wait ends without the dynamic pressure dropping: timeout (separates anyway) or serial (the core ran dry).</summary>
+        private static void EndHold(Vessel v, double ut, string reason)
+        {
+            _heldS = ut - _heldUt;
+            FlightEvents.Add("separation_forced", Coordinator.StepIndex, new Dictionary<string, object>
+            {
+                ["stage"] = v.currentStage,
+                ["q_kpa"] = Math.Round(v.dynamicPressurekPa, 3),
+                ["reason"] = reason,
+            });
+        }
 
         // ---- on_start ----
 
@@ -814,6 +836,7 @@ namespace KspBridge.Flight
                 ["separate_ut"] = _separateUt,
                 ["settle_ut"] = _settleUt,
                 ["held_ut"] = _heldUt,
+                ["held_s"] = _heldS,
                 ["ticks"] = (double)_ticks,
                 ["parallel"] = _parallel,
                 ["last_ut"] = _lastUt,
@@ -836,6 +859,7 @@ namespace KspBridge.Flight
             _separateUt = Handover.D(d, "separate_ut");
             _settleUt = Handover.D(d, "settle_ut");
             _heldUt = Handover.D(d, "held_ut", 0);
+            _heldS = Handover.D(d, "held_s", 0);
             _ticks = (int)Handover.D(d, "ticks", 0);
             _parallel = Handover.B(d, "parallel");
             _lastUt = Handover.D(d, "last_ut", double.NegativeInfinity);
