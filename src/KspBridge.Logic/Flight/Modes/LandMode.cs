@@ -56,6 +56,24 @@ namespace KspBridge.Flight.Modes
         /// <summary>How long (s) after turning on the Gear group the bottom keeps being re-measured.</summary>
         private const double GearSettleS = 5;
 
+        /// <summary>Max tilt from vertical (deg) per m/s of horizontal speed above 1 m/s (decision 10).</summary>
+        private const double TiltPerMs = 5;
+
+        /// <summary>Final-segment speed gain (1/s).</summary>
+        private const double FinalGain = 1;
+
+        /// <summary>Axis-to-target angle (deg) for a normal start and for ending the post-forced-start alignment wait.</summary>
+        private const double AlignDeg = 15;
+
+        /// <summary>Descent speed (m/s) a burn needs to start: a vessel resting on the ground never starts.</summary>
+        private const double MinStartVv = 0.5;
+
+        /// <summary>Interval (s) of the burn telemetry log line.</summary>
+        private const double DiagS = 0.25;
+
+        private double _diagUt;
+        private bool _burning;
+        private bool _aligning;   // forced start with the axis still turning: until it first comes within AlignDeg
         private bool _gearDone;
         private double _gearSettleUntil;   // 0 = not settling
 
@@ -74,6 +92,12 @@ namespace KspBridge.Flight.Modes
         public ModeCommand Update(Vessel v, Telemetry t)
         {
             double h = Height(v);
+            Vector3d up = (v.CoMD - v.mainBody.position).normalized;
+            double r = (v.CoMD - v.mainBody.position).magnitude;
+            double g = v.mainBody.gravParameter / (r * r);
+            double vv = -v.verticalSpeed;   // down positive
+            double vh = Vector3d.Exclude(up, v.srf_velocity).magnitude;
+            double cos = Vector3d.Dot(v.ReferenceTransform.up, up);
 
             // Never in the submit trial: a failed submit must leave the vessel unchanged; the first real Tick turns it on.
             if (!_gearDone && !double.IsNaN(_gearAlt) && h <= _gearAlt && !FlightEvents.InTrial)
@@ -86,8 +110,76 @@ namespace KspBridge.Flight.Modes
                 _gearSettleUntil = Planetarium.GetUniversalTime() + GearSettleS;
                 Log("gear on: h=" + F(h, 1));
             }
-            return ModeCommand.Idle;
+
+            // attitude: up, tilted toward surface retrograde by at most max_tilt(vh)
+            double maxTilt = Clamp((vh - 1) * TiltPerMs, 0, 90);
+            AttitudeTarget att = AttitudeTarget.RotateTowards(up, -v.srf_velocity, maxTilt);
+
+            double maxAccel = EngineModel.MaxAccel(v);
+            if (maxAccel <= 0)
+            {
+                return new ModeCommand(att, 1);   // no engine thrust (not tilt): the Coordinator waits or aborts no_thrust
+            }
+            double aMaxV = maxAccel * cos;
+            double aReq = vv > 0 && h > _finalAlt
+                ? (vv * vv - _finalSpeed * _finalSpeed) / (2 * (h - _finalAlt)) + g
+                : double.NaN;
+
+            if (!_burning)
+            {
+                // normal start: axis near the actual target direction (not the tilt limit), judged with the target's cos so
+                // an axis tilted past the target does not start high; forced starts: near the ground, or no margin even
+                // with a vertical axis
+                Vector3d dir = att.Direction(v);
+                double alignErr = Vector3d.Angle(v.ReferenceTransform.up, dir);
+                double aMaxVTarget = maxAccel * Vector3d.Dot(dir, up);
+                string why = vv <= MinStartVv ? null
+                    : h <= _finalAlt ? "final_altitude"
+                    : aReq >= _margin * maxAccel ? "no_margin"
+                    : alignErr <= AlignDeg && aReq >= _margin * aMaxVTarget ? "aligned"
+                    : null;
+                if (why == null)
+                {
+                    return new ModeCommand(att, 0);
+                }
+                _burning = true;
+                _aligning = why != "aligned" && alignErr > AlignDeg;
+                Log("burn start: why=" + why + " h=" + F(h, 1) + " vv=" + F(vv, 2) + " vh=" + F(vh, 2) + " align_err=" + F(alignErr, 1) +
+                    " cos=" + F(cos, 3) + " a_req=" + F(aReq, 2) + " a_max=" + F(maxAccel, 2) + " a_max_v_target=" + F(aMaxVTarget, 2));
+            }
+
+            double throttle = h > _finalAlt
+                ? aReq / aMaxV
+                : (g + FinalGain * (vv - _finalSpeed)) / aMaxV;
+            throttle = cos <= 0 || double.IsNaN(throttle) ? 0 : Clamp01(throttle);
+
+            // only after a forced start, until the axis first comes within AlignDeg of the target (latched, never re-armed):
+            // scale down thrust pointed the wrong way. A normal burn whose moving target the axis lags behind is untouched.
+            double burnAlignErr = Vector3d.Angle(v.ReferenceTransform.up, att.Direction(v));
+            if (_aligning && burnAlignErr <= AlignDeg)
+            {
+                _aligning = false;
+                Log("aligned after forced start: align_err=" + F(burnAlignErr, 1) + " h=" + F(h, 1));
+            }
+            if (_aligning)
+            {
+                throttle *= Math.Max(0, Math.Cos(burnAlignErr * Math.PI / 180));
+            }
+            double now = Planetarium.GetUniversalTime();
+            if (now - _diagUt >= DiagS)   // burn telemetry for the measurement runs (0030 단위 3)
+            {
+                _diagUt = now;
+                Log("burn: h=" + F(h, 1) + " radar=" + F(v.radarAltitude, 1) + " hft=" + F(v.heightFromTerrain, 1) +
+                    " terrain=" + F(v.terrainAltitude, 1) + " vv=" + F(vv, 2) + " vh=" + F(vh, 2) + " thr=" + F(throttle, 3) +
+                    " cos=" + F(cos, 3) + " align_err=" + F(burnAlignErr, 1) + " max_tilt=" + F(maxTilt, 1) +
+                    " a_req=" + F(aReq, 2) + " a_max_v=" + F(aMaxV, 2) + " thrust=" + F(t.Num["thrust"], 1) + " sit=" + v.situation);
+            }
+            return new ModeCommand(att, throttle);
         }
+
+        private static double Clamp(double x, double min, double max) => x < min ? min : x > max ? max : x;
+
+        private static double Clamp01(double x) => Clamp(x, 0, 1);
 
         /// <summary>Ground clearance of the vessel bottom: radarAltitude (CoM) minus the CoM-to-bottom distance.</summary>
         private double Height(Vessel v)
