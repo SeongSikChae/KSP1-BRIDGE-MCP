@@ -313,6 +313,8 @@ namespace KspBridge.App
             "these three only for calls that change something, step -1 without a plan: action_group {group, action, before, on, changed, actions, error " +
             "(action_failed only)} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error (field_failed only)} " +
             "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow), " +
+            "resource_transfer_start {id, resource, requested, source_part_ids, target_part_ids}, resource_transfer_end {id, resource, requested, transferred, " +
+            "reason, error} (start_resource_transfer; step -1 without a plan), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
@@ -422,5 +424,31 @@ namespace KspBridge.App
             [Description("Resource name, e.g. LiquidFuel")] string resource,
             [Description("true = flow enabled, false = locked")] bool enabled, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/resource_flow", new { part_id, resource, enabled }, ct);
+
+        [McpServerTool(Name = "start_resource_transfer", Destructive = true)]
+        [Description("Start moving one resource between parts of the active vessel (docked vessels included) over time, like the part action window " +
+            "Transfer Out (sources) / Transfer In (targets): with one source each target receives max_amount/20 per second split over the targets not full " +
+            "at start (game Out button); with several sources each target receives max_amount/20 per second split over the sources not empty at start (In button); " +
+            "time warp speeds it up. Flow locks (flow_enabled false) do not stop it, as in the game. amount = total the targets receive; omit to run until " +
+            "every source is empty or every target is full. One transfer at a time; allowed while a flight plan runs. Returns the get_resource_transfer state. " +
+            "Errors: not_in_flight, no_active_vessel, bad_request, transfer_running, part_not_found, resource_not_found, not_transferable, transfer_not_unlocked " +
+            "(R&D level), no_crossfeed (difficulty setting obeys crossfeed), flow_mode_blocked, transfer_locked (input locked or no control), nothing_to_transfer.")]
+        public Task<string> StartResourceTransfer([Description("Resource name, e.g. LiquidFuel")] string resource,
+            [Description("Part ids (persistentId) to take from")] double[] source_part_ids,
+            [Description("Part ids (persistentId) to fill")] double[] target_part_ids,
+            [Description("Total amount (units) to move; omit for as much as possible")] double? amount = null, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/resource_transfer", new { resource, source_part_ids, target_part_ids, amount }, ct);
+
+        [McpServerTool(Name = "get_resource_transfer", ReadOnly = true)]
+        [Description("The running or last resource transfer: {active, id, resource, requested, transferred, ut (now; null outside flight), started_ut, ended_ut, " +
+            "end_reason (done | source_empty | target_full | stopped | vessel_changed | part_lost | scene | logic_stop | error), error (end_reason error only), " +
+            "sources/targets [{part_id, part, amount, max_amount, flow_enabled}]}; id null when none ran since the mod loaded.")]
+        public Task<string> GetResourceTransfer(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/flight/resource_transfer", null, ct);
+
+        [McpServerTool(Name = "stop_resource_transfer", Destructive = true)]
+        [Description("Stop the running resource transfer (end_reason stopped). Returns the get_resource_transfer state plus stopped (false when nothing was running).")]
+        public Task<string> StopResourceTransfer(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/resource_transfer/stop", new { }, ct);
     }
 }

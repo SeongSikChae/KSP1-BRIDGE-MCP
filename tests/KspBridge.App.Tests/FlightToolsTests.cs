@@ -135,6 +135,25 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task ResourceTransferToolsMapToHttpRequests()
+        {
+            (FlightTools tools, RecordingHandler handler) = Create();
+            CancellationToken ct = CancellationToken.None;
+
+            await tools.StartResourceTransfer("LiquidFuel", [1, 2], [3], ct: ct);
+            await tools.StartResourceTransfer("Oxidizer", [1], [3], 50, ct);
+            await tools.GetResourceTransfer(ct);
+            await tools.StopResourceTransfer(ct);
+
+            var r = handler.Requests;
+            Assert.HasCount(4, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/resource_transfer", (string?)"""{"resource":"LiquidFuel","source_part_ids":[1,2],"target_part_ids":[3],"amount":null}"""), r[0]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/resource_transfer", (string?)"""{"resource":"Oxidizer","source_part_ids":[1],"target_part_ids":[3],"amount":50}"""), r[1]);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/resource_transfer", (string?)null), r[2]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/resource_transfer/stop", (string?)"{}"), r[3]);
+        }
+
+        [TestMethod]
         public async Task ManeuverNodeToolsMapToHttpRequests()
         {
             (FlightTools tools, RecordingHandler handler) = Create();
