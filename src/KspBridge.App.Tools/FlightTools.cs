@@ -86,8 +86,10 @@ namespace KspBridge.App
             "auto_stage:true runs burnout → tailoff → separate → settle → ignite by itself (parallel boosters keep the core burning and are dropped only once " +
             "the dynamic pressure is at most max_separate_q, at most max_separate_q_wait_s after the wait began; serial stages cut the throttle, " +
             "separate and wait settle_distance before igniting); it never fires a stage when nothing with an engine is left (out_of_stages), and is refused " +
-            "(invalid_plan control_part_jettisoned) when a later separation would drop the control part. staging_options: tailoff_ratio 0.05, max_tailoff_s 5, " +
-            "settle_distance 2 m, max_settle_s 3, max_separate_q 25 kPa, max_separate_q_wait_s 30. To restart after a no_thrust abort (out_of_stages, ignite_blocked, stage_failed), on_start:[\"stage\"] is required. " +
+            "(invalid_plan control_part_jettisoned) when a later separation would drop the control part. A flamed-out engine with propellant left " +
+            "(air-starved jets included) is a pause, not a burnout: with no working engine, staging \"paused\" keeps the throttle while KSP relights it, " +
+            "and after max_flameout_pause_s of wanted thrust it ends with flameout_timeout, then no_thrust. staging_options: tailoff_ratio 0.05, max_tailoff_s 5, " +
+            "settle_distance 2 m, max_settle_s 3, max_separate_q 25 kPa, max_separate_q_wait_s 30, max_flameout_pause_s 3. To restart after a no_thrust abort (out_of_stages, ignite_blocked, stage_failed), on_start:[\"stage\"] is required. " +
             "Invalid plans fail with invalid_plan \"<path>: <reason>\"; no engine and nothing staging fails with no_thrust. " +
             "Returns {plan_id, state, steps, event_seq, epoch}; follow progress with get_flight_events.")]
         public Task<string> SubmitFlightPlan([Description("Flight plan JSON object")] JsonElement plan, CancellationToken ct)
@@ -158,7 +160,8 @@ namespace KspBridge.App
             "epoch identifies the event session (kept across reload_mod); if it changes, reset since to 0. " +
             "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, steps_replaced, step_started, step_completed, stage_burnout, staged {stage, reason, q_kpa (separate only)}, " +
             "staging_completed {stage, tailoff_s, settle_s, held_s (dynamic-pressure wait), ignited}, separation_held {stage, q_kpa}, " +
-            "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, plan_completed, plan_aborted {reason, condition, message}; " +
+            "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage}, " +
+            "out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
             "part_collision {part, part_id, vessel_id, active, kind part|crash|splashdown, other, speed m/s, crash_tolerance} (a collision that destroys the part comes right after its part_lost), " +
