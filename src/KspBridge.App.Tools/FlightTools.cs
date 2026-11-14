@@ -187,7 +187,7 @@ namespace KspBridge.App
             "coast (throttle 0, reference prograde by default or none for no attitude control, warp true; until required: with warp it time-warps on rails above the atmosphere " +
             "toward the time leaves of until (time_to_apoapsis|time_to_periapsis with < or <=, met|step_time with > or >=) and stops 15..10 s before; " +
             "a player cancel is respected for the rest of the step; no plan warp while the player's own warp is on); " +
-            "circularize (tolerance 0.5 m/s; waits, with warp, until the burn start before apoapsis, or burns at once when that time or the apoapsis has passed; " +
+            "circularize (tolerance 0.5 m/s; waits, warping once aligned (attitude_error <= 5 deg and angular rate <= 0.02 rad/s), until the burn start before apoapsis, or burns at once when that time or the apoapsis has passed; " +
             "burns along the Δv to the circular velocity at the current position, only while attitude_error <= 5 deg; completes by itself); " +
             "land (margin 0.8, final_altitude 20 m, final_speed 2 m/s, gear_altitude 500 m or false; from a descent: ground height is the radar altitude " +
             "minus the vessel bottom; starts the burn when the vertical stopping distance at margin × full thrust reaches the ground and the axis is within 15 deg " +
@@ -197,17 +197,18 @@ namespace KspBridge.App
             "unless the axis is still turning after a forced start or points below the horizon), touchdown, landed {tilt_deg, tipped}; throttle 0 after touchdown " +
             "and completes by itself once landed and still (speed < 0.5 m/s, angular speed < 0.05 rad/s) for 2 s, so add timeout_s if it may keep sliding; " +
             "submitted on an already landed vessel it reports touchdown and landed at once (refused with no_thrust if no engine is running; on the pad, PRELAUNCH is not landed, so the step does not end by itself); no warp: put a coast step before it); " +
-            "execute_node (the first maneuver node, e.g. from plan_maneuver; tolerance 0.2 m/s, late_limit_s 10: warps to the burn start (half the burn before the node, " +
+            "execute_node (the first maneuver node, e.g. from plan_maneuver; tolerance 0.2 m/s, late_limit_s 10: waits, warping once aligned, until the burn start (half the burn before the node," +
             "staged burn time), burns along the node's remaining Δv only while attitude_error <= 5 deg (1 deg once the direction is locked near the end), " +
             "completes when the remaining Δv is within tolerance or starts growing and removes the node; events node_burn_start, insufficient_dv, node_burn_done); " +
-            "approach (set_target vessel or docking port first; distance 50 m (1..1000), max_speed 10 m/s: warps to the closest approach, kills the relative velocity, " +
+            "approach (set_target vessel or docking port first; distance 50 m (1..1000), max_speed 10 m/s: waits, warping once aligned, until about half the kill burn before the closest approach at its predicted relative speed " +
+            "(the whole burn when the pass is closer than the distance covered while killing), rechecks the closest approach there (waits again when it moved later), kills the relative velocity," +
             "then closes at most max_speed (main engine for velocity errors above 2 m/s, RCS translation below; engine only without RCS); a port target is approached to the point distance in front of the port, around the target " +
             "when behind it; completes holding at the goal below 0.2 m/s for 3 s; the closest approach must be within 10 km (rendezvous first); events approach_phase, approach_done, rcs_unavailable); " +
             "dock (target a free docking port of the same size; port = own port part id when more than one fits, retries 2 (0..10): uses the own port as the control point, " +
             "aligns with the target port axis and translates in with RCS (rcs true recommended), backs off 10 m and retries when contact does not couple; " +
             "on docking the plan continues on the merged vessel and the control point is restored when the step ends; events dock_attempt, docked, rcs_unavailable). " +
             "First-step refusals (409, nothing applied) and later plan_aborted reasons of these modes: no_node, node_missed (burn start passed by more than late_limit_s), " +
-            "no_target, target_too_far, port_incompatible, dock_failed (retries used up, no RCS translation or the target port lost; not refused at submit). " +
+            "no_target, target_too_far, approach_off_course (at the kill start the distance is far above the predicted closest approach; no burn), port_incompatible, dock_failed (retries used up, no RCS translation or the target port lost; not refused at submit). " +
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
@@ -300,7 +301,9 @@ namespace KspBridge.App
             "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, steps_replaced, step_started, step_completed, stage_burnout, staged {stage, reason, q_kpa (separate only)}, " +
             "staging_completed {stage, tailoff_s, settle_s, held_s (dynamic-pressure wait), ignited}, separation_held {stage, q_kpa}, " +
             "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage, pause_s}, " +
-            "out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, " +
+            "out_of_stages, ignite_blocked, stage_failed, warp_started {rate, until_ut, resumed?}, warp_stopped {rate, until_ut, ended_by plan|unexpected, remaining_s} (plan warps only; " +
+            "an unexpected end allows one re-request per step, a second one in the step is taken as a user cancel), " +
+            "warp_unavailable {reason player_warp|not_supported|mode_switch_refused|align_wait (wait step not aligned for 30 s)}, " +
             "landing_infeasible {reason accel|dv, a_req, a_max, a_max_basis best|actual, dv_need, dv_left, altitude} (land; once per step and reason; " +
             "altitude = ground height of the vessel bottom, not the sea-level altitude; dv_need/dv_left are null for accel, a_req is null below final_altitude), " +
             "touchdown {vertical_speed (up positive, negative when descending), horizontal_speed, situation} (land; first ground contact, or the first tick when submitted already landed), landed {tilt_deg, tipped (tilt > 45), time_since_touchdown_s} (land; on completion), " +
