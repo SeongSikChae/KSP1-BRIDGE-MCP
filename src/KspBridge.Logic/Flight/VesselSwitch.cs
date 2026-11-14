@@ -68,7 +68,6 @@ namespace KspBridge.Flight
             }
         }
 
-        /// <summary>POST api/flight/switch. Every pre-check runs before anything changes (design 0035 error table order).</summary>
         /// <summary>409 switch_pending while a switch waits (switch_vessel, open_tracking_station).</summary>
         internal static void RequireNotPending()
         {
@@ -78,6 +77,7 @@ namespace KspBridge.Flight
             }
         }
 
+        /// <summary>POST api/flight/switch. Every pre-check runs before anything changes (design 0035 error table order).</summary>
         public static object Switch(RequestBody b)
         {
             double idArg = b.GetDouble("vessel_id");
