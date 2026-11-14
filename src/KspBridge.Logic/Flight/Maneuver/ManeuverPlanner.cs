@@ -37,6 +37,7 @@ namespace KspBridge.Flight.Maneuver
                 start = last.UT;
             }
             List<OrbitMath.NodeSpec> nodes;
+            Dictionary<string, object> extra = null;
             switch (kind)
             {
                 case "change_apoapsis":
@@ -57,8 +58,52 @@ namespace KspBridge.Flight.Maneuver
                     nodes = OrbitMath.Hohmann(o, TargetR(o, b, "altitude"), double.IsNaN(ut) ? start + AutoLeadS : Lead(o, b, ut, start));
                     break;
                 }
+                case "transfer_body":
+                {
+                    CelestialBody body = TargetBody(v, o);
+                    double pe = b.GetDouble("periapsis");
+                    if (pe <= (body.atmosphere ? body.atmosphereDepth : 0) || body.Radius + pe >= body.sphereOfInfluence)
+                    {
+                        throw ApiException.BadRequest("periapsis must be above the " + (body.atmosphere ? "atmosphere" : "surface") + " of " + body.bodyName + " and inside its SOI");
+                    }
+                    if (o.eccentricity > 0.1)
+                    {
+                        throw new ApiException(409, "no_solution", "circularize first (eccentricity " + o.eccentricity.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + ")");
+                    }
+                    OrbitMath.TransferResult tr = OrbitMath.TransferBody(o, body, pe, start + MinLeadS);
+                    if (!OrbitMath.Finite(tr.Node.Ut))
+                    {
+                        throw new ApiException(409, "no_solution", "transfer search exceeded its time budget");
+                    }
+                    if (double.IsNaN(tr.PeriapsisAlt))
+                    {
+                        throw new ApiException(409, "no_encounter", "no SOI entry of " + body.bodyName + " found");
+                    }
+                    nodes = One(tr.Node);
+                    extra = new Dictionary<string, object>
+                    {
+                        ["body"] = body.bodyName,
+                        ["computed_periapsis"] = OrbitMath.Num(tr.PeriapsisAlt),
+                        ["computed_soi_entry_ut"] = OrbitMath.Num(tr.EntryUt),
+                    };
+                    break;
+                }
+                case "capture":
+                {
+                    // At the periapsis of the current orbit (a hyperbola after an SOI entry included): the apoapsis goes to
+                    // altitude (default: the periapsis altitude, a circular orbit).
+                    double ut = OrbitMath.ApsisUt(o, false, start);
+                    if (!OrbitMath.Finite(ut))
+                    {
+                        throw new ApiException(409, "no_solution", "no periapsis ahead on this orbit");
+                    }
+                    double peR = o.getRelativePositionAtUT(ut).magnitude;
+                    double apoR = b.Has("altitude") ? TargetR(o, b, "altitude") : peR;
+                    nodes = One(OrbitMath.ChangeApsis(o, ut, apoR, raiseApo: true));   // apoapsis below the periapsis: 400
+                    break;
+                }
                 default:
-                    throw ApiException.BadRequest("unknown kind " + kind + " (change_apoapsis, change_periapsis, circularize, change_inclination, hohmann)");
+                    throw ApiException.BadRequest("unknown kind " + kind + " (change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture)");
             }
             foreach (OrbitMath.NodeSpec n in nodes)
             {
@@ -82,7 +127,21 @@ namespace KspBridge.Flight.Maneuver
                 from = OrbitMath.After(from, n);   // the next node's frame is on the orbit after this one
             }
             s.UpdateFlightPlan();
-            return Result(v, s, nodes);
+            return Result(v, s, nodes, extra);
+        }
+
+        /// <summary>The current target as a child body of the orbit's reference body (409 no_target otherwise).</summary>
+        private static CelestialBody TargetBody(Vessel v, Orbit o)
+        {
+            if (!(v.targetObject is CelestialBody body))
+            {
+                throw new ApiException(409, "no_target", "transfer_body needs a body target (set_target body)");
+            }
+            if (body.referenceBody != o.referenceBody || body == o.referenceBody)
+            {
+                throw new ApiException(409, "no_target", body.bodyName + " does not orbit " + o.referenceBody.bodyName);
+            }
+            return body;
         }
 
         private static List<OrbitMath.NodeSpec> One(OrbitMath.NodeSpec n) => new List<OrbitMath.NodeSpec> { n };
@@ -148,7 +207,7 @@ namespace KspBridge.Flight.Maneuver
             return body.Radius + alt;
         }
 
-        private static object Result(Vessel v, PatchedConicSolver s, List<OrbitMath.NodeSpec> nodes)
+        private static object Result(Vessel v, PatchedConicSolver s, List<OrbitMath.NodeSpec> nodes, Dictionary<string, object> extra)
         {
             double total = 0;
             foreach (OrbitMath.NodeSpec n in nodes)
@@ -157,15 +216,33 @@ namespace KspBridge.Flight.Maneuver
             }
             double bt = EngineModel.BurnTimeStaged(v, total, out bool shortDv);
             ManeuverNode last = s.maneuverNodes.Count > 0 ? s.maneuverNodes[s.maneuverNodes.Count - 1] : null;
-            return new Dictionary<string, object>
+            Dictionary<string, object> predicted = last?.nextPatch == null ? null : OrbitMath.OrbitSummary(last.nextPatch);
+            if (predicted != null && extra != null && extra.TryGetValue("body", out object bodyName))
+            {
+                // KSP's own prediction of the encounter: the patch after the node ends in an SOI entry of that body.
+                Orbit p = last.nextPatch;
+                bool enc = p.patchEndTransition == Orbit.PatchTransitionType.ENCOUNTER && p.nextPatch != null
+                    && p.nextPatch.referenceBody != null && p.nextPatch.referenceBody.bodyName == (string)bodyName;
+                predicted["encounter"] = enc;
+                predicted["encounter_periapsis"] = enc ? OrbitMath.Num(p.nextPatch.PeA) : null;
+            }
+            Dictionary<string, object> result = new Dictionary<string, object>
             {
                 ["maneuver_nodes"] = ManeuverNodes.List(v),
                 ["created"] = nodes.Count,
                 ["total_dv"] = OrbitMath.Num(total),
                 ["burn_time"] = OrbitMath.Num(bt),
                 ["dv_short"] = shortDv,
-                ["predicted"] = last?.nextPatch == null ? null : OrbitMath.OrbitSummary(last.nextPatch),
+                ["predicted"] = predicted,
             };
+            if (extra != null)
+            {
+                foreach (KeyValuePair<string, object> kv in extra)
+                {
+                    result[kv.Key] = kv.Value;
+                }
+            }
+            return result;
         }
     }
 }

@@ -34,6 +34,16 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/flight/nodes/add", (m, b, q) => Flight.Maneuver.ManeuverNodes.Add(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/nodes/update", (m, b, q) => Flight.Maneuver.ManeuverNodes.Update(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/nodes/remove", (m, b, q) => Flight.Maneuver.ManeuverNodes.Remove(Guard.ActiveVessel(), b));
+            yield return new Route("GET", "/api/vessels", (m, b, q) =>
+            {
+                string d = q["include_debris"];
+                if (d != null && d != "true" && d != "false")
+                {
+                    throw ApiException.BadRequest("include_debris must be true or false");
+                }
+                return Flight.Targeting.List(Guard.ActiveVessel(), d == "true");   // qualified: KSP has a global Targeting type
+            });
+            yield return new Route("POST", "/api/flight/target", (m, b, q) => Flight.Targeting.Set(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/plan_maneuver", (m, b, q) => Flight.Maneuver.ManeuverPlanner.Plan(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/revert", (m, b, q) => FlightReset.Revert(b.GetString("target")));
             yield return new Route("POST", "/api/flight/leave", (m, b, q) => FlightReset.Leave());

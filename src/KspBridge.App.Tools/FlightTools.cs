@@ -29,7 +29,8 @@ namespace KspBridge.App
             "and time_warp {mode rails|physics, rate_index, rate, auto_warp (a warp-to pending or running)}, " +
             "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}, rcs {on, parts, monopropellant {amount, max} or null}, translate (last rcs_translate pulse, see rcs_translate; null before any)} (null with controls_error if it could not be read), " +
             "maneuver_nodes [{index, ut, time_to, prograde, normal, radial (m/s), dv, burn_time (s across stages; null when no stage can fire), dv_short (the stages cannot supply dv), " +
-            "orbit_after {apoapsis, periapsis, eccentricity, inclination, period, body} (KSP's prediction after the node; null until computed)}] (KSP maneuver nodes, earliest first). " +
+            "orbit_after {apoapsis, periapsis, eccentricity, inclination, period, body} (KSP's prediction after the node; null until computed)}] (KSP maneuver nodes, earliest first), " +
+            "target (null without one; else as set_target returns). " +
             "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
         public Task<string> GetFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
@@ -70,6 +71,28 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/translate", new { seconds, x, y, z }, ct);
 
+        [McpServerTool(Name = "list_vessels", ReadOnly = true)]
+        [Description("Vessels in the flight scene, nearest to the active vessel first: id (persistentId, as get_flight / get_status), name, type, situation, body, " +
+            "orbit {apoapsis, periapsis, eccentricity, inclination, period, body}, active, loaded (inside physics range), distance m, " +
+            "docking_ports [{part_id, node_type (size, e.g. size1), state, free}] (from the save snapshot when unloaded). Debris, flags and space objects " +
+            "are left out unless include_debris. Flight scene only (not_in_flight).")]
+        public Task<string> ListVessels([Description("true = also debris, flags and space objects")] bool include_debris = false, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/vessels?include_debris=" + (include_debris ? "true" : "false"), null, ct);
+
+        [McpServerTool(Name = "set_target", Destructive = true)]
+        [Description("Set the active vessel's target like the player: a body (body name, e.g. Mun), a vessel (vessel_id from list_vessels), a docking port " +
+            "(vessel_id + port = part_id from list_vessels; the vessel must be loaded: target_unloaded otherwise, approach it with the vessel as target first; " +
+            "port_occupied when already docked), or clear: true. Not while a flight plan runs (plan_running). bad_request for an unknown body/vessel/port or the " +
+            "active vessel itself. Returns {target} as get_flight.target: {kind vessel|body|port, name, id, port_id, distance, relative_speed, " +
+            "closest_approach {distance, ut, time_to, relative_speed} (vessel or port target orbiting the same body)}.")]
+        public Task<string> SetTarget(
+            [Description("Body name, e.g. Mun")] string? body = null,
+            [Description("Vessel id (persistentId) from list_vessels")] double? vessel_id = null,
+            [Description("Docking port part_id from list_vessels (with vessel_id)")] double? port = null,
+            [Description("true = clear the target")] bool? clear = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/target", new { body, vessel_id, port, clear }, ct);
+
         [McpServerTool(Name = "add_maneuver_node", Destructive = true)]
         [Description("Add a KSP maneuver node to the active vessel at an orbit position (at: apoapsis, periapsis, ascending_node, descending_node; " +
             "nodes are relative to the target's orbit plane when the target orbits the same body, else the equator) or at ut (game time, not in the past); " +
@@ -91,19 +114,25 @@ namespace KspBridge.App
             "change_periapsis (altitude; at default apoapsis), circularize (at default apoapsis), " +
             "change_inclination (inclination deg against the target's orbit plane when the target orbits the same body, else the equator; " +
             "at ascending_node|descending_node|auto, default auto = the node at the larger radius; any point when already coplanar), " +
-            "hohmann (altitude of the target circular orbit; two nodes: transfer and arrival circularization; at apoapsis|periapsis|ut|auto, auto = now + 60 s). " +
+            "hohmann (altitude of the target circular orbit; two nodes: transfer and arrival circularization; at apoapsis|periapsis|ut|auto, auto = now + 60 s), " +
+            "transfer_body (needs a body target orbiting the same parent, e.g. set_target Mun, and a near-circular orbit; periapsis = wanted periapsis altitude inside the body's SOI; " +
+            "one transfer node; returns computed_periapsis and predicted.encounter / encounter_periapsis from KSP; correct after the SOI change with change_periapsis at ut), " +
+            "capture (at the periapsis of the current orbit, also a hyperbola after an SOI entry; altitude = wanted apoapsis, default the periapsis altitude = circular). " +
+            "Orbit-position nodes closer than 30 s move one orbit later. " +
             "Altitudes are above sea level, above the atmosphere and inside the SOI. Existing nodes are replaced unless append: true (plans from the orbit after the last node). " +
             "Not while a flight plan runs (plan_running). Errors: bad_request (an apoapsis below / periapsis above the node point, altitude out of range, at not allowed), " +
-            "no_solution (undefined time or a non-finite result), nodes_unavailable. Returns {maneuver_nodes, created, total_dv, burn_time, dv_short, predicted (KSP's orbit after the last node)}.")]
+            "no_solution (undefined time, a non-finite result, an eccentric start orbit for transfer_body, the search time budget), no_target (transfer_body without a body target of the same parent), " +
+            "no_encounter (no SOI entry found), nodes_unavailable. Returns {maneuver_nodes, created, total_dv, burn_time, dv_short, predicted (KSP's orbit after the last node)}.")]
         public Task<string> PlanManeuver(
-            [Description("change_apoapsis, change_periapsis, circularize, change_inclination or hohmann")] string kind,
-            [Description("Target altitude m above sea level (change_apoapsis, change_periapsis, hohmann)")] double? altitude = null,
+            [Description("change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body or capture")] string kind,
+            [Description("Target altitude m above sea level (change_apoapsis, change_periapsis, hohmann; capture apoapsis)")] double? altitude = null,
             [Description("Target inclination deg (change_inclination)")] double? inclination = null,
             [Description("Node position: apoapsis, periapsis, ascending_node, descending_node, ut or auto (allowed values depend on kind)")] string? at = null,
             [Description("Node time (game UT seconds) with at ut")] double? ut = null,
             [Description("true = keep the existing nodes and plan after the last one")] bool? append = null,
+            [Description("Wanted periapsis altitude m inside the target body's SOI (transfer_body)")] double? periapsis = null,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append }, ct);
+            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append, periapsis }, ct);
 
         [McpServerTool(Name = "update_maneuver_node", Destructive = true)]
         [Description("Change a maneuver node of the active vessel: index from get_flight.maneuver_nodes (0 = earliest); only the given fields change " +

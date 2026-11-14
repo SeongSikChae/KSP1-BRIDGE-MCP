@@ -820,6 +820,15 @@ namespace KspBridge.Flight
             }
             try
             {
+                result["target"] = Targeting.DescribeTarget(v, v.targetObject);
+            }
+            catch (Exception e)   // isolated like controls
+            {
+                result["target"] = null;
+                result["target_error"] = e.GetType().Name + ": " + e.Message;
+            }
+            try
+            {
                 result["maneuver_nodes"] = Maneuver.ManeuverNodes.List(v);
             }
             catch (Exception e)   // isolated like controls

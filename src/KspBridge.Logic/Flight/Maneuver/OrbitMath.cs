@@ -159,8 +159,8 @@ namespace KspBridge.Flight.Maneuver
 
         private static double HyperbolicMeanAnomaly(double nu, double e)
         {
-            double x = Math.Sqrt((e - 1) / (e + 1)) * Math.Tan(nu / 2);
-            double H = 0.5 * Math.Log((1 + x) / (1 - x));   // atanh
+            double x = Math.Sqrt((e - 1) / (e + 1)) * Math.Tan(nu / 2);   // = tanh(H/2)
+            double H = Math.Log((1 + x) / (1 - x));   // 2·atanh(x) (unit 5 measurement: the missing factor 2 put a capture node at 1321 s instead of the periapsis)
             return e * Math.Sinh(H) - H;
         }
 
@@ -261,6 +261,200 @@ namespace KspBridge.Flight.Maneuver
                 hDir = -hDir;
             }
             return new NodeSpec(ut, vr * rHat + vh.magnitude * hDir - vel);
+        }
+
+        // ---- body transfer (transfer_body / capture) ----------------------------------------------------------------------
+
+        /// <summary>Budget for one search (s of real time): the main thread has a 5 s request limit.</summary>
+        public const double SearchBudgetS = 2;
+
+        /// <summary>Result of a transfer search: the node and the periapsis altitude it reaches inside the body's SOI.</summary>
+        public struct TransferResult
+        {
+            public NodeSpec Node;
+            public double PeriapsisAlt;   // NaN: no SOI entry
+            public double EntryUt;
+        }
+
+        /// <summary>
+        /// Transfer from a near-circular orbit o to a child body of its reference body: a Hohmann-like burn (apoapsis at the body's
+        /// orbit radius) whose departure UT is searched over one synodic period for the closest pass at the transfer apoapsis,
+        /// then scanned and golden-refined (±120 s) so the periapsis inside the body's SOI meets periapsisAlt. NaN periapsis when
+        /// no SOI entry was found (the caller answers no_encounter); NaN node UT when the budget ran out (no_solution).
+        /// </summary>
+        public static TransferResult TransferBody(Orbit o, CelestialBody body, double periapsisAlt, double start)
+        {
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            double mu = o.referenceBody.gravParameter;
+            double r2 = body.orbit.semiMajorAxis;
+            double synodic = 1 / Math.Abs(1 / o.period - 1 / body.orbit.period);
+            // 1. Departure UT with the closest pass at the transfer apoapsis (coarse scan, then golden refine).
+            Func<double, double> miss = t =>
+            {
+                NodeSpec n = ChangeApsis(o, t, r2, raiseApo: true);
+                Orbit tr = After(o, n);
+                double tApo = t + Math.PI * Math.Sqrt(Math.Pow(tr.semiMajorAxis, 3) / mu);
+                return (tr.getRelativePositionAtUT(tApo) - body.orbit.getRelativePositionAtUT(tApo)).magnitude;
+            };
+            double best = start, bestMiss = double.PositiveInfinity;
+            int samples = 180;
+            for (int i = 0; i <= samples; i++)
+            {
+                double t = start + synodic * i / samples;
+                double m = miss(t);
+                if (m < bestMiss)
+                {
+                    bestMiss = m;
+                    best = t;
+                }
+            }
+            double step = synodic / samples;
+            best = Golden(miss, best - step, best + step, 40);
+            // 2. Departure UT within ±120 s for the target periapsis inside the SOI.
+            Func<double, double> err = t =>
+            {
+                double pe = SoiPeriapsis(o, ChangeApsis(o, t, r2, raiseApo: true), body, out _);
+                return double.IsNaN(pe) ? double.PositiveInfinity : Math.Abs(pe - periapsisAlt);
+            };
+            double bestT = best, bestErr = err(best);
+            for (double dt = -120; dt <= 120; dt += 2)
+            {
+                if (sw.Elapsed.TotalSeconds > SearchBudgetS)
+                {
+                    return new TransferResult { Node = new NodeSpec(double.NaN, Vector3d.zero), PeriapsisAlt = double.NaN };
+                }
+                double e = err(best + dt);
+                if (e < bestErr)
+                {
+                    bestErr = e;
+                    bestT = best + dt;
+                }
+            }
+            if (!double.IsInfinity(bestErr))
+            {
+                bestT = Golden(err, bestT - 2, bestT + 2, 30);
+            }
+            NodeSpec node = ChangeApsis(o, bestT, r2, raiseApo: true);
+            double peAlt = SoiPeriapsis(o, node, body, out double entry);
+            return new TransferResult { Node = node, PeriapsisAlt = peAlt, EntryUt = entry };
+        }
+
+        /// <summary>Periapsis altitude inside body's SOI after applying n to o: the first SOI entry within one orbit after the
+        /// node (60 s scan, then bisection), the relative state turned into an Orbit about body. NaN without an entry.</summary>
+        public static double SoiPeriapsis(Orbit o, NodeSpec n, CelestialBody body, out double entryUt)
+        {
+            entryUt = double.NaN;
+            Orbit tr = After(o, n);
+            double soi = body.sphereOfInfluence;
+            double end = n.Ut + (tr.eccentricity < 1 ? tr.period : 86400);
+            Func<double, double> dist = t => (tr.getRelativePositionAtUT(t) - body.orbit.getRelativePositionAtUT(t)).magnitude;
+            double prev = n.Ut;
+            for (double t = n.Ut + 60; t <= end; t += 60)
+            {
+                if (dist(t) < soi)
+                {
+                    double lo = prev, hi = t;
+                    for (int i = 0; i < 40; i++)
+                    {
+                        double mid = (lo + hi) / 2;
+                        if (dist(mid) < soi)
+                        {
+                            hi = mid;
+                        }
+                        else
+                        {
+                            lo = mid;
+                        }
+                    }
+                    entryUt = hi;
+                    Vector3d rRel = tr.getRelativePositionAtUT(hi) - body.orbit.getRelativePositionAtUT(hi);
+                    Vector3d vRel = tr.getOrbitalVelocityAtUT(hi) - body.orbit.getOrbitalVelocityAtUT(hi);
+                    Orbit inBody = new Orbit();
+                    inBody.UpdateFromStateVectors(rRel, vRel, body, hi);
+                    return inBody.PeA;
+                }
+                prev = t;
+            }
+            return double.NaN;
+        }
+
+        // ---- closest approach (target, rendezvous, approach) ---------------------------------------------------------------
+
+        /// <summary>Search span for a closest approach: one period on an ellipse, the time left to the SOI exit on a hyperbola,
+        /// NaN when neither is defined.</summary>
+        public static double SafeSpan(Orbit o, double now)
+        {
+            if (o.eccentricity < 1)
+            {
+                return o.period;
+            }
+            double left = o.EndUT - now;
+            return Finite(left) && left > 0 ? left : double.NaN;
+        }
+
+        /// <summary>Minimum distance between two orbits of the same body over [ut0, ut0 + span]: 200 samples, then a golden
+        /// refine around the best (40 iterations), within SearchBudgetS. Never throws: (NaN, NaN) for a bad span, different
+        /// bodies or an exceeded budget.</summary>
+        public static void ClosestApproach(Orbit a, Orbit b, double ut0, double span, out double ut, out double dist)
+        {
+            ut = double.NaN;
+            dist = double.NaN;
+            if (!Finite(span) || span <= 0 || a.referenceBody != b.referenceBody)
+            {
+                return;
+            }
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            Func<double, double> d = t => (a.getRelativePositionAtUT(t) - b.getRelativePositionAtUT(t)).magnitude;
+            int samples = 200;
+            double step = span / samples, best = ut0, bestD = double.PositiveInfinity;
+            for (int i = 0; i <= samples; i++)
+            {
+                double t = ut0 + step * i;
+                double x = d(t);
+                if (x < bestD)
+                {
+                    bestD = x;
+                    best = t;
+                }
+            }
+            if (sw.Elapsed.TotalSeconds > SearchBudgetS)
+            {
+                return;
+            }
+            double lo = Math.Max(ut0, best - step), hi = Math.Min(ut0 + span, best + step);
+            ut = Golden(d, lo, hi, 40);
+            dist = d(ut);
+        }
+
+        /// <summary>Relative speed of two orbits at ut (m/s).</summary>
+        public static double RelativeSpeed(Orbit a, Orbit b, double ut) => (a.getOrbitalVelocityAtUT(ut) - b.getOrbitalVelocityAtUT(ut)).magnitude;
+
+        /// <summary>Golden-section minimum of f on [a, b] (iterations bound the work).</summary>
+        public static double Golden(Func<double, double> f, double a, double b, int iterations)
+        {
+            double g = (Math.Sqrt(5) - 1) / 2;
+            double c = b - g * (b - a), d = a + g * (b - a);
+            double fc = f(c), fd = f(d);
+            for (int i = 0; i < iterations; i++)
+            {
+                if (fc < fd)
+                {
+                    b = d;
+                    d = c;
+                    fd = fc;
+                    c = b - g * (b - a);
+                    fc = f(c);
+                }
+                else
+                {
+                    a = c;
+                    c = d;
+                    fc = fd;
+                    d = a + g * (b - a);
+                    fd = f(d);
+                }
+            }
+            return (a + b) / 2;
         }
 
         internal static object Num(double x) => double.IsNaN(x) || double.IsInfinity(x) ? null : (object)Math.Round(x, 3);

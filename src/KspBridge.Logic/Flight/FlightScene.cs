@@ -16,6 +16,7 @@ namespace KspBridge.Flight
             GameEvents.onVesselChange.Add(s.OnVesselChange);
             GameEvents.onVesselWillDestroy.Add(s.OnVesselDestroy);
             GameEvents.onPartCouple.Add(s.OnPartCouple);
+            GameEvents.onVesselSOIChanged.Add(s.OnSoiChanged);
             _hooked = s;
         }
 
@@ -31,6 +32,29 @@ namespace KspBridge.Flight
             GameEvents.onVesselChange.Remove(s.OnVesselChange);
             GameEvents.onVesselWillDestroy.Remove(s.OnVesselDestroy);
             GameEvents.onPartCouple.Remove(s.OnPartCouple);
+            GameEvents.onVesselSOIChanged.Remove(s.OnSoiChanged);
+        }
+
+        /// <summary>soi_changed for the active vessel, with or without a plan (design 0032 decision 31).</summary>
+        private void OnSoiChanged(GameEvents.HostedFromToAction<Vessel, CelestialBody> a)
+        {
+            try
+            {
+                if (a.host == null || a.host != FlightGlobals.ActiveVessel)
+                {
+                    return;
+                }
+                FlightEvents.Add("soi_changed", Coordinator.Running ? Coordinator.StepIndex : -1, new System.Collections.Generic.Dictionary<string, object>
+                {
+                    ["vessel_id"] = (double)a.host.persistentId,
+                    ["from"] = a.from != null ? a.from.bodyName : null,
+                    ["to"] = a.to != null ? a.to.bodyName : null,
+                });
+            }
+            catch (System.Exception e)
+            {
+                UnityEngine.Debug.LogError("[KspBridge] soi_changed: " + e);
+            }
         }
 
         // Only a running plan is aborted: Abort releases control, which must not touch the user's throttle otherwise.
