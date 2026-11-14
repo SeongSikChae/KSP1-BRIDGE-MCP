@@ -310,9 +310,9 @@ namespace KspBridge.App
             "rcs_unavailable {reason rcs_off|no_thrusters|no_propellant} (approach, dock), dock_attempt {attempt, forced (debug_dock_reject), contact_speed, lateral_error}, " +
             "docked {vessel_id, name, parts, attempts} (dock), soi_changed {vessel_id, from, to} (any vessel; step -1 without a plan), " +
             "part_event {part_id, part, module, index, event, counterparts, vessel_changed, separated, error} (invoke_part_event; step -1 without a plan), " +
-            "action_group {group, action, before, on, changed, actions, error} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error} " +
-            "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow) (only calls that change something; " +
-            "error set only for action_failed / field_failed; step -1 without a plan), " +
+            "these three only for calls that change something, step -1 without a plan: action_group {group, action, before, on, changed, actions, error " +
+            "(action_failed only)} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error (field_failed only)} " +
+            "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
@@ -355,7 +355,7 @@ namespace KspBridge.App
         [Description("Press a part action window button of the active vessel, like a click in the game (only events get_vessel_parts lists as " +
             "available). A module event is first sent to the symmetry counterparts' part-level event lists, as the game does; module events such as " +
             "antenna Extend reach counterparts only if the module does it itself. Returns {part_id, part, module, index, event, title, counterparts " +
-            "[{part_id, sent}], vessel_changed, part_vessel_id, separated (the part left the vessel, e.g. Undock), module_state (as get_vessel_parts; " +
+            "[{part_id, sent}], vessel_changed, part_vessel_id, separated (the part left the vessel, e.g. Undock), module_state (as get_vessel_parts, with the same field and state keys; " +
             "events of a part no longer in the active vessel are unavailable with reason not_active_vessel), state_error}; slow changes (animations) " +
             "finish later, check get_vessel_parts. If a flight plan runs and the event splits the vessel so the active vessel changes, the plan stops " +
             "with vessel_changed. Errors: not_in_flight, no_active_vessel, bad_request, part_not_found, module_not_found, event_not_found, ambiguous_module (give module_index), " +
@@ -386,7 +386,7 @@ namespace KspBridge.App
 
         [McpServerTool(Name = "set_action_group", Destructive = true)]
         [Description("Fire an action group of the active vessel like its key: Custom01..Custom10, Light, Gear, Brakes, Abort (SAS: set_sas, RCS: set_rcs; " +
-            "Stage is not set here). action toggle | on | off; on/off that already holds does nothing (changed false). Allowed while a flight plan runs; " +
+            "Stage is not set here). action toggle | on | off; on/off that already holds does nothing (changed false), even while the key is locked. Allowed while a flight plan runs; " +
             "if the group splits the vessel so the active vessel changes, the plan stops with vessel_changed; a land plan does not redeploy gear turned off " +
             "here after it deployed it. Returns {group, action, before, on, changed, cooldown, actions (fired; empty when unchanged), vessel_changed}; slow " +
             "changes (gear) finish later, check get_vessel_parts. Errors: not_in_flight, no_active_vessel, eva_not_supported, bad_request, group_locked " +

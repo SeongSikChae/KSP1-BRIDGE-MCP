@@ -93,15 +93,15 @@ namespace KspBridge.Flight
             {
                 throw ApiException.BadRequest("action must be toggle, on or off");
             }
-            if (!PartStates.Unlocked(KeyLock(g)))
+            bool before = v.ActionGroups[g];
+            bool want = action == "toggle" ? !before : action == "on";
+            bool changed = want != before;
+            if (changed && !PartStates.Unlocked(KeyLock(g)))   // on/off that already holds does nothing, locked or not
             {
                 // GetName: the exact flag name; ToString would also name composite flags that contain it
                 throw new ApiException(409, "group_locked", g + " is input_locked (" + Enum.GetName(typeof(ControlTypes), KeyLock(g))
                     + (v.IsControllable ? "" : "; no control") + ")");
             }
-            bool before = v.ActionGroups[g];
-            bool want = action == "toggle" ? !before : action == "on";
-            bool changed = want != before;
             List<object> actions = changed ? Actions(v, g) : new List<object>();
             uint id = v.persistentId;
             if (changed)

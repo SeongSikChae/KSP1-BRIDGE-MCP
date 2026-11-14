@@ -260,7 +260,7 @@ namespace KspBridge.Flight
                 + " (resources: " + string.Join(", ", p.Resources.Cast<PartResource>().Select(x => x.resourceName).ToArray()) + ")");
             if (!FlowToggleable(r))
             {
-                throw new ApiException(409, "flow_not_toggleable", name + " in " + p.partInfo.name + " has no flow button (no-flow resource or hidden)");
+                throw new ApiException(409, "flow_not_toggleable", name + " in " + p.partInfo.name + " has no flow button (no-flow, hidden or empty resource row)");
             }
             if (!Unlocked(ControlTypes.TWEAKABLES_ANYCONTROL))
             {
@@ -503,7 +503,8 @@ namespace KspBridge.Flight
         /// must also be one PartSettings.Convert takes, so editable never promises a value set_vessel_part_field refuses.
         /// </summary>
         private static UI_Control EditableControl(BaseField f) =>
-            f.uiControlFlight is UI_Control c && !(c is UI_Label) && !(c is UI_ProgressBar) && c.controlEnabled && Convertible(f.FieldInfo.FieldType) ? c : null;
+            f.uiControlFlight is UI_Control c && !(c is UI_Label) && !(c is UI_ProgressBar) && !(c is UI_ColorPicker) && c.controlEnabled
+                && Convertible(f.FieldInfo.FieldType) ? c : null;   // UI_ColorPicker opens a picker; its string field is not the value
 
         /// <summary>The types PartSettings.Convert takes.</summary>
         private static bool Convertible(Type t) =>
@@ -512,8 +513,12 @@ namespace KspBridge.Flight
         /// <summary>UIPartAction* value change: requireFullControl → TWEAKABLES_FULLONLY, else TWEAKABLES_ANYCONTROL.</summary>
         private static ControlTypes FieldLock(UI_Control c) => c.requireFullControl ? ControlTypes.TWEAKABLES_FULLONLY : ControlTypes.TWEAKABLES_ANYCONTROL;
 
-        /// <summary>UIPartActionResource.Setup: the flow button exists.</summary>
-        private static bool FlowToggleable(PartResource r) => r.info.resourceFlowMode != ResourceFlowMode.NO_FLOW && !r.hideFlow;
+        /// <summary>
+        /// The flight window has the resource row (UIPartActionWindow.CanActivateResource: maxAmount above 0 and isVisible) and the
+        /// row has the flow button (UIPartActionResource.Setup: not NO_FLOW, not hideFlow).
+        /// </summary>
+        private static bool FlowToggleable(PartResource r) =>
+            r.maxAmount != 0 && r.isVisible && r.info.resourceFlowMode != ResourceFlowMode.NO_FLOW && !r.hideFlow;
 
         /// <summary>The range or choices the control offers (design 0043 get_vessel_parts additions).</summary>
         private static void AddRange(Dictionary<string, object> d, BaseField f, UI_Control c)
