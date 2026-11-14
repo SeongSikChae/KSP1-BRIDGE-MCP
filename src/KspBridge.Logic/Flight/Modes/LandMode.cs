@@ -69,8 +69,8 @@ namespace KspBridge.Flight.Modes
         /// <summary>Descent speed (m/s) a burn needs to start: a vessel resting on the ground never starts.</summary>
         private const double MinStartVv = 0.5;
 
-        /// <summary>Interval (s) of the burn telemetry log line.</summary>
-        private const double DiagS = 0.25;
+        /// <summary>Interval (s) of the burn and post-touchdown telemetry log lines (Player.log, landing diagnosis).</summary>
+        private const double DiagS = 1;
 
         /// <summary>Surface speed (m/s) below which a landed vessel counts as still.</summary>
         private const double StillSpeed = 0.5;
@@ -149,11 +149,11 @@ namespace KspBridge.Flight.Modes
                     });
                     Done = true;
                 }
-                if (ut - _touchUt <= 10 && ut - _diagUt >= DiagS)   // post-touchdown telemetry (tip-over investigation)
+                if (ut - _touchUt <= 10 && ut - _diagUt >= DiagS)   // post-touchdown telemetry (tip-over diagnosis)
                 {
                     _diagUt = ut;
                     Log("ground: t=" + F(ut - _touchUt, 2) + " tilt=" + F(Vector3d.Angle(v.ReferenceTransform.up, up), 1) +
-                        " slope=" + F(Vector3d.Angle(v.terrainNormal, up), 1) + " ang_vel=" + F(v.angularVelocity.magnitude, 3) +
+                        " ang_vel=" + F(v.angularVelocity.magnitude, 3) +
                         " vv=" + F(v.verticalSpeed, 2) + " vh=" + F(vh, 2) + " srf=" + F(v.srfSpeed, 2) + " sit=" + v.situation +
                         " h=" + F(h, 2));
                 }
@@ -237,7 +237,7 @@ namespace KspBridge.Flight.Modes
                 throttle = 1;   // this tick only; back to the computed throttle once it clears
             }
             double now = Planetarium.GetUniversalTime();
-            if (now - _diagUt >= DiagS)   // burn telemetry for the measurement runs (0030 단위 3)
+            if (now - _diagUt >= DiagS)   // burn telemetry (landing diagnosis)
             {
                 _diagUt = now;
                 Log("burn: h=" + F(h, 1) + " radar=" + F(v.radarAltitude, 1) + " hft=" + F(v.heightFromTerrain, 1) +

@@ -217,6 +217,7 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 | `gravity_turn` | 고도에 따라 기울이며 상승하고, 예측 원지점이 목표에 가까워지면 스로틀을 줄임. `target_apoapsis` 필수(대기권보다 높게) | 대기권 밖에서 예측 원지점 ≥ 목표, 스로틀 0 |
 | `coast` | 스로틀 0, 기준 방향(기본 `prograde`, `none`이면 자세 제어 없음) 유지. 시간 조건이면 대기권 밖에서 레일 가속, 목표 15~10초 전에 해제 | `until` 필수 |
 | `circularize` | 원지점 전 시작 시각까지 기다렸다가(가속 포함) 원궤도화 연소. 시작 시각이나 원지점이 이미 지났으면 바로 연소, 자세 오차 5° 넘으면 스로틀 0 | 남은 Δv ≤ 잔여 추력 Δv + `tolerance`(0.5 m/s). 10 m/s 아래에서 방향을 고정한 뒤 Δv가 다시 커지거나 이심률이 5틱 동안 줄지 않아도 완료 |
+| `land` | 하강 중인 기체를 엔진 감속으로 착륙(동력 착륙). 지면 고도 = radar 고도 − 기체 바닥까지 거리. 최대 추력 × `margin`(0.8)으로 멈출 거리가 지면에 닿고 자세가 목표와 15° 이내면 연소 시작(여유가 없거나 `final_altitude`(20 m) 아래면 자세와 관계없이 시작). `final_altitude` 아래에서는 `final_speed`(2 m/s)로 하강. 자세는 수평 속도 1 m/s당 5°까지 수직에서 surface retrograde 쪽으로 기움. `gear_altitude`(500 m, `false`면 끔) 아래에서 Gear group 켬. 시간 가속은 하지 않으므로 긴 낙하는 앞 단계 `coast`로 | 접지 뒤 스로틀 0, 지표 속도 0.5 m/s·각속도 0.05 rad/s 미만이 2초 이어지면 완료 |
 
 발사부터 궤도까지 한 계획으로 날리는 예입니다(첫 점화는 `on_start: ["stage"]`가 필요합니다).
 
@@ -229,6 +230,23 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
   ]
 }
 ```
+
+준궤도로 올라갔다가 내려와 착륙하는 예입니다. KSC 시설은 발사대 서쪽에 있어 북쪽으로 띄웠습니다(radar 고도는 지형 기준이라 건물 높이를 모릅니다).
+
+```json
+{
+  "steps": [
+    { "name": "상승", "mode": "attitude", "pitch": 75, "heading": 0, "throttle": 1, "on_start": ["stage"],
+      "until": { "var": "apoapsis", "op": ">=", "value": 3000 } },
+    { "name": "낙하", "mode": "coast", "reference": "none", "warp": false,
+      "until": { "var": "vertical_speed", "op": "<", "value": -5 } },
+    { "name": "착륙", "mode": "land" }
+  ]
+}
+```
+
+- **착륙 이벤트**(`land`): `landing_infeasible`(`reason` `accel`: 최대 추력으로도 못 멈춤, `dv`: 남은 Δv 부족. `a_max_basis` `best`는 최선 자세 기준, `actual`은 실제 기체 축 기준. 단계마다 이유별 1회. 판정이 참인 연소 중 틱은 스로틀 1), `touchdown`(처음 접지한 순간의 `vertical_speed`·`horizontal_speed`), `landed`(완료 때 `tilt_deg`, 45° 넘으면 `tipped: true`). 부품 손상은 아래 부품 진단 이벤트로 확인합니다.
+- 착륙 다리가 엔진 노즐보다 짧으면 노즐로 접지해 넘어질 수 있습니다. 다리를 노즐보다 아래까지 닿게 붙이세요(실측 기체는 LT-2를 연료통 맨 아래에 붙임).
 
 - 조건(`until`, `abort`)은 `{var, op, value, for_s?}`, `{all: [...]}`, `{any: [...]}`, 배열 `[...]`(= `all`)입니다. `op`는 `<`, `<=`, `>`, `>=`, `==`, `!=`이고, 문자열 변수(`situation`, `staging`)는 `==`, `!=`만 됩니다. 값을 모르는(null) 변수는 거짓입니다. 예: `{"var": "apoapsis", "op": ">=", "value": 150000}`.
 - **자동 스테이징**(`auto_stage: true`): 연소 종료 → 잔여 추력 감쇠(tailoff) → 분리 → 이격(settle) → 점화를 스스로 합니다. 연료가 남은 엔진의 flameout(공기 부족 포함)은 연소 종료로 보지 않고 분리하지 않습니다. 작동 엔진이 없으면 스테이징 상태 `paused`(`flameout_pause`)로 스로틀을 유지한 채 KSP가 엔진을 다시 켜길 기다리고(`flameout_resumed`), 추력을 원하는 동안 `max_flameout_pause_s`가 지나면 `flameout_timeout`을 남기고 `no_thrust`로 중단합니다. 병렬 부스터는 코어를 계속 태우고, 동압이 `max_separate_q` 이하가 될 때까지 분리를 미룹니다(`separation_held`, 대기가 `max_separate_q_wait_s`를 넘기면 그대로 분리하고 `separation_forced`). 높은 동압에서 떼어 낸 부스터가 코어와 부딪히는 것을 막습니다. 직렬 단은 스로틀을 0으로 두고 분리한 뒤 이격 거리만큼 떨어지면 점화합니다. 다 쓴 엔진을 떼어낼 수 없거나 남는 쪽에 엔진이 없으면 스테이지를 쓰지 않고 `out_of_stages`를 남깁니다. 점화할 다음 스테이지에 엔진이 없으면(페어링·낙하산 등) 그 스테이지를 쓰지 않고 `ignite_blocked`, 스테이지 작동이 확인되지 않으면 `stage_failed`입니다. 이 셋 뒤에 Mode가 추력을 원하면 `no_thrust`로 중단하고, 다시 시작하려면 `on_start: ["stage"]`가 필요합니다. 분리 뒤 조종 부품이 떨어져 나갈 구성은 제출 때 400 `invalid_plan`(메시지에 `control_part_jettisoned`)으로 거부합니다.

@@ -79,7 +79,13 @@ namespace KspBridge.App
             "toward the time leaves of until (time_to_apoapsis|time_to_periapsis with < or <=, met|step_time with > or >=) and stops 15..10 s before; " +
             "a player cancel is respected for the rest of the step; no plan warp while the player's own warp is on); " +
             "circularize (tolerance 0.5 m/s; waits, with warp, until the burn start before apoapsis, or burns at once when that time or the apoapsis has passed; " +
-            "burns along the Δv to the circular velocity at the current position, only while attitude_error <= 5 deg; completes by itself). " +
+            "burns along the Δv to the circular velocity at the current position, only while attitude_error <= 5 deg; completes by itself); " +
+            "land (margin 0.8, final_altitude 20 m, final_speed 2 m/s, gear_altitude 500 m or false; from a descent: ground height is the radar altitude " +
+            "minus the vessel bottom; starts the burn when the vertical stopping distance at margin × full thrust reaches the ground and the axis is within 15 deg " +
+            "of the target, or regardless of attitude once there is no margin left or below final_altitude; then holds final_speed below final_altitude; " +
+            "the attitude tilts from vertical toward surface retrograde by 5 deg per m/s of horizontal speed; turns on the Gear group at gear_altitude; " +
+            "events landing_infeasible (accel|dv, once each), touchdown, landed {tilt_deg, tipped}; throttle 0 after touchdown and completes by itself once landed " +
+            "and still (speed < 0.5 m/s, angular speed < 0.05 rad/s) for 2 s; no warp: put a coast step before it). " +
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
@@ -161,7 +167,10 @@ namespace KspBridge.App
             "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, steps_replaced, step_started, step_completed, stage_burnout, staged {stage, reason, q_kpa (separate only)}, " +
             "staging_completed {stage, tailoff_s, settle_s, held_s (dynamic-pressure wait), ignited}, separation_held {stage, q_kpa}, " +
             "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage, pause_s}, " +
-            "out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, plan_completed, plan_aborted {reason, condition, message}; " +
+            "out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, " +
+            "landing_infeasible {reason accel|dv, a_req, a_max, a_max_basis best|actual, dv_need, dv_left, altitude} (land; once per step and reason), " +
+            "touchdown {vertical_speed, horizontal_speed, situation} (land; first contact), landed {tilt_deg, tipped (tilt > 45), time_since_touchdown_s} (land; on completion), " +
+            "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
             "part_collision {part, part_id, vessel_id, active, kind part|crash|splashdown, other, speed m/s, crash_tolerance} (a collision that destroys the part comes right after its part_lost), " +
