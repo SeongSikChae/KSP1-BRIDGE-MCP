@@ -197,7 +197,7 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 검증 | `check_craft`, `render_craft` | Tools |
 | 발사 | `launch_craft` | Tools |
 | 비행 계획 | `submit_flight_plan`, `replace_flight_steps`, `abort_flight` | Tools |
-| 비행 조회 | `get_flight`, `get_flight_events` | Tools |
+| 비행 조회 | `get_flight`, `get_flight_events`, `get_controller_trace` | Tools |
 | 궤도 기동 | `add_maneuver_node`, `update_maneuver_node`, `remove_maneuver_node`, `plan_maneuver` | Tools |
 | 기체·목표 | `list_vessels`, `set_target` | Tools |
 | 시간 가속 | `set_time_warp` | Tools |
@@ -266,6 +266,7 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
   - `enabled: false`면 판정·이벤트를 끕니다(`plan.monitor` 통계는 계속). `abort: false`면 중단 항목도 경고만 냅니다. 알 수 없는 키나 범위 밖 값은 400 `invalid_plan`입니다.
   - 이벤트는 수준이 바뀔 때만 `monitor_alert {kind, level warn|abort, value, limit}`, 해제될 때 `monitor_clear {kind}`입니다. 단계가 바뀌면 경고를 해제(`step_completed` 앞)합니다. 중단은 `plan_aborted {reason: monitor, message: "<항목>: <값>"}`입니다.
   - `get_flight`의 `flight`에 `angular_rate`(rad/s), `aoa`(기수와 지표 속도 사이 각), `temp_ratio`(부품 내부·외피 온도/한계의 최댓값)가 있고 조건 변수로도 씁니다. `plan.monitor`는 최근 10초 통계(`window_s`, `samples`, `attitude_error_max`·`attitude_error_mean`, `angular_rate_max`, `sign_flips`, `aoa_max`, `temp_ratio_max`, `alerts`)이며, 계획이 끝난 뒤에는 통계만 남고 `alerts`는 비어 있습니다. 리로드 뒤에는 통계와 경고 상태가 비어 다시 쌓입니다.
+- **자세 제어기 진단**(`get_controller_trace`, 읽기 전용): 계획이 자세를 실제로 제어한 틱(최대 1000개, 약 20초)을 기록해 최근 `seconds`(1~20, 기본 10)의 축별 요약을 돌려줍니다. 요약은 오차 크기, 진동(`osc_hz`·`osc_amp_deg`·`osc_peak_ratio`, 큰 선회를 뺀 구간의 0.2~5 Hz 스펙트럼 봉우리), 입력 포화 비율, 토크 모델 대비 실측 각가속도 비율(`alpha_gain`, 1이면 모델과 같음)과 교란(`accel_bias`), 입력에서 응답까지의 추가 지연(`lag_ticks`, `lag_r2`), 진동 동작점의 목표 각속도 기울기(`want_slope_at_amp`), 종류별 가용 토크(`wheel`·`gimbal`·`surface`·`rcs`·`other`)입니다. `step`(1~50)을 주면 그 틱마다 원시 시계열(`series`)을 함께 줍니다. 새 계획 시작, 장면 전환, 기체 변경, 리로드 때 비우고 계획이 끝난 뒤에는 남깁니다. 요약 값의 한계(저주파로 치우친 오차, 선회 뒤 감속 과도, 포화로 끊기는 큰 진동)는 도구 설명에 있으며, 의심스러우면 `series`로 확인합니다.
 - 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태와 모드로, RCS를 계획이 바꿨으면 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
 - **중단 reason**: `condition`(abort 조건), `timeout`, `monitor`(이상 상태 감시), `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`, `revert`(`revert_flight`), `recover`(`recover_vessel`), `leave`(`leave_flight`), 궤도 기동 Mode의 `no_node`, `node_missed`, `no_target`, `target_too_far`, `approach_off_course`, `port_incompatible`, `dock_failed`. 궤도 기동 Mode의 이 사유가 제출 검사(첫 단계 trial)에서 나면 제출이 같은 코드의 409로 거부되고 아무것도 바뀌지 않습니다. `dock`은 제출 때 `port_incompatible`만 검사하고 `dock_failed`는 실행 중에만 납니다. 도킹으로 생긴 결합 기체로 바뀌는 것은 `vessel_changed`·`vessel_lost`로 보지 않습니다.
 - **궤도 기동 이벤트**: `node_burn_start`(`dv_planned`, `dv_remaining`, `burn_time`, `late_s`), `insufficient_dv`(단계 Δv가 노드보다 적음, 연소는 계속), `node_burn_done`(`reason` `dv`·`dv_growing`, `dv_executed`, `dv_remaining`, `orbit_after`), `approach_phase`(`wait`·`kill`·`close`), `approach_done`(`distance`, `relative_speed`, `goal` `vessel`·`port`), `rcs_unavailable`(`reason` `rcs_off`·`no_thrusters`·`no_propellant`), `dock_attempt`(`attempt`, `forced`, `contact_speed`, `lateral_error`), `docked`(`vessel_id`, `name`, `parts`, `attempts`), 그리고 계획과 관계없이 `soi_changed`(`vessel_id`, `from`, `to`).
