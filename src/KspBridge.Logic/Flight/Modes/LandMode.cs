@@ -71,6 +71,7 @@ namespace KspBridge.Flight.Modes
         /// <summary>Interval (s) of the burn telemetry log line.</summary>
         private const double DiagS = 0.25;
 
+        private readonly List<string> _infeasible = new List<string>();   // landing_infeasible reasons already reported
         private double _diagUt;
         private bool _burning;
         private bool _aligning;   // forced start with the axis still turning: until it first comes within AlignDeg
@@ -127,6 +128,7 @@ namespace KspBridge.Flight.Modes
 
             if (!_burning)
             {
+                Judge(v, t, h, vv, aReq, maxAccel, "best", g);   // before the burn too, against the best attitude
                 // normal start: axis near the actual target direction (not the tilt limit), judged with the target's cos so
                 // an axis tilted past the target does not start high; forced starts: near the ground, or no margin even
                 // with a vertical axis
@@ -161,9 +163,18 @@ namespace KspBridge.Flight.Modes
                 _aligning = false;
                 Log("aligned after forced start: align_err=" + F(burnAlignErr, 1) + " h=" + F(h, 1));
             }
-            if (_aligning)
+            bool misaligned = _aligning;
+            if (misaligned)
             {
                 throttle *= Math.Max(0, Math.Cos(burnAlignErr * Math.PI / 180));
+            }
+
+            // misaligned (after a forced start, before the first alignment): judge against the best attitude and do not
+            // force full throttle, so a still-turning axis neither reports a false accel nor burns hard the wrong way
+            double aCap = misaligned ? maxAccel : aMaxV;
+            if (Judge(v, t, h, vv, aReq, aCap, misaligned ? "best" : "actual", g) && !misaligned && cos > 0)
+            {
+                throttle = 1;   // this tick only; back to the computed throttle once it clears
             }
             double now = Planetarium.GetUniversalTime();
             if (now - _diagUt >= DiagS)   // burn telemetry for the measurement runs (0030 단위 3)
@@ -176,6 +187,58 @@ namespace KspBridge.Flight.Modes
             }
             return new ModeCommand(att, throttle);
         }
+
+        /// <summary>Infeasibility on this tick (no latch). aCap: MaxAccel (best attitude) before the burn and while _aligning
+        /// after a forced start, otherwise the actual vertical capacity aMaxV; basis says which. Reports once per step and
+        /// reason.</summary>
+        private bool Judge(Vessel v, Telemetry t, double h, double vv, double aReq, double aCap, string basis, double g)
+        {
+            if (!(vv > _finalSpeed))
+            {
+                return false;
+            }
+            bool infeasible = false;
+            if (h > _finalAlt && aReq > aCap)
+            {
+                infeasible = true;
+                Report("accel", aReq, aCap, basis, double.NaN, double.NaN, h);
+            }
+            double dvLeft = t.Num["total_dv"];
+            if (!double.IsNaN(dvLeft) && aCap > g)
+            {
+                double dvNeed = v.srfSpeed + g * vv / (aCap - g);   // speed + gravity loss over the vertical stop
+                if (dvLeft < dvNeed)
+                {
+                    infeasible = true;
+                    Report("dv", aReq, aCap, basis, dvNeed, dvLeft, h);
+                }
+            }
+            return infeasible;
+        }
+
+        private void Report(string reason, double aReq, double aMax, string basis, double need, double left, double h)
+        {
+            if (_infeasible.Contains(reason))
+            {
+                return;   // once per step and reason
+            }
+            _infeasible.Add(reason);
+            Log("landing_infeasible: reason=" + reason + " a_req=" + F(aReq, 2) + " a_max=" + F(aMax, 2) + " basis=" + basis +
+                " dv_need=" + F(need, 1) + " dv_left=" + F(left, 1) + " h=" + F(h, 1));
+            FlightEvents.Add("landing_infeasible", Coordinator.StepIndex, new Dictionary<string, object>
+            {
+                ["reason"] = reason,
+                ["a_req"] = R(aReq),
+                ["a_max"] = R(aMax),
+                ["a_max_basis"] = basis,
+                ["dv_need"] = R(need),
+                ["dv_left"] = R(left),
+                ["altitude"] = R(h),
+            });
+        }
+
+        /// <summary>Rounded to 3 decimals; NaN and infinity become null (JSON).</summary>
+        private static object R(double x) => double.IsNaN(x) || double.IsInfinity(x) ? null : (object)Math.Round(x, 3);
 
         private static double Clamp(double x, double min, double max) => x < min ? min : x > max ? max : x;
 
