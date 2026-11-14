@@ -310,11 +310,11 @@ namespace KspBridge.App
             "rcs_unavailable {reason rcs_off|no_thrusters|no_propellant} (approach, dock), dock_attempt {attempt, forced (debug_dock_reject), contact_speed, lateral_error}, " +
             "docked {vessel_id, name, parts, attempts} (dock), soi_changed {vessel_id, from, to} (any vessel; step -1 without a plan), " +
             "part_event {part_id, part, module, index, event, counterparts, vessel_changed, separated, error} (invoke_part_event; step -1 without a plan), " +
+            "resource_transfer_start {id, resource, requested, source_part_ids, target_part_ids} (start_resource_transfer), resource_transfer_end {id, resource, " +
+            "requested, transferred, reason, error} (when the transfer ends: done, stopped, or stopped by a vessel change, scene change or mod reload; step -1 without a plan), " +
             "these three only for calls that change something, step -1 without a plan: action_group {group, action, before, on, changed, actions, error " +
             "(action_failed only)} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error (field_failed only)} " +
             "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow), " +
-            "resource_transfer_start {id, resource, requested, source_part_ids, target_part_ids}, resource_transfer_end {id, resource, requested, transferred, " +
-            "reason, error} (start_resource_transfer; step -1 without a plan), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +

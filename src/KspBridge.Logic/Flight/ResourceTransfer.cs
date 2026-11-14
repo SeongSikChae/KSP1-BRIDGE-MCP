@@ -38,8 +38,6 @@ namespace KspBridge.Flight
         private static List<Side> _sources = new List<Side>();
         private static List<Side> _targets = new List<Side>();
 
-        public static bool Active => _active;
-
         public static object Start(Vessel v, RequestBody b)
         {
             string name = b.GetString("resource");
@@ -203,7 +201,15 @@ namespace KspBridge.Flight
                             {
                                 continue;
                             }
-                            to.part.TransferResource(to, taken, from.part);
+                            try
+                            {
+                                to.part.TransferResource(to, taken, from.part);
+                            }
+                            catch
+                            {
+                                from.amount += taken - Math.Max(0, to.amount - toBefore);   // nothing taken is lost when filling throws
+                                throw;
+                            }
                             double moved = to.amount - toBefore;
                             if (taken - moved > 0)
                             {
@@ -315,10 +321,10 @@ namespace KspBridge.Flight
         private static PartResource Row(Vessel v, uint id, string name)
         {
             Part p = v.parts.FirstOrDefault(x => x.persistentId == id) ?? throw PartStates.PartNotFound(id);
-            PartResource r = p.Resources[name];
-            if (r == null || r.maxAmount == 0 || !r.isVisible)
+            PartResource r = p.Resources[name] ?? throw PartStates.ResourceNotFound(p, name);
+            if (r.maxAmount == 0 || !r.isVisible)
             {
-                throw PartStates.ResourceNotFound(p, name);
+                throw new ApiException(404, "resource_not_found", name + " in " + Label(p) + " has no flight resource row (empty or hidden)");
             }
             return r;
         }
