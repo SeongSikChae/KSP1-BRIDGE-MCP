@@ -321,6 +321,79 @@ namespace KspBridge.Flight
             return new Dictionary<string, object> { ["accepted"] = true };
         }
 
+        /// <summary>open_tracking_station (design 0038): the Space Center building (CanGoInTrackingStation, save, load) or, in flight,
+        /// the pause menu's Tracking Station button (both game settings and ClearToSave, then onSceneConfirmExit, save Game.Updated(),
+        /// load). Every check runs before anything changes.</summary>
+        public static object OpenTrackingStation()
+        {
+            RequireNoPendingRecovery();
+            VesselSwitch.RequireNotPending();
+            RequireSceneReady();
+            RequireStockGame("open_tracking_station");
+            GameParameters p = HighLogic.CurrentGame.Parameters;
+            GameScenes scene = HighLogic.LoadedScene;
+            if (scene == GameScenes.TRACKSTATION)
+            {
+                return new Dictionary<string, object> { ["accepted"] = true, ["already_open"] = true };
+            }
+            if (scene == GameScenes.SPACECENTER)
+            {
+                if (!p.SpaceCenter.CanGoInTrackingStation)
+                {
+                    throw TrackingStationUnavailable("going into the tracking station is disabled in this game");
+                }
+                LoadTrackingStation(Save, "");
+                return new Dictionary<string, object> { ["accepted"] = true, ["from"] = "SPACECENTER" };
+            }
+            if (scene != GameScenes.FLIGHT)
+            {
+                throw ApiException.SceneNotAllowed("open_tracking_station");
+            }
+            Vessel v = Guard.ActiveVessel();
+            if (!p.Flight.CanLeaveToTrackingStation || !p.SpaceCenter.CanGoInTrackingStation)
+            {
+                throw TrackingStationUnavailable("leaving to the tracking station is disabled in this game");
+            }
+            ClearToSaveStatus c = FlightGlobals.ClearToSave(false);   // no game log: the reason goes into the response
+            if (c != ClearToSaveStatus.CLEAR)
+            {
+                throw TrackingStationUnavailable("cannot leave " + v.vesselName + " now: " + c);
+            }
+            bool aborted = Coordinator.Running;
+            if (aborted)
+            {
+                Coordinator.Abort("tracking_station", null, null);
+            }
+            Control.ManualControl.StopPulse("tracking_station");
+            LoadTrackingStation(() =>
+            {
+                GameEvents.onSceneConfirmExit.Fire(HighLogic.CurrentGame.startScene);
+                GamePersistence.SaveGame(HighLogic.CurrentGame.Updated(), "persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+            }, aborted ? " (the flight plan was already aborted)" : "");
+            return new Dictionary<string, object> { ["accepted"] = true, ["from"] = "FLIGHT" };
+        }
+
+        /// <summary>Saves and requests TRACKSTATION; 500 tracking_station_failed when that throws or no load request follows
+        /// (LoadScene fires onGameSceneLoadRequested at once, which sets _requestedScene and _sceneLoading).</summary>
+        private static void LoadTrackingStation(Action save, string stopped)
+        {
+            try
+            {
+                save();
+                HighLogic.LoadScene(GameScenes.TRACKSTATION);
+            }
+            catch (Exception e)
+            {
+                throw new ApiException(500, "tracking_station_failed", e.GetType().Name + ": " + e.Message + stopped);
+            }
+            if (_requestedScene != GameScenes.TRACKSTATION || !_sceneLoading)
+            {
+                throw new ApiException(500, "tracking_station_failed", "the game did not start loading the tracking station" + stopped);
+            }
+        }
+
+        private static ApiException TrackingStationUnavailable(string why) => new ApiException(409, "tracking_station_unavailable", why);
+
         /// <summary>recover_vessel. The flight scene is not read for site ("" included).</summary>
         public static object Recover(RequestBody b)
         {

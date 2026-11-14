@@ -69,6 +69,15 @@ namespace KspBridge.Flight
         }
 
         /// <summary>POST api/flight/switch. Every pre-check runs before anything changes (design 0035 error table order).</summary>
+        /// <summary>409 switch_pending while a switch waits (switch_vessel, open_tracking_station).</summary>
+        internal static void RequireNotPending()
+        {
+            if (_targetId != null)
+            {
+                throw new ApiException(409, "switch_pending", "a vessel switch is in progress (get_status reset.switch)");
+            }
+        }
+
         public static object Switch(RequestBody b)
         {
             double idArg = b.GetDouble("vessel_id");
@@ -77,10 +86,7 @@ namespace KspBridge.Flight
                 throw ApiException.BadRequest("vessel_id must be a vessel id from list_vessels");
             }
             FlightReset.RequireNoPendingRecovery();
-            if (_targetId != null)
-            {
-                throw new ApiException(409, "switch_pending", "a vessel switch is in progress (get_status reset.switch)");
-            }
+            RequireNotPending();
             FlightReset.RequireSceneReady();
             FlightReset.RequireStockGame("switch_vessel");
             GameScenes scene = HighLogic.LoadedScene;
