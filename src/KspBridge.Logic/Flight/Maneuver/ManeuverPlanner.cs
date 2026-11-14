@@ -46,6 +46,7 @@ namespace KspBridge.Flight.Maneuver
             }
             List<OrbitMath.NodeSpec> nodes;
             Dictionary<string, object> extra = null;
+            Orbit closestTo = null;   // rendezvous_phase / correct_approach: the closest approach is re-read from KSP's prediction
             switch (kind)
             {
                 case "change_apoapsis":
@@ -81,7 +82,7 @@ namespace KspBridge.Flight.Maneuver
                     OrbitMath.TransferResult tr = OrbitMath.TransferBody(o, body, pe, start + MinLeadS);
                     if (!OrbitMath.Finite(tr.Node.Ut))
                     {
-                        throw new ApiException(409, "no_solution", "transfer search exceeded its time budget");
+                        throw new ApiException(409, "no_solution", "no transfer found (search time budget, or the orbit is not below " + body.bodyName + "'s orbit)");
                     }
                     if (double.IsNaN(tr.PeriapsisAlt))
                     {
@@ -113,10 +114,10 @@ namespace KspBridge.Flight.Maneuver
                     OrbitMath.NodeSpec n = OrbitMath.RendezvousPhase(o, tgt, distance, start + MinLeadS);
                     if (!OrbitMath.Finite(n.Ut))
                     {
-                        throw new ApiException(409, "no_solution", "rendezvous search exceeded its time budget");
+                        throw new ApiException(409, "no_solution", "no rendezvous transfer found (search time budget, or no departure point toward the target's altitude)");
                     }
                     nodes = One(n);
-                    extra = Closest(o, n, tgt);
+                    closestTo = tgt;
                     break;
                 }
                 case "correct_approach":
@@ -134,7 +135,7 @@ namespace KspBridge.Flight.Maneuver
                         throw new ApiException(409, "no_solution", "no correction improves the closest approach");
                     }
                     nodes = One(n);
-                    extra = Closest(o, n, tgt);
+                    closestTo = tgt;
                     break;
                 }
                 case "capture":
@@ -176,7 +177,7 @@ namespace KspBridge.Flight.Maneuver
                 from = OrbitMath.After(from, n);   // the next node's frame is on the orbit after this one
             }
             s.UpdateFlightPlan();
-            return Result(v, s, nodes, extra);
+            return Result(v, s, nodes, extra, closestTo);
         }
 
         /// <summary>The target vessel's orbit (a docking port target: its vessel) about the same body (409 no_target otherwise).</summary>
@@ -202,19 +203,6 @@ namespace KspBridge.Flight.Maneuver
                 throw ApiException.BadRequest("distance must be in [0, 100000] m");
             }
             return d;
-        }
-
-        /// <summary>Our own closest-approach prediction after node n (the response's predicted gets KSP's orbit too).</summary>
-        private static Dictionary<string, object> Closest(Orbit o, OrbitMath.NodeSpec n, Orbit tgt)
-        {
-            double d = OrbitMath.ClosestAfter(o, n, tgt, out double cut);
-            Orbit after = OrbitMath.After(o, n);
-            return new Dictionary<string, object>
-            {
-                ["closest_distance"] = OrbitMath.Num(d),
-                ["closest_ut"] = OrbitMath.Num(cut),
-                ["relative_speed_at_closest"] = OrbitMath.Finite(cut) ? OrbitMath.Num(OrbitMath.RelativeSpeed(after, tgt, cut)) : null,
-            };
         }
 
         private static string F(double x, int digits) => x.ToString("F" + digits, System.Globalization.CultureInfo.InvariantCulture);
@@ -296,7 +284,7 @@ namespace KspBridge.Flight.Maneuver
             return body.Radius + alt;
         }
 
-        private static object Result(Vessel v, PatchedConicSolver s, List<OrbitMath.NodeSpec> nodes, Dictionary<string, object> extra)
+        private static object Result(Vessel v, PatchedConicSolver s, List<OrbitMath.NodeSpec> nodes, Dictionary<string, object> extra, Orbit closestTo)
         {
             double total = 0;
             foreach (OrbitMath.NodeSpec n in nodes)
@@ -314,6 +302,15 @@ namespace KspBridge.Flight.Maneuver
                     && p.nextPatch.referenceBody != null && p.nextPatch.referenceBody.bodyName == (string)bodyName;
                 predicted["encounter"] = enc;
                 predicted["encounter_periapsis"] = enc ? OrbitMath.Num(p.nextPatch.PeA) : null;
+            }
+            if (predicted != null && closestTo != null)
+            {
+                // Design 0032 decision 12: the closest approach on KSP's orbit after the node (patched conics), not our own.
+                Orbit p = last.nextPatch;
+                OrbitMath.ClosestApproach(p, closestTo, last.UT, OrbitMath.SafeSpan(p, last.UT), out double cut, out double d);
+                predicted["closest_distance"] = OrbitMath.Num(d);
+                predicted["closest_ut"] = OrbitMath.Num(cut);
+                predicted["relative_speed_at_closest"] = OrbitMath.Finite(cut) ? OrbitMath.Num(OrbitMath.RelativeSpeed(p, closestTo, cut)) : null;
             }
             Dictionary<string, object> result = new Dictionary<string, object>
             {

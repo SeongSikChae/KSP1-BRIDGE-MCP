@@ -201,6 +201,21 @@ namespace KspBridge.Flight.Maneuver
                 throw ApiException.BadRequest((raiseApo ? "apoapsis below" : "periapsis above") + " the node point altitude "
                     + alt.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m");
             }
+            return Apsis(o, ut, r, vel, newR);
+        }
+
+        /// <summary>ChangeApsis for the search helpers: a NaN node instead of the 400 when newR is on the wrong side of the
+        /// node radius at ut (an eccentric start orbit crosses the target radius during the scan).</summary>
+        private static NodeSpec ApsisOrNaN(Orbit o, double ut, double newR, bool raiseApo)
+        {
+            StateWorld(o, ut, out Vector3d r, out Vector3d vel);
+            double rNow = r.magnitude;
+            return (raiseApo ? newR < rNow : newR > rNow) ? new NodeSpec(double.NaN, Vector3d.zero) : Apsis(o, ut, r, vel, newR);
+        }
+
+        private static NodeSpec Apsis(Orbit o, double ut, Vector3d r, Vector3d vel, double newR)
+        {
+            double rNow = r.magnitude;
             double a = (rNow + newR) / 2;
             double vNew = Math.Sqrt(o.referenceBody.gravParameter * (2 / rNow - 1 / a));
             Vector3d horiz = Vector3d.Exclude(r, vel).normalized;
@@ -291,7 +306,11 @@ namespace KspBridge.Flight.Maneuver
             // 1. Departure UT with the closest pass at the transfer apoapsis (coarse scan, then golden refine).
             Func<double, double> miss = t =>
             {
-                NodeSpec n = ChangeApsis(o, t, r2, raiseApo: true);
+                NodeSpec n = ApsisOrNaN(o, t, r2, raiseApo: true);
+                if (!Finite(n.Ut))
+                {
+                    return double.PositiveInfinity;
+                }
                 Orbit tr = After(o, n);
                 double tApo = t + Math.PI * Math.Sqrt(Math.Pow(tr.semiMajorAxis, 3) / mu);
                 return (tr.getRelativePositionAtUT(tApo) - body.orbit.getRelativePositionAtUT(tApo)).magnitude;
@@ -313,7 +332,8 @@ namespace KspBridge.Flight.Maneuver
             // 2. Departure UT within ±120 s for the target periapsis inside the SOI.
             Func<double, double> err = t =>
             {
-                double pe = SoiPeriapsis(o, ChangeApsis(o, t, r2, raiseApo: true), body, out _);
+                NodeSpec n = ApsisOrNaN(o, t, r2, raiseApo: true);
+                double pe = Finite(n.Ut) ? SoiPeriapsis(o, n, body, out _) : double.NaN;
                 return double.IsNaN(pe) ? double.PositiveInfinity : Math.Abs(pe - periapsisAlt);
             };
             double bestT = best, bestErr = err(best);
@@ -334,7 +354,11 @@ namespace KspBridge.Flight.Maneuver
             {
                 bestT = Golden(err, bestT - 2, bestT + 2, 30);
             }
-            NodeSpec node = ChangeApsis(o, bestT, r2, raiseApo: true);
+            NodeSpec node = ApsisOrNaN(o, bestT, r2, raiseApo: true);
+            if (!Finite(node.Ut))
+            {
+                return new TransferResult { Node = node, PeriapsisAlt = double.NaN };   // no departure point below the body's orbit
+            }
             double peAlt = SoiPeriapsis(o, node, body, out double entry);
             return new TransferResult { Node = node, PeriapsisAlt = peAlt, EntryUt = entry };
         }
@@ -449,7 +473,11 @@ namespace KspBridge.Flight.Maneuver
             double synodic = 1 / Math.Abs(1 / o.period - 1 / tgt.period);
             Func<double, double> miss = t =>
             {
-                NodeSpec n = ChangeApsis(o, t, r2, raiseApo: raise);
+                NodeSpec n = ApsisOrNaN(o, t, r2, raiseApo: raise);
+                if (!Finite(n.Ut))
+                {
+                    return double.PositiveInfinity;
+                }
                 Orbit tr = After(o, n);
                 double tFar = t + Math.PI * Math.Sqrt(Math.Pow(tr.semiMajorAxis, 3) / mu);
                 return (tr.getRelativePositionAtUT(tFar) - tgt.getRelativePositionAtUT(tFar)).magnitude;
@@ -473,14 +501,15 @@ namespace KspBridge.Flight.Maneuver
             }
             Func<double, double> err = t =>
             {
-                double d = ClosestAfter(o, ChangeApsis(o, t, r2, raiseApo: raise), tgt, out _);
+                NodeSpec n = ApsisOrNaN(o, t, r2, raiseApo: raise);
+                double d = Finite(n.Ut) ? ClosestAfter(o, n, tgt, out _) : double.NaN;
                 return Finite(d) ? Math.Abs(d - distance) : double.PositiveInfinity;
             };
             // The miss is a V with its minimum near zero; the wanted distance sits on either side: refine each side and keep the better.
             double sideA = Golden(err, Math.Max(start, best - step), best, 30);
             double sideB = Golden(err, best, best + step, 30);
             double t1 = err(sideA) <= err(sideB) ? sideA : sideB;
-            return sw.Elapsed.TotalSeconds > SearchBudgetS ? new NodeSpec(double.NaN, Vector3d.zero) : ChangeApsis(o, t1, r2, raiseApo: raise);
+            return sw.Elapsed.TotalSeconds > SearchBudgetS ? new NodeSpec(double.NaN, Vector3d.zero) : ApsisOrNaN(o, t1, r2, raiseApo: raise);
         }
 
         /// <summary>

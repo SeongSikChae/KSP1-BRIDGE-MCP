@@ -644,11 +644,16 @@ namespace KspBridge.Flight
             HandedPlan hp = h.Plan;
             Vessel v = HighLogic.LoadedSceneIsFlight && FlightGlobals.fetch != null ? FlightGlobals.ActiveVessel : null;
             bool stagerLoaded = false;
+            IFlightMode loading = null;   // a mode whose Load threw is not _mode yet: its End still undoes what the old logic set up
             try
             {
                 if (h.Incompatible)
                 {
                     throw new InvalidOperationException(h.Error ?? "handover does not match");
+                }
+                if (v != null && v.persistentId != hp.VesselId && DockMode.CoupledInto(v, hp.ModeState))
+                {
+                    hp.VesselId = v.persistentId;   // docked and absorbed before the adoption: the merged vessel is the plan's vessel
                 }
                 if (v == null || v.persistentId != hp.VesselId)
                 {
@@ -670,6 +675,7 @@ namespace KspBridge.Flight
                     leaves[i].TrueSince = hp.Timers[i] == null ? double.NaN : Convert.ToDouble(hp.Timers[i], System.Globalization.CultureInfo.InvariantCulture);
                 }
                 IFlightMode mode = plan.Steps[hp.Step].CreateMode();
+                loading = mode;
                 mode.Load(v, hp.ModeState);   // instead of Begin
                 // 2. Then the stager, the warp latch and the switch to Running.
                 AutoStager.Load(hp.Staging ?? throw new InvalidOperationException("staging missing"));
@@ -707,6 +713,10 @@ namespace KspBridge.Flight
             }
             catch (Exception e)
             {
+                if (_mode == null && loading != null)
+                {
+                    Safe(() => loading.End(v));
+                }
                 Incompatible(v, hp, stagerLoaded, e.Message);
             }
         }

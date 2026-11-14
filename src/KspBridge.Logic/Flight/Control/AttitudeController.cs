@@ -61,9 +61,9 @@ namespace KspBridge.Flight.Control
         /// (no Detach/Record, so the plan end restores the state from before the plan).</summary>
         public static void Retarget(Vessel v)
         {
-            if (_v == v)
+            if (_v == v || _v == null)
             {
-                return;
+                return;   // not attached yet (reload Resume adopts before Attach): Attach records and binds v itself
             }
             if (_v != null)
             {

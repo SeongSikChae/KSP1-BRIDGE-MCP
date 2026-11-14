@@ -14,7 +14,7 @@ namespace KspBridge.Flight.Modes
     /// point) → BackOut → Align (lateral error) → Advance (along the axis, at most MaxSpeed, ContactSpeed near contact) → Contact.
     /// A contact that does not couple and moves away again is a failed attempt: back off and retry; more than retries →
     /// dock_failed. The Coordinator adopts the merged vessel on coupling and the step completes (docked). End restores the
-    /// control part. Reasons port_incompatible, no_target, dock_failed. Events dock_attempt, docked, rcs_unavailable.
+    /// control part. Reasons port_incompatible (at submit too), dock_failed. Events dock_attempt, docked, rcs_unavailable.
     /// </summary>
     public sealed class DockMode : IFlightMode
     {
@@ -142,7 +142,7 @@ namespace KspBridge.Flight.Modes
             }
             if (_tgt == null || _tgt.part == null || _tgt.vessel == null || _tgt.nodeTransform == null)
             {
-                throw new ModeAbortException("no_target", "the target port is gone");
+                throw new ModeAbortException("dock_failed", "the target port is gone");   // design 0032: a lost port is dock_failed
             }
             double aRcs = ApproachMode.RcsAccel(v, _stepRcs, out string why);
             if (aRcs <= 0)
@@ -318,17 +318,19 @@ namespace KspBridge.Flight.Modes
         /// <summary>Instance fields only (Resume step 1 keeps static state untouched); RestoreWatch restores the watch later.</summary>
         public void Load(Vessel v, Dictionary<string, object> state)
         {
+            // What End needs comes first: a Load that throws below still lets Resume's cleanup put the control point back.
+            _armed = B(state, "armed");
+            _coupledSaved = B(state, "coupled");
+            _controlBefore = (uint)Handover.D(state, "control_before", 0);
             uint own = (uint)Handover.D(state, "own_port", 0);
             uint tgt = (uint)Handover.D(state, "target_port", 0);
             _own = FindPort(v, own) ?? throw new InvalidOperationException("own docking port " + own + " not found");
             _tgt = v.targetObject as ModuleDockingNode;
-            if (_tgt == null || _tgt.part == null || _tgt.part.persistentId != tgt)
+            if (!_coupledSaved && (_tgt == null || _tgt.part == null || _tgt.part.persistentId != tgt))
             {
+                // Once coupled KSP clears the target (its port is part of the merged vessel): Update only adopts or waits then.
                 throw new InvalidOperationException("target docking port " + tgt + " is not the target any more");
             }
-            _armed = B(state, "armed");
-            _coupledSaved = B(state, "coupled");
-            _controlBefore = (uint)Handover.D(state, "control_before", 0);
             _attempts = (int)Handover.D(state, "attempts", 0);
             _contactSeen = B(state, "contact_seen");
             _retreat = B(state, "retreat");
@@ -345,6 +347,13 @@ namespace KspBridge.Flight.Modes
                     }
                 }
             }
+        }
+
+        /// <summary>Resume: a handed-over dock state that had coupled, with its own port now on v (our vessel was absorbed).</summary>
+        public static bool CoupledInto(Vessel v, Dictionary<string, object> state)
+        {
+            return state != null && B(state, "coupled") && B(state, "armed")
+                && FindPort(v, (uint)Handover.D(state, "own_port", 0)) != null;
         }
 
         private static bool B(Dictionary<string, object> state, string key) => state.TryGetValue(key, out object b) && b is bool x && x;
@@ -364,7 +373,10 @@ namespace KspBridge.Flight.Modes
         /// <summary>Stops the watch and puts the control point back (when that part is still on v). Safe to call twice.</summary>
         public void End(Vessel v)
         {
-            Coordinator.WatchDock(0, false);
+            if (_armed)
+            {
+                Coordinator.WatchDock(0, false);   // only the armed instance owns the watch (a failed trial must not clear a running step's)
+            }
             if (_armed && v != null && _controlBefore != 0)
             {
                 foreach (Part p in v.parts)

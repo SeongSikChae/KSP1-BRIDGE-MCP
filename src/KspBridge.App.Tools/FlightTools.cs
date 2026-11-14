@@ -121,7 +121,7 @@ namespace KspBridge.App
             "rendezvous_phase (needs a vessel or docking-port target on the same body; both orbits near-circular e ≤ 0.05 and within 1° of each other, else orbits_not_coplanar_circular; " +
             "altitudes at least 1 km apart, else no_transfer_window; one transfer node timed so the closest approach is distance, default 200 m), " +
             "correct_approach (same target; a small prograde/normal/radial correction at ut, or auto = now + 60 s, so the closest approach is distance; no_solution when nothing improves it). " +
-            "rendezvous_phase / correct_approach also return closest_distance, closest_ut, relative_speed_at_closest. " +
+            "rendezvous_phase / correct_approach add predicted.closest_distance, closest_ut, relative_speed_at_closest (on KSP's orbit after the node). " +
             "Orbit-position nodes closer than 30 s move one orbit later. " +
             "Altitudes are above sea level, above the atmosphere and inside the SOI. Existing nodes are replaced unless append: true (plans from the orbit after the last node). " +
             "Not while a flight plan runs (plan_running). Errors: bad_request (an apoapsis below / periapsis above the node point, altitude out of range, at not allowed), " +
@@ -191,7 +191,7 @@ namespace KspBridge.App
             "aligns with the target port axis and translates in with RCS (rcs true recommended), backs off 10 m and retries when contact does not couple; " +
             "on docking the plan continues on the merged vessel and the control point is restored when the step ends; events dock_attempt, docked, rcs_unavailable). " +
             "First-step refusals (409, nothing applied) and later plan_aborted reasons of these modes: no_node, node_missed (burn start passed by more than late_limit_s), " +
-            "no_target, target_too_far, port_incompatible, dock_failed (retries used up or no RCS translation). " +
+            "no_target, target_too_far, port_incompatible, dock_failed (retries used up, no RCS translation or the target port lost; not refused at submit). " +
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
