@@ -44,6 +44,10 @@ namespace KspBridge.Flight.Modes
         /// <summary>RCS translation in the rcs_translate tool frame (x right, y top/dorsal, z nose), each [-1, 1]; null = none.</summary>
         public UnityEngine.Vector3? Translate;
 
+        /// <summary>The mode thrusts on purpose before the axis is aligned (land after a forced start): the flight monitor
+        /// pauses its attitude-error timers meanwhile.</summary>
+        public bool Aligning;
+
         public ModeCommand(AttitudeTarget? attitude, double throttle)
         {
             Attitude = attitude;
@@ -51,6 +55,7 @@ namespace KspBridge.Flight.Modes
             ModeThrottle = throttle;
             WarpToUt = null;
             Translate = null;
+            Aligning = false;
         }
 
         public static ModeCommand Idle => default(ModeCommand);

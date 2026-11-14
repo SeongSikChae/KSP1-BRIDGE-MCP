@@ -245,7 +245,7 @@ namespace KspBridge.Flight.Modes
                     " cos=" + F(cos, 3) + " align_err=" + F(burnAlignErr, 1) + " max_tilt=" + F(maxTilt, 1) +
                     " a_req=" + F(aReq, 2) + " a_max_v=" + F(aMaxV, 2) + " thrust=" + F(t.Num["thrust"], 1) + " sit=" + v.situation);
             }
-            return new ModeCommand(att, throttle);
+            return new ModeCommand(att, throttle) { Aligning = misaligned };
         }
 
         /// <summary>Infeasibility on this tick (no latch). aCap: MaxAccel (best attitude) before the burn and while _aligning

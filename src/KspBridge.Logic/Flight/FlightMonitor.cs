@@ -1,13 +1,183 @@
+using KspBridge.Flight.Modes;
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace KspBridge.Flight
 {
     /// <summary>
     /// Plan-wide watch for abnormal flight (flip, lost control, overheat, oscillation, wasted thrust). Main thread only.
+    /// Alerts and clears are events (monitor_alert / monitor_clear) on level changes only; an abort item at level abort
+    /// makes Tick return the plan_aborted message.
     /// </summary>
     public static class FlightMonitor
     {
+        private const double WindowS = 10;
+
+        private struct Sample
+        {
+            public double Ut, Err, Rate, Aoa, Temp;
+            public Vector3 Omega;
+        }
+
+        private static readonly Queue<Sample> _window = new Queue<Sample>();
+        private static readonly Dictionary<string, string> _level = new Dictionary<string, string>();   // kind → warn|abort
+        private static double _flipFor, _lostFor, _wasteFor;
+        private static double _lastUt = double.NaN;
+        private static double _oscMinRate = 0.05;
+        private static bool _running;   // false after EndPlan: the summary shows no current alerts
+
+        /// <summary>Every real plan tick after the abort check (not in the trial). cmd: the command in force (last tick's).
+        /// Returns the abort message, or null.</summary>
+        public static string Tick(Telemetry t, Vessel v, double ut, ModeCommand cmd, Effective s)
+        {
+            _running = true;
+            _oscMinRate = s.OscMinRate;   // before the Enabled check: the summary counts with it either way
+            double dt = double.IsNaN(_lastUt) ? 0 : Math.Max(0, ut - _lastUt);
+            _lastUt = ut;
+            if (!v.packed)
+            {
+                Add(new Sample
+                {
+                    Ut = ut, Err = t.Num["attitude_error"], Rate = t.Num["angular_rate"], Aoa = t.Num["aoa"], Temp = t.Num["temp_ratio"],
+                    Omega = v.angularVelocity,
+                });
+            }
+            if (!s.Enabled)
+            {
+                return null;
+            }
+            bool thrusting = t.Num["throttle"] > 0 && t.Num["thrust"] > 0;
+            double err = t.Num["attitude_error"], q = t.Num["dynamic_pressure"], aoa = t.Num["aoa"], temp = t.Num["temp_ratio"];
+            // keep the timers, add nothing: on rails (a rail tick spans a long dt), staging, an intended misalignment, no error
+            bool pauseErr = v.packed || t.Str["staging"] != "none" || cmd.Aligning || double.IsNaN(err);
+
+            // flipped: only while the commanded attitude itself flies along the surface velocity (land / retrograde descents excluded)
+            bool inAtmo = v.mainBody.atmosphere && v.altitude < v.mainBody.atmosphereDepth;
+            double cmdAoa = cmd.Attitude.HasValue && v.srfSpeed >= 1
+                ? Vector3d.Angle(cmd.Attitude.Value.Direction(v), v.srf_velocity) : double.NaN;
+            Accumulate(ref _flipFor, inAtmo && q >= s.FlipMinQ && cmdAoa <= s.FlipAoaDeg && aoa > s.FlipAoaDeg, v.packed, dt);
+            Accumulate(ref _lostFor, thrusting && err > s.LostErrorDeg, pauseErr, dt);
+            Accumulate(ref _wasteFor, thrusting && err > s.WasteErrorDeg, pauseErr, dt);
+
+            string abortLevel = s.Abort ? "abort" : "warn";
+            string abort = null;
+            abort = Set("flipped", _flipFor >= s.FlipForS ? abortLevel : null, aoa, s.FlipAoaDeg,
+                "aoa " + F(aoa) + " deg at q " + F(q) + " kPa for " + F(_flipFor) + " s") ?? abort;
+            abort = Set("control_lost", _lostFor >= s.LostForS ? abortLevel : null, err, s.LostErrorDeg,
+                "attitude_error " + F(err) + " deg under thrust for " + F(_lostFor) + " s") ?? abort;
+            abort = Set("overheat", temp >= s.TempAbort ? abortLevel : temp >= s.TempWarn ? "warn" : null, temp,
+                temp >= s.TempAbort ? s.TempAbort : s.TempWarn, "temp_ratio " + F(temp, 3)) ?? abort;
+            Set("thrust_waste", _wasteFor >= s.WasteForS ? "warn" : null, err, s.WasteErrorDeg, null);
+            int flips = MaxFlips(s.OscMinRate);
+            bool oscOn = _level.ContainsKey("oscillation") ? flips >= s.OscFlips / 2 : flips >= s.OscFlips;   // hysteresis
+            Set("oscillation", oscOn ? "warn" : null, flips, s.OscFlips, null);
+            return abort;
+        }
+
+        /// <summary>Step change (NextStep, a replaced current step): clears every alert with monitor_clear and the timers;
+        /// the sample window stays.</summary>
+        public static void ResetStep()
+        {
+            foreach (string kind in new List<string>(_level.Keys))
+            {
+                Set(kind, null, double.NaN, double.NaN, null);
+            }
+            _flipFor = _lostFor = _wasteFor = 0;
+        }
+
+        /// <summary>Plan end (abort, completion, release): alerts and timers cleared without events (plan_aborted /
+        /// plan_completed tell the end); the window stays for get_flight.</summary>
+        public static void EndPlan()
+        {
+            _level.Clear();
+            _flipFor = _lostFor = _wasteFor = 0;
+            _running = false;
+        }
+
+        /// <summary>New plan: everything, the window included.</summary>
+        public static void Reset()
+        {
+            EndPlan();
+            _window.Clear();
+            _lastUt = double.NaN;
+        }
+
+        private static void Add(Sample s)
+        {
+            _window.Enqueue(s);
+            while (_window.Count > 0 && _window.Peek().Ut < s.Ut - WindowS)
+            {
+                _window.Dequeue();
+            }
+        }
+
+        private static void Accumulate(ref double acc, bool cond, bool pause, double dt)
+        {
+            if (pause)
+            {
+                return;
+            }
+            acc = cond ? acc + dt : 0;
+        }
+
+        /// <summary>Sets the level of one item (null = clear); an event only when it changes. Returns the abort message at level abort.</summary>
+        private static string Set(string kind, string level, double value, double limit, string detail)
+        {
+            _level.TryGetValue(kind, out string current);
+            if (level != current)
+            {
+                if (level == null)
+                {
+                    _level.Remove(kind);
+                    FlightEvents.Add("monitor_clear", Coordinator.StepIndex, new Dictionary<string, object> { ["kind"] = kind });
+                }
+                else
+                {
+                    _level[kind] = level;
+                    FlightEvents.Add("monitor_alert", Coordinator.StepIndex, new Dictionary<string, object>
+                    {
+                        ["kind"] = kind,
+                        ["level"] = level,
+                        ["value"] = Num(value),
+                        ["limit"] = Num(limit),
+                    });
+                }
+            }
+            return level == "abort" ? kind + ": " + detail : null;
+        }
+
+        /// <summary>Sign changes per local axis over the window, counting only samples with |ω axis| ≥ minRate
+        /// (a near-zero axis does not flip back and forth on noise). The largest of the three axes.</summary>
+        private static int MaxFlips(double minRate)
+        {
+            int max = 0;
+            for (int axis = 0; axis < 3; axis++)
+            {
+                int last = 0, flips = 0;
+                foreach (Sample s in _window)
+                {
+                    float w = s.Omega[axis];
+                    if (Math.Abs(w) < minRate)
+                    {
+                        continue;
+                    }
+                    int sign = w > 0 ? 1 : -1;
+                    if (last != 0 && sign != last)
+                    {
+                        flips++;
+                    }
+                    last = sign;
+                }
+                max = Math.Max(max, flips);
+            }
+            return max;
+        }
+
+        private static object Num(double x) => double.IsNaN(x) || double.IsInfinity(x) ? null : (object)Math.Round(x, 3);
+
+        private static string F(double x, int digits = 1) => double.IsNaN(x) ? "NaN" : x.ToString("F" + digits, System.Globalization.CultureInfo.InvariantCulture);
+
         /// <summary>A plan or step "monitor" object: only the keys the JSON gave (null = inherit from the plan, then the defaults).</summary>
         public sealed class Settings
         {

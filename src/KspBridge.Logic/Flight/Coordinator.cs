@@ -61,6 +61,13 @@ namespace KspBridge.Flight
                     Abort("condition", hit, null);
                     return;
                 }
+                string monitorAbort = FlightMonitor.Tick(_t, v, ut, Command,
+                    FlightMonitor.Effective.Merge(_plan.Steps[_step].Monitor, _plan.Monitor));
+                if (monitorAbort != null)
+                {
+                    Abort("monitor", null, monitorAbort);
+                    return;
+                }
                 if (_plan.Steps[_step].TimeoutS is double to && ut - _stepStartUt > to)
                 {
                     Abort("timeout", null, null);
@@ -187,6 +194,7 @@ namespace KspBridge.Flight
             Warp.Stop();
             Warp.ClearLatch();
             EndMode(v);   // before step_completed; a throwing next BeginStep leaves no mode to end twice
+            FlightMonitor.ResetStep();   // monitor_clear of the finished step, before step_completed
             FlightEvents.Add("step_completed", _step, StepData(_plan, _step));   // the last step too
             if (_step + 1 >= _plan.Steps.Count)
             {
@@ -299,6 +307,7 @@ namespace KspBridge.Flight
                     FlightEvents.Add("plan_replaced", _step, new Dictionary<string, object> { ["plan_id"] = _plan.Id, ["steps"] = _plan.Steps.Count });
                 }
                 EndMode(v);   // the replaced plan's mode (none when idle)
+                FlightMonitor.Reset();   // after plan_replaced; a replaced plan's alerts end with it
                 _plan = plan;
                 _mode = mode;
                 _step = 0;
@@ -387,6 +396,7 @@ namespace KspBridge.Flight
                     _plan.ReplaceSteps(keep, steps);
                     EndMode(v);   // the replaced current step's mode
                     _mode = mode;
+                    FlightMonitor.ResetStep();
                     _stepStartUt = ut;
                     Warp.Stop();        // like NextStep
                     Warp.ClearLatch();
@@ -459,6 +469,7 @@ namespace KspBridge.Flight
         private static void Release()
         {
             Safe(() => EndMode(PlanVessel() ?? FlightGlobals.ActiveVessel));   // v may be null (vessel lost / changed)
+            Safe(() => FlightMonitor.EndPlan());
             Command = ModeCommand.Idle;
             Safe(() => AttitudeController.ZeroThrottle());
             Safe(() =>
