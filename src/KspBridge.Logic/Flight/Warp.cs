@@ -80,7 +80,8 @@ namespace KspBridge.Flight
             bool allowed = v.altitude > (v.mainBody.atmosphere ? v.mainBody.atmosphereDepth : 0)
                 && FlightInputHandler.state.mainThrottle == 0
                 && EngineModel.ThrustSum(v) <= 0
-                && !AutoStager.Pending;   // staging runs tick by tick: never on rails
+                && (!AutoStager.Pending || AutoStager.Paused);   // staging runs tick by tick: never on rails; a flameout pause at
+                                                                  // throttle 0 only waits for thrust (#13)
             if (!allowed || targetUt - Planetarium.GetUniversalTime() < 15)
             {
                 if (_requested)

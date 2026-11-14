@@ -160,7 +160,7 @@ namespace KspBridge.App
             "epoch identifies the event session (kept across reload_mod); if it changes, reset since to 0. " +
             "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, steps_replaced, step_started, step_completed, stage_burnout, staged {stage, reason, q_kpa (separate only)}, " +
             "staging_completed {stage, tailoff_s, settle_s, held_s (dynamic-pressure wait), ignited}, separation_held {stage, q_kpa}, " +
-            "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage}, " +
+            "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage, pause_s}, " +
             "out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +

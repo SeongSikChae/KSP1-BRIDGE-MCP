@@ -428,14 +428,14 @@ namespace KspBridge.Flight
             for (int i = 0; i < props.Count; i++)
             {
                 Propellant p = props[i];
-                if (p.ignoreForIsp)
+                if (p.ignoreForIsp && p.ignoreForThrustCurve)
                 {
                     continue;
                 }
                 e.part.GetConnectedResourceTotals(p.id, p.GetFlowMode(), out double amount, out double max);
-                if (!(amount > 0) || !(amount - p.minResToLeave >= p.ratio * need * e.ignitionThreshold))
+                if (!p.ignoreForIsp && (!(amount > 0) || !(amount - p.minResToLeave >= p.ratio * need * e.ignitionThreshold)))
                 {
-                    return false;
+                    return false;   // ignoreForIsp (IntakeAir) never counts as "no propellant" (#13 decision 4)
                 }
                 if (!p.ignoreForThrustCurve)
                 {

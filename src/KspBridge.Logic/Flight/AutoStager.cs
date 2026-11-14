@@ -188,7 +188,13 @@ namespace KspBridge.Flight
                     }
                     else if (ut - _since > o.MaxFlameoutPauseS)
                     {
-                        EndWithLatch(v, "flameout_timeout", ut);   // Pending false: throttle > 0 then aborts with no_thrust
+                        FlightEvents.Add("flameout_timeout", Coordinator.StepIndex, new Dictionary<string, object>
+                        {
+                            ["stage"] = v.currentStage,
+                            ["pause_s"] = Math.Round(ut - _pauseUt, 3),   // the whole pause; the limit counts thrust-wanted time only
+                        });
+                        _latch = new Latch(v);
+                        ResetSequence(ut);   // Pending false: throttle > 0 then aborts with no_thrust
                     }
                     break;
 
@@ -280,6 +286,11 @@ namespace KspBridge.Flight
                     if (_request == null && EngineModel.AnyOperational(v))
                     {
                         Completed(v, t, ut);   // parallel core, or a decoupler and engine in the same stage: no activation needed
+                        break;
+                    }
+                    if (_request == null && PausedEngine(v))
+                    {
+                        Completed(v, t, ut);   // a paused engine with propellant: never fire the next stage over it; none enters paused (#13)
                         break;
                     }
                     if (_request == null)
@@ -444,13 +455,19 @@ namespace KspBridge.Flight
             ModuleEngines[] es = EngineModel.Engines(v);
             for (int i = 0; i < es.Length; i++)
             {
-                if (es[i].flameout && es[i].EngineIgnited && EngineModel.HasPropellantCached(es[i]))
+                if (IsPausedEngine(es[i]))
                 {
                     return true;
                 }
             }
             return false;
         }
+
+        private static bool IsPausedEngine(ModuleEngines e) => e.flameout && e.EngineIgnited && EngineModel.HasPropellantCached(e);
+
+        /// <summary>Coordinator: with no working engine the throttle stays as the mode wants while a paused engine waits for KSP to
+        /// relight it (in paused or inside a running sequence); otherwise staging holds it at 0.</summary>
+        public static bool KeepsThrottle(Vessel v) => _state == StagingState.Paused || PausedEngine(v);
 
         /// <summary>Burnout by fuel only (never by throttle): ≥ 1 spent engine and no lit unflamed engine, or a spent engine in J_next.</summary>
         private static bool BurnedOut(Vessel v)
@@ -508,7 +525,8 @@ namespace KspBridge.Flight
             RefreshSets(v);
             for (int i = 0; i < _keptEngines.Count; i++)
             {
-                if (EngineModel.IsOperational(_keptEngines[i]))
+                // a kept engine paused by a flameout with propellant left is a burning core too: never turn it into a serial stage (#13)
+                if (EngineModel.IsOperational(_keptEngines[i]) || IsPausedEngine(_keptEngines[i]))
                 {
                     return true;
                 }

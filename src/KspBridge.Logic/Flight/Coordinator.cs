@@ -158,7 +158,7 @@ namespace KspBridge.Flight
                 {
                     throw new NoThrustException();
                 }
-                if (!AutoStager.Paused)
+                if (!AutoStager.KeepsThrottle(v))
                 {
                     cmd.Throttle = 0;                                // keep attitude until staging brings an engine
                 }                                                    // a flameout pause keeps the throttle so KSP can relight (#13)
