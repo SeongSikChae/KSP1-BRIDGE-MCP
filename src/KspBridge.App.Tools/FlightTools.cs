@@ -32,6 +32,10 @@ namespace KspBridge.App
             "maneuver_nodes [{index, ut, time_to, prograde, normal, radial (m/s), dv, burn_time (s across stages; null when no stage can fire), dv_short (the stages cannot supply dv), " +
             "orbit_after {apoapsis, periapsis, eccentricity, inclination, period, body} (KSP's prediction after the node; null until computed)}] (KSP maneuver nodes, earliest first), " +
             "target (null without one; else as set_target returns). " +
+            "flight also has angular_rate (rad/s), aoa (deg between the nose and the surface velocity; null below 1 m/s) and temp_ratio (highest part temperature / limit, " +
+            "internal or skin; 1 = at the limit); angular_rate and aoa are null on rails. plan.monitor = the flight monitor's last 10 s {window_s, samples, attitude_error_max, " +
+            "attitude_error_mean, angular_rate_max, sign_flips (most sign changes of one axis rate), aoa_max, temp_ratio_max, alerts (items alerted now; empty once the plan " +
+            "ended)} (null before the first sample; kept after the plan ends until the next plan). " +
             "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
         public Task<string> GetFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
@@ -178,7 +182,14 @@ namespace KspBridge.App
             => client.SendAsync(HttpMethod.Post, "api/flight/nodes/remove", new { index, all }, ct);
 
         [McpServerTool(Name = "submit_flight_plan", Destructive = true)]
-        [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?, rcs?}]}. " +
+        [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, monitor?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?, rcs?, monitor?}]}. " +
+            "monitor (plan and step, optional; a step's keys override the plan's per key, then the defaults): while a plan runs it alerts or aborts on " +
+            "flipped (in atmosphere, dynamic_pressure >= flip_min_q_kpa 5, the commanded attitude within flip_aoa_deg of the surface velocity but aoa > flip_aoa_deg 30 " +
+            "for flip_for_s 2; land and retrograde descents are not judged), control_lost (under thrust, attitude_error > lost_error_deg 30 for lost_for_s 5), " +
+            "overheat (temp_ratio >= temp_abort 0.95; temp_warn 0.8 only alerts), and only alerts on thrust_waste (under thrust, attitude_error > waste_error_deg 10 " +
+            "for waste_for_s 5) and oscillation (osc_flips 6 sign changes of one axis rate >= osc_min_rate 0.05 rad/s within 10 s; cleared below half of that); " +
+            "the attitude-error timers pause, not reset, while staging, on rails or while land is still turning after a forced start; enabled false turns the checks " +
+            "off (plan.monitor still fills), abort false makes the abort items alerts; an abort is plan_aborted reason monitor with message \"<item>: <values>\". " +
             "rcs (any step): true/false sets the RCS group when the step starts (RCS adds its torque to attitude control; e.g. true for vacuum turns); " +
             "a step without rcs after the plan changed RCS puts it back to the state before the plan; the plan end restores it too. " +
             "Modes: attitude (pitch+heading [+roll] or reference prograde|retrograde|surface_prograde|normal|antinormal|radial_in|radial_out, throttle 0..1; until required); " +
@@ -209,7 +220,7 @@ namespace KspBridge.App
             "on docking the plan continues on the merged vessel and the control point is restored when the step ends; events dock_attempt, docked, rcs_unavailable). " +
             "First-step refusals (409, nothing applied) and later plan_aborted reasons of these modes: no_node, node_missed (burn start passed by more than late_limit_s), " +
             "no_target, target_too_far, approach_off_course (at the kill start the distance is far above the predicted closest approach; no burn), port_incompatible, dock_failed (retries used up, no RCS translation or the target port lost; not refused at submit). " +
-            "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
+            "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight incl. angular_rate, aoa, temp_ratio; orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
             "auto_stage:true runs burnout → tailoff → separate → settle → ignite by itself (parallel boosters keep the core burning and are dropped only once " +
@@ -319,6 +330,8 @@ namespace KspBridge.App
             "these three only for calls that change something, step -1 without a plan: action_group {group, action, before, on, changed, actions, error " +
             "(action_failed only)} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error (field_failed only)} " +
             "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow), " +
+            "monitor_alert {kind flipped|control_lost|overheat|thrust_waste|oscillation, level warn|abort, value, limit} and monitor_clear {kind} " +
+            "(flight monitor, see submit_flight_plan monitor; only when an item's level changes; a step change clears the alerts before step_completed), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
