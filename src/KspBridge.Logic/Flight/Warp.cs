@@ -33,7 +33,8 @@ namespace KspBridge.Flight
         private static bool _cancelled;    // user-cancel latch: no new request within the step
         private static bool _resumeUsed;   // one re-request per step after an unexpected end (design 0048 decision 2)
         private static bool _resumePending; // the next warp_started is that re-request
-        private static string _unavailable; // reason already reported in this step (warp_unavailable once per step and reason)
+        private static bool _resumable;    // the step waits through CircularizeMode.WarpGate (execute_node, circularize, approach); coast is not
+        private static readonly HashSet<string> _unavailable = new HashSet<string>(); // reasons reported in this step (once per step and reason)
         private static double _untilUt = double.NaN;
 
         /// <summary>True while a warp we requested is in effect.</summary>
@@ -60,17 +61,18 @@ namespace KspBridge.Flight
         }
 
         /// <summary>Every tick (order f): our warp ending without our Stop (user cancel, or WarpTo stopping by itself; the two
-        /// cannot be told apart) allows one re-request in the step; a second such end latches as a user cancel.</summary>
+        /// cannot be told apart) allows one re-request in a wait step that goes through CircularizeMode.WarpGate; a second such
+        /// end, or any such end in another step (coast), latches as a user cancel.</summary>
         public static void Sync()
         {
             bool active = Active;
             if (_requested && _wasActive && !active)
             {
                 _requested = false;
-                if (_resumeUsed)
+                if (_resumeUsed || !_resumable)
                 {
                     _cancelled = true;
-                    Debug.Log("[KspBridge] warp ended without our Stop again: latched for this step (user cancel)");
+                    Debug.Log("[KspBridge] warp ended without our Stop: latched for this step (user cancel)");
                 }
                 else
                 {
@@ -179,7 +181,8 @@ namespace KspBridge.Flight
             _cancelled = false;
             _resumeUsed = false;
             _resumePending = false;
-            _unavailable = null;
+            _resumable = false;
+            _unavailable.Clear();
             _refusal = null;
         }
 
@@ -223,6 +226,9 @@ namespace KspBridge.Flight
             _untilUt = double.NaN;
         }
 
+        /// <summary>Marks the current step as a wait step that may re-request once (CircularizeMode.WarpGate, every tick).</summary>
+        public static void MarkResumable() => _resumable = true;
+
         /// <summary>A wait step stayed unaligned too long (design 0048 decision 1): warp_unavailable align_wait with the attitude
         /// error (deg, null when unknown) and the angular rate (rad/s) of that tick, so the failing gate is visible over MCP.</summary>
         public static void AlignWait(double attitudeErrorDeg, double angularRate) =>
@@ -235,11 +241,10 @@ namespace KspBridge.Flight
         /// <summary>Why a coast step waits without our warp; once per step and reason, so the cause is visible over MCP.</summary>
         private static void Unavailable(string reason, Dictionary<string, object> extra = null)
         {
-            if (_unavailable == reason)
+            if (!_unavailable.Add(reason))
             {
                 return;
             }
-            _unavailable = reason;
             Debug.Log("[KspBridge] warp not requested: " + reason);
             Event("warp_unavailable", reason, extra);
         }

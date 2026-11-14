@@ -156,6 +156,10 @@ namespace KspBridge.Flight.Modes
             }
             if (_phase == Phase.Wait)
             {
+                if (_closestRelV.sqrMagnitude == 0)
+                {
+                    _closestRelV = relV;   // handover state from before 0.2.47 whose target could not be resolved at Load
+                }
                 double wake = Wake(v);
                 if (ut < wake)
                 {
@@ -167,10 +171,12 @@ namespace KspBridge.Flight.Modes
                 {
                     return WaitCommand(v, t, wake);
                 }
+                // Centre to centre like the closest approach (d is to the goal point, which a port target moves up to distance away).
+                double dc = Vector3d.Distance(v.CoMD, tv.CoMD);
                 double expected = _closestDist + _closestRelV.magnitude * Math.Max(0, _closestUt - ut);
-                if (d > GuardFactor * expected + GuardSlackM)
+                if (dc > GuardFactor * expected + GuardSlackM)
                 {
-                    throw new ModeAbortException("approach_off_course", "distance " + F(d, 0) + " m at the kill start, expected about "
+                    throw new ModeAbortException("approach_off_course", "distance " + F(dc, 0) + " m at the kill start, expected about "
                         + F(expected, 0) + " m (closest " + F(_closestDist, 0) + " m in " + F(_closestUt - ut, 0) + " s)");
                 }
                 Enter(Phase.Kill, d, relV.magnitude);

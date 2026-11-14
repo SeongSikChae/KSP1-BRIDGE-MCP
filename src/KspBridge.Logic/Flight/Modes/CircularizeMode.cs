@@ -65,13 +65,16 @@ namespace KspBridge.Flight.Modes
         /// for WarpAlignHoldS and the angular rate at most WarpAlignRate (rails warp keeps the attitude of that moment, so the
         /// burn direction stays within the gate through it). Our running warp counts as aligned: attitude_error is NaN on rails,
         /// and dropping WarpToUt would make the Coordinator stop it. Reports align_wait after AlignWaitS unaligned while 15 s or
-        /// more are left (Warp.Request's own floor).</summary>
+        /// more are left (Warp.Request's own floor). A rails warp that is not ours (the player's) also passes the target, so that
+        /// Warp.Request reports it as player_warp instead of an alignment wait. Marks the step as resumable for Warp.Sync.</summary>
         internal static double? WarpGate(Vessel v, Telemetry t, double targetUt, ref double alignSince, ref double inGateSince)
         {
             double ut = Planetarium.GetUniversalTime();
-            if (Warp.Requested)
+            Warp.MarkResumable();
+            if (Warp.Requested || Warp.Active)
             {
                 alignSince = double.NaN;
+                inGateSince = double.NaN;   // alignment is measured again (2 s) after the warp ends
                 return targetUt;
             }
             double err = t.Num["attitude_error"];
