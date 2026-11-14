@@ -25,7 +25,7 @@ namespace KspBridge.Flight
                     ["relay_power"] = node.antennaRelay.power,
                 },
             };
-            if (!enabled || c == null)
+            if (!enabled || c == null || node == null)   // no CommNode yet: nothing to read the connection from
             {
                 foreach (string k in Connection)
                 {
@@ -40,12 +40,9 @@ namespace KspBridge.Flight
             d["signal"] = c.Signal.ToString();
             d["signal_delay"] = c.SignalDelay;
             List<object> path = new List<object>();
-            if (c.ControlPath != null)
+            foreach (CommLink link in c.ControlPath)   // path links: a = start side, b = next node (CommNetwork.FindPath)
             {
-                foreach (CommLink link in c.ControlPath)   // path links: a = start side, b = next node (CommNetwork.FindPath)
-                {
-                    path.Add(Hop(link));
-                }
+                path.Add(Hop(link));
             }
             d["path"] = path;
             return d;
@@ -62,7 +59,7 @@ namespace KspBridge.Flight
             double? range = null;
             string aRole = null, bRole = null;   // antenna used by o.a / o.b
             CommLink o = null;
-            if (from != null && to != null && from.TryGetValue(to, out o) && o != null)
+            if (from.TryGetValue(to, out o) && o != null)
             {
                 double s = link.signalStrength;
                 if (o.strengthRR == s)
@@ -88,7 +85,7 @@ namespace KspBridge.Flight
             {
                 ["from"] = Node(from),
                 ["to"] = Node(to),
-                ["distance"] = from != null && to != null ? (object)(from.precisePosition - to.precisePosition).magnitude : null,
+                ["distance"] = (from.precisePosition - to.precisePosition).magnitude,
                 ["max_range"] = range,
                 ["signal_strength"] = link.signalStrength,
                 ["from_antenna"] = fromIsA ? aRole : bRole,
@@ -100,10 +97,6 @@ namespace KspBridge.Flight
 
         private static Dictionary<string, object> Node(CommNode n)
         {
-            if (n == null)
-            {
-                return null;
-            }
             Vessel owner = FlightGlobals.Vessels.FirstOrDefault(x => x != null && x.connection != null && x.connection.Comm == n);
             return new Dictionary<string, object>
             {

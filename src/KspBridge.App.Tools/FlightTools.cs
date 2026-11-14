@@ -336,7 +336,7 @@ namespace KspBridge.App
             {
                 query.Add("part_id=" + part_id.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
-            if (!string.IsNullOrWhiteSpace(module))
+            if (!string.IsNullOrEmpty(module))   // as the route's Empty: only "" means no filter, " " is a (missing) module name
             {
                 query.Add("module=" + Uri.EscapeDataString(module));
             }
@@ -350,7 +350,7 @@ namespace KspBridge.App
             "[{part_id, sent}], vessel_changed, part_vessel_id, separated (the part left the vessel, e.g. Undock), module_state (as get_vessel_parts; " +
             "events of a part no longer in the active vessel are unavailable with reason not_active_vessel), state_error}; slow changes (animations) " +
             "finish later, check get_vessel_parts. If a flight plan runs and the event splits the vessel so the active vessel changes, the plan stops " +
-            "with vessel_changed. Errors: bad_request, part_not_found, module_not_found, event_not_found, ambiguous_module (give module_index), " +
+            "with vessel_changed. Errors: not_in_flight, no_active_vessel, bad_request, part_not_found, module_not_found, event_not_found, ambiguous_module (give module_index), " +
             "event_unavailable (inactive, input_locked, no_control, module disabled), event_failed.")]
         public Task<string> InvokePartEvent(
             [Description("Part id (persistentId) from get_vessel_parts")] double part_id,
@@ -365,7 +365,7 @@ namespace KspBridge.App
             "control_state, signal_strength, signal, signal_delay, path [{from, to {name, vessel_id, home}, distance, max_range, signal_strength, " +
             "from_antenna, to_antenna (relay | transmit: the antenna each end used on this hop)}]} from the vessel to its control source (KSC, or the " +
             "nearest crewed control source when home is out of reach, so the last to may not be home). enabled false (CommNet off in difficulty " +
-            "settings) or no CommNet on the vessel: only antenna, the rest null. Errors: not_in_flight, no_active_vessel.")]
+            "settings) or no CommNet node on the vessel yet: only antenna (null without a node), the rest null. Errors: not_in_flight, no_active_vessel.")]
         public Task<string> GetCommNet(CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Get, "api/flight/commnet", null, ct);
     }
