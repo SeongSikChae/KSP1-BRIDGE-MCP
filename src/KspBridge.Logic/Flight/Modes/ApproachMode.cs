@@ -8,10 +8,13 @@ namespace KspBridge.Flight.Modes
 {
     /// <summary>
     /// approach (design 0032 decisions 21~24): closes on the target vessel (a docking-port target: its vessel, goal = a point
-    /// distance in front of the port, reached around the target). Phases wait (warp to the closest approach, computed once at
-    /// Begin, minus the kill burn, spool-up and KillLeadS) → kill (cancel the relative velocity, main engine; RCS when there is no
+    /// distance in front of the port, reached around the target). Phases wait (warp once aligned to the closest approach, computed
+    /// at Begin, minus half the kill burn at the predicted closest relative speed — the whole burn when the pass is closer than the
+    /// distance covered while killing — spool-up and KillLeadS; at that time the closest approach is computed again and the
+    /// distance checked, design 0048 decisions 3·4) → kill (cancel the relative velocity, main engine; RCS when there is no
     /// engine) → close (target relative speed min(max_speed, Margin·√(2·a·d)); error above EngineErr: main engine, else RCS
-    /// translation). Done when at the goal and the relative speed ≤ DoneSpeed for HoldS. Reasons no_target, target_too_far.
+    /// translation). Done when at the goal and the relative speed ≤ DoneSpeed for HoldS. Reasons no_target, target_too_far,
+    /// approach_off_course (at the kill start the distance is far above the predicted closest approach; no burn).
     /// Events approach_phase, approach_done, rcs_unavailable (once per step).
     /// </summary>
     public sealed class ApproachMode : IFlightMode
@@ -26,6 +29,9 @@ namespace KspBridge.Flight.Modes
         private const double Margin = 0.6;
         private const double KillLeadS = 10;
         private const double ClearanceM = 5;
+        private const double ResyncSlackS = 30;   // wake moved later than this at the kill check: wait again (design 0048 decision 4)
+        private const double GuardFactor = 3;
+        private const double GuardSlackM = 500;
 
         private enum Phase { Wait, Kill, Close }
 
@@ -37,6 +43,8 @@ namespace KspBridge.Flight.Modes
         private uint _targetId;
         private double _closestUt = double.NaN;
         private double _closestDist = double.NaN;
+        private Vector3d _closestRelV;              // predicted relative velocity at the closest approach (world)
+        private double _alignSince = double.NaN;   // wait start while unaligned (CircularizeMode.WarpGate)
         private double _holdStart = double.NaN;
         private bool _waypointDone;
         private readonly List<string> _reported = new List<string>();
@@ -66,8 +74,15 @@ namespace KspBridge.Flight.Modes
                 throw new ModeAbortException("no_target", "the target orbits " + tv.mainBody.bodyName);
             }
             _targetId = tv.persistentId;
-            double now = Planetarium.GetUniversalTime();
+            FindClosest(v, tv, Planetarium.GetUniversalTime());
+        }
+
+        /// <summary>Closest approach from now (Begin and the kill check) with the predicted relative velocity there; the current
+        /// state when already closer than any later pass. Throws target_too_far above MaxClosestM.</summary>
+        private void FindClosest(Vessel v, Vessel tv, double now)
+        {
             OrbitMath.ClosestApproach(v.orbit, tv.orbit, now, OrbitMath.SafeSpan(v.orbit, now), out _closestUt, out _closestDist);
+            _closestRelV = OrbitMath.Finite(_closestUt) ? RelVAt(v, tv, _closestUt) : v.obt_velocity - tv.obt_velocity;
             double here = Vector3d.Distance(v.CoMD, tv.CoMD);
             if (here < _closestDist || !OrbitMath.Finite(_closestDist))
             {
@@ -76,6 +91,7 @@ namespace KspBridge.Flight.Modes
                 {
                     _closestUt = now;
                     _closestDist = here;
+                    _closestRelV = v.obt_velocity - tv.obt_velocity;
                 }
             }
             if (!OrbitMath.Finite(_closestDist) || _closestDist > MaxClosestM)
@@ -83,6 +99,23 @@ namespace KspBridge.Flight.Modes
                 throw new ModeAbortException("target_too_far", "closest approach " + F(_closestDist, 0) + " m > " + F(MaxClosestM, 0) + " m: rendezvous first");
             }
         }
+
+        /// <summary>Relative velocity (world) at ut from the two orbits (Orbit vectors are swizzled: .xzy).</summary>
+        private static Vector3d RelVAt(Vessel v, Vessel tv, double ut) =>
+            (v.orbit.getOrbitalVelocityAtUT(ut) - tv.orbit.getOrbitalVelocityAtUT(ut)).xzy;
+
+        /// <summary>Kill start at the predicted closest relative speed: half the kill burn before the closest approach (design 0032
+        /// decision 22), the whole burn when the pass is closer than the distance covered while killing (stop before it).</summary>
+        private double Wake(Vessel v)
+        {
+            double speed = _closestRelV.magnitude;
+            double kill = EngineModel.BurnTimeStaged(v, speed, out _);
+            double lead = !OrbitMath.Finite(kill) ? 0 : _closestDist < speed * kill / 2 ? kill : kill / 2;
+            return _closestUt - lead - EngineModel.SpoolUpS(v) - KillLeadS;
+        }
+
+        private ModeCommand WaitCommand(Vessel v, Telemetry t, double wake) =>
+            new ModeCommand(AttitudeTarget.Vector(-_closestRelV.normalized), 0) { WarpToUt = CircularizeMode.WarpGate(v, t, wake, ref _alignSince) };
 
         public ModeCommand Update(Vessel v, Telemetry t)
         {
@@ -122,11 +155,22 @@ namespace KspBridge.Flight.Modes
             }
             if (_phase == Phase.Wait)
             {
-                double kill = EngineModel.BurnTimeStaged(v, relV.magnitude, out _);
-                double wake = _closestUt - (OrbitMath.Finite(kill) ? kill : 0) - EngineModel.SpoolUpS(v) - KillLeadS;
-                if (ut < wake && Vector3d.Dot(rel, relV) > 0)
+                double wake = Wake(v);
+                if (ut < wake)
                 {
-                    return new ModeCommand(AttitudeTarget.Vector(-relV.normalized), 0) { WarpToUt = wake };
+                    return WaitCommand(v, t, wake);
+                }
+                FindClosest(v, tv, ut);   // the orbit may have changed while waiting (throws target_too_far)
+                wake = Wake(v);
+                if (wake - ut > ResyncSlackS)
+                {
+                    return WaitCommand(v, t, wake);
+                }
+                double expected = _closestDist + _closestRelV.magnitude * Math.Max(0, _closestUt - ut);
+                if (d > GuardFactor * expected + GuardSlackM)
+                {
+                    throw new ModeAbortException("approach_off_course", "distance " + F(d, 0) + " m at the kill start, expected about "
+                        + F(expected, 0) + " m (closest " + F(_closestDist, 0) + " m in " + F(_closestUt - ut, 0) + " s)");
                 }
                 Enter(Phase.Kill, d, relV.magnitude);
             }
@@ -332,6 +376,9 @@ namespace KspBridge.Flight.Modes
             ["target_id"] = (double)_targetId,
             ["closest_ut"] = _closestUt,
             ["closest_dist"] = _closestDist,
+            ["closest_rel_v_x"] = _closestRelV.x,
+            ["closest_rel_v_y"] = _closestRelV.y,
+            ["closest_rel_v_z"] = _closestRelV.z,
             ["hold_start"] = _holdStart,
             ["waypoint_done"] = _waypointDone,
             ["reported"] = new List<object>(_reported),
@@ -344,6 +391,12 @@ namespace KspBridge.Flight.Modes
             _targetId = (uint)Handover.D(state, "target_id", 0);
             _closestUt = Handover.D(state, "closest_ut", double.NaN);
             _closestDist = Handover.D(state, "closest_dist", double.NaN);
+            _closestRelV = new Vector3d(Handover.D(state, "closest_rel_v_x", 0), Handover.D(state, "closest_rel_v_y", 0),
+                Handover.D(state, "closest_rel_v_z", 0));
+            if (_closestRelV.sqrMagnitude == 0 && OrbitMath.Finite(_closestUt) && TargetVessel(v) is Vessel tv && tv.persistentId == _targetId)
+            {
+                _closestRelV = RelVAt(v, tv, _closestUt);   // handover state from before 0.2.47 has no relative velocity
+            }
             _holdStart = Handover.D(state, "hold_start", double.NaN);
             _waypointDone = state.TryGetValue("waypoint_done", out object w) && w is bool wb && wb;
             _reported.Clear();
