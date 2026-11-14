@@ -91,6 +91,29 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task PartToolsMapToHttpRequests()
+        {
+            (FlightTools tools, RecordingHandler handler) = Create();
+            CancellationToken ct = CancellationToken.None;
+
+            await tools.GetVesselParts(456, "ModuleDeployableAntenna", ct);
+            await tools.GetVesselParts(ct: ct);
+            await tools.GetVesselParts(module: "Module A&B", ct: ct);
+            await tools.InvokePartEvent(456, "ModuleDeployableAntenna", "Extend", ct: ct);
+            await tools.InvokePartEvent(456, "ModuleAnimateGeneric", "Toggle", 3, ct);
+            await tools.GetCommNet(ct);
+
+            var r = handler.Requests;
+            Assert.HasCount(6, r);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/parts?part_id=456&module=ModuleDeployableAntenna", (string?)null), r[0]);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/parts", (string?)null), r[1]);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/parts?module=Module%20A%26B", (string?)null), r[2]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/part_event", (string?)"""{"part_id":456,"module":"ModuleDeployableAntenna","event":"Extend","module_index":null}"""), r[3]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/part_event", (string?)"""{"part_id":456,"module":"ModuleAnimateGeneric","event":"Toggle","module_index":3}"""), r[4]);
+            Assert.AreEqual((HttpMethod.Get, "/api/flight/commnet", (string?)null), r[5]);
+        }
+
+        [TestMethod]
         public async Task ManeuverNodeToolsMapToHttpRequests()
         {
             (FlightTools tools, RecordingHandler handler) = Create();

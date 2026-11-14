@@ -309,6 +309,7 @@ namespace KspBridge.App
             "approach_phase {phase wait|kill|close, distance, relative_speed}, approach_done {distance, relative_speed, goal vessel|port} (approach), " +
             "rcs_unavailable {reason rcs_off|no_thrusters|no_propellant} (approach, dock), dock_attempt {attempt, forced (debug_dock_reject), contact_speed, lateral_error}, " +
             "docked {vessel_id, name, parts, attempts} (dock), soi_changed {vessel_id, from, to} (any vessel; step -1 without a plan), " +
+            "part_event {part_id, part, module, index, event, counterparts, vessel_changed, separated, error} (invoke_part_event; step -1 without a plan), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
@@ -317,5 +318,55 @@ namespace KspBridge.App
         public Task<string> GetFlightEvents([Description("Return events after this seq (default 0)")] long since = 0,
             [Description("Maximum events (1..500, default 100)")] int limit = 100, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Get, $"api/flight/events?since={since}&limit={limit}", null, ct);
+
+        [McpServerTool(Name = "get_vessel_parts", ReadOnly = true)]
+        [Description("Parts of the active vessel as the flight part action window shows them: {vessel, id, parts [{id (part_id), name, title, " +
+            "modules [{index (module_index), module (\"Part\" = part-level, index null), fields [{field, title, value, units, error?}], " +
+            "events [{event, title, available, reason (input_locked | no_control | not_active_vessel | null)}], state? (deploy_state " +
+            "RETRACTED|EXTENDED|RETRACTING|EXTENDING|BROKEN for deployable parts such as antennas and solar panels; state, docked_part_id for docking ports)}], " +
+            "resources [{resource, amount, max, flow_enabled}]}]}. Only enabled modules; advanced tweakables only when the game setting is on. " +
+            "Errors: not_in_flight, no_active_vessel, bad_request, part_not_found.")]
+        public Task<string> GetVesselParts(
+            [Description("Only this part (persistentId)")] double? part_id = null,
+            [Description("Only modules with this name (\"Part\" for part-level); parts without it are left out")] string? module = null,
+            CancellationToken ct = default)
+        {
+            List<string> query = [];
+            if (part_id != null)
+            {
+                query.Add("part_id=" + part_id.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            if (!string.IsNullOrWhiteSpace(module))
+            {
+                query.Add("module=" + Uri.EscapeDataString(module));
+            }
+            return client.SendAsync(HttpMethod.Get, "api/flight/parts" + (query.Count > 0 ? "?" + string.Join("&", query) : ""), null, ct);
+        }
+
+        [McpServerTool(Name = "invoke_part_event", Destructive = true)]
+        [Description("Press a part action window button of the active vessel, like a click in the game (only events get_vessel_parts lists as " +
+            "available). A module event is first sent to the symmetry counterparts' part-level event lists, as the game does; module events such as " +
+            "antenna Extend reach counterparts only if the module does it itself. Returns {part_id, part, module, index, event, title, counterparts " +
+            "[{part_id, sent}], vessel_changed, part_vessel_id, separated (the part left the vessel, e.g. Undock), module_state (as get_vessel_parts; " +
+            "events of a part no longer in the active vessel are unavailable with reason not_active_vessel), state_error}; slow changes (animations) " +
+            "finish later, check get_vessel_parts. If a flight plan runs and the event splits the vessel so the active vessel changes, the plan stops " +
+            "with vessel_changed. Errors: bad_request, part_not_found, module_not_found, event_not_found, ambiguous_module (give module_index), " +
+            "event_unavailable (inactive, input_locked, no_control, module disabled), event_failed.")]
+        public Task<string> InvokePartEvent(
+            [Description("Part id (persistentId) from get_vessel_parts")] double part_id,
+            [Description("Module name, or \"Part\" for part-level events")] string module,
+            [Description("Event name (not the title), e.g. Extend, Undock")] string @event,
+            [Description("Module index from get_vessel_parts; needed when the part has several enabled modules of this name")] int? module_index = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/part_event", new { part_id, module, @event, module_index }, ct);
+
+        [McpServerTool(Name = "get_commnet", ReadOnly = true)]
+        [Description("CommNet state of the active vessel: {enabled, vessel, id, antenna {transmit_power, relay_power}, connected, connected_home, " +
+            "control_state, signal_strength, signal, signal_delay, path [{from, to {name, vessel_id, home}, distance, max_range, signal_strength, " +
+            "from_antenna, to_antenna (relay | transmit: the antenna each end used on this hop)}]} from the vessel to its control source (KSC, or the " +
+            "nearest crewed control source when home is out of reach, so the last to may not be home). enabled false (CommNet off in difficulty " +
+            "settings) or no CommNet on the vessel: only antenna, the rest null. Errors: not_in_flight, no_active_vessel.")]
+        public Task<string> GetCommNet(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Get, "api/flight/commnet", null, ct);
     }
 }
