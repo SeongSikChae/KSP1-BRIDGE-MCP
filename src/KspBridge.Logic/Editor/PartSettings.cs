@@ -82,7 +82,7 @@ namespace KspBridge.Editor
         private static IEnumerable<Part> Counterparts(Part p) => (p.symmetryCounterparts ?? new List<Part>()).Where(s => s != null);
 
         /// <summary>UIPartActionFieldItem.SetSymCounterpartValue: the module at the same index when it has the same type, else the first of that class.</summary>
-        private static PartModule CounterpartModule(Part s, int index, PartModule m) =>
+        internal static PartModule CounterpartModule(Part s, int index, PartModule m) =>
             index >= 0 && index < s.Modules.Count && s.Modules[index] != null && s.Modules[index].GetType() == m.GetType()
                 ? s.Modules[index]
                 : s.Modules[m.ClassName];
@@ -152,7 +152,7 @@ namespace KspBridge.Editor
         }
 
         /// <summary>A JSON value (number, bool or string) as the field's own type, or 400.</summary>
-        private static object Convert(BaseField field, object raw)
+        internal static object Convert(BaseField field, object raw)
         {
             Type t = field.FieldInfo.FieldType;
             string name = field.name;
@@ -222,7 +222,7 @@ namespace KspBridge.Editor
         /// The limits the placed part's editor control offers: slider or number box range, scale intervals, or the option /
         /// state list (by name, or by index for an int field).
         /// </summary>
-        private static void CheckRange(BaseField field, UI_Control control, object value)
+        internal static void CheckRange(BaseField field, UI_Control control, object value)
         {
             switch (control)
             {

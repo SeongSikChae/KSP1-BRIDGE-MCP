@@ -65,7 +65,8 @@ namespace KspBridge.Flight
             string eventName = b.GetString("event");
             int? moduleIndex = b.Has("module_index") ? ModuleIndex(b) : (int?)null;
             Part p = v.parts.FirstOrDefault(x => x.persistentId == id) ?? throw PartNotFound(id);
-            BaseEventList events = FindTarget(p, module, moduleIndex, out PartModule target, out int? index);
+            PartModule target = FindModule(p, module, moduleIndex, "event_unavailable", "part-level events", out int? index);
+            BaseEventList events = target == null ? p.Events : target.Events;
             BaseEvent e = events[eventName] ?? throw new ApiException(404, "event_not_found", eventName + " is not an event of " + module
                 + " on " + p.partInfo.name + " (events: " + string.Join(", ", events.Select(x => x.name).ToArray()) + ")");
             string reason = !Listed(e) ? "inactive" : Unavailable(e, p);
@@ -210,18 +211,20 @@ namespace KspBridge.Flight
             return (int)v;
         }
 
-        /// <summary>The event list to press in (design 0041 invoke_part_event step 4); target null = part-level.</summary>
-        private static BaseEventList FindTarget(Part p, string module, int? moduleIndex, out PartModule target, out int? index)
+        /// <summary>
+        /// The module to act on (design 0041 invoke_part_event step 4); null = part-level. disabled: the 409 code when the module is
+        /// disabled. partLevel: the words in the module_index 400 ("part-level events" keeps invoke_part_event's text).
+        /// </summary>
+        private static PartModule FindModule(Part p, string module, int? moduleIndex, string disabled, string partLevel, out int? index)
         {
             if (module == PartLevel)
             {
                 if (moduleIndex != null)
                 {
-                    throw ApiException.BadRequest("module_index is not used with module \"" + PartLevel + "\" (part-level events)");
+                    throw ApiException.BadRequest("module_index is not used with module \"" + PartLevel + "\" (" + partLevel + ")");
                 }
-                target = null;
                 index = null;
-                return p.Events;
+                return null;
             }
             if (moduleIndex != null)
             {
@@ -249,12 +252,12 @@ namespace KspBridge.Flight
                 }
                 index = enabled.Count == 1 ? enabled[0] : named[0];
             }
-            target = p.Modules[index.Value];
+            PartModule target = p.Modules[index.Value];
             if (!target.isEnabled)
             {
-                throw new ApiException(409, "event_unavailable", module + " on " + p.partInfo.name + " is disabled (module disabled)");
+                throw new ApiException(409, disabled, module + " on " + p.partInfo.name + " is disabled (module disabled)");
             }
-            return target.Events;
+            return target;
         }
 
         /// <summary>part_event in get_flight_events and a [KspBridge] KSP.log line (proposal decision 10).</summary>
@@ -293,7 +296,7 @@ namespace KspBridge.Flight
             List<object> rows = new List<object>();
             foreach (BaseField f in list)
             {
-                if (!f.guiActive || (f.advancedTweakable && !GameSettings.ADVANCED_TWEAKABLES))
+                if (!Shown(f))
                 {
                     continue;
                 }
@@ -307,9 +310,73 @@ namespace KspBridge.Flight
                     d["value"] = null;
                     d["error"] = ex.GetType().Name + ": " + ex.Message;
                 }
+                UI_Control c = EditableControl(f);
+                bool editable = c != null && Unlocked(FieldLock(c));
+                d["editable"] = editable;
+                if (editable)
+                {
+                    AddRange(d, f, c);
+                }
                 rows.Add(d);
             }
             return rows;
+        }
+
+        /// <summary>CanActivateField for an active-vessel part (design 0041 window rules).</summary>
+        private static bool Shown(BaseField f) => f.guiActive && !(f.advancedTweakable && !GameSettings.ADVANCED_TWEAKABLES);
+
+        /// <summary>
+        /// The flight control a player can change the value with (design 0043 set_vessel_part_field step 5), or null; the field type
+        /// must also be one PartSettings.Convert takes, so editable never promises a value set_vessel_part_field refuses.
+        /// </summary>
+        private static UI_Control EditableControl(BaseField f) =>
+            f.uiControlFlight is UI_Control c && !(c is UI_Label) && !(c is UI_ProgressBar) && c.controlEnabled && Convertible(f.FieldInfo.FieldType) ? c : null;
+
+        /// <summary>The types PartSettings.Convert takes.</summary>
+        private static bool Convertible(Type t) =>
+            t == typeof(bool) || t == typeof(string) || t.IsEnum || t == typeof(float) || t == typeof(double) || t == typeof(int);
+
+        /// <summary>UIPartAction* value change: requireFullControl → TWEAKABLES_FULLONLY, else TWEAKABLES_ANYCONTROL.</summary>
+        private static ControlTypes FieldLock(UI_Control c) => c.requireFullControl ? ControlTypes.TWEAKABLES_FULLONLY : ControlTypes.TWEAKABLES_ANYCONTROL;
+
+        /// <summary>UIPartActionResource.Setup: the flow button exists.</summary>
+        private static bool FlowToggleable(PartResource r) => r.info.resourceFlowMode != ResourceFlowMode.NO_FLOW && !r.hideFlow;
+
+        /// <summary>The range or choices the control offers (design 0043 get_vessel_parts additions).</summary>
+        private static void AddRange(Dictionary<string, object> d, BaseField f, UI_Control c)
+        {
+            switch (c)
+            {
+                case UI_FloatRange r:
+                    d["min"] = r.minValue;
+                    d["max"] = r.maxValue;
+                    d["step"] = r.stepIncrement;
+                    break;
+                case UI_FloatEdit e:
+                    d["min"] = e.minValue;
+                    d["max"] = e.maxValue;
+                    break;
+                case UI_ScaleEdit s when s.intervals != null && s.intervals.Length > 0:
+                    d["min"] = s.intervals[0];
+                    d["max"] = s.intervals[s.intervals.Length - 1];
+                    break;
+                case UI_Cycle y when y.stateNames != null:
+                    Options(d, f, y.stateNames, y.stateNames);
+                    break;
+                case UI_ChooseOption o when o.options != null:
+                    Options(d, f, o.options, o.display ?? o.options);
+                    break;
+            }
+        }
+
+        /// <summary>options: titles the window shows; a text field also gets option_values, the values set_vessel_part_field takes.</summary>
+        private static void Options(Dictionary<string, object> d, BaseField f, string[] values, string[] titles)
+        {
+            d["options"] = titles.Select(t => (object)KSP.Localization.Localizer.Format(t)).ToList();
+            if (f.FieldInfo.FieldType == typeof(string))
+            {
+                d["option_values"] = values.Cast<object>().ToList();
+            }
         }
 
         private static List<object> Events(BaseEventList list, Part p)
@@ -333,7 +400,7 @@ namespace KspBridge.Flight
             return rows;
         }
 
-        /// <summary>Main states that are not window fields (design 0041 decision 2).</summary>
+        /// <summary>Main states that are not window fields (design 0041 decision 2, design 0043 decision 6).</summary>
         private static Dictionary<string, object> State(PartModule m)
         {
             switch (m)
@@ -346,6 +413,14 @@ namespace KspBridge.Flight
                         ["state"] = n.state,
                         ["docked_part_id"] = n.otherNode != null && n.otherNode.part != null ? (object)(double)n.otherNode.part.persistentId : null,
                     };
+                case ModuleParachute c:
+                    return new Dictionary<string, object> { ["deployment_state"] = c.deploymentState.ToString(), ["safe_state"] = c.deploymentSafeState.ToString() };
+                case ModuleLight l:
+                    return new Dictionary<string, object> { ["on"] = l.isOn };
+                case ModuleWheels.ModuleWheelDeployment w:
+                    return new Dictionary<string, object> { ["wheel_state"] = w.stateString, ["position"] = w.position };   // FSM state name, not a DeployState
+                case ModuleEngines e:
+                    return new Dictionary<string, object> { ["ignited"] = e.EngineIgnited, ["flameout"] = e.flameout, ["staged"] = e.staged, ["thrust_limit"] = e.thrustPercentage };
                 default:
                     return null;
             }
@@ -362,6 +437,7 @@ namespace KspBridge.Flight
                     ["amount"] = r.amount,
                     ["max"] = r.maxAmount,
                     ["flow_enabled"] = r.flowState,
+                    ["flow_toggleable"] = FlowToggleable(r),
                 });
             }
             return rows;
