@@ -233,10 +233,14 @@ namespace KspBridge.Flight
                         modeArgs = ApproachMode.Args;
                         step.CreateMode = ApproachMode.Parse(o, path);
                         break;
+                    case "dock":
+                        modeArgs = DockMode.Args;
+                        step.CreateMode = DockMode.Parse(o, path);
+                        break;
                     case null:
                         throw Invalid(path + ".mode", "required");
                     default:
-                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn, coast, circularize, land, execute_node, approach)");
+                        throw Invalid(path + ".mode", "unknown mode " + step.Mode + " (attitude, gravity_turn, coast, circularize, land, execute_node, approach, dock)");
                 }
                 foreach (string key in o.Keys)
                 {

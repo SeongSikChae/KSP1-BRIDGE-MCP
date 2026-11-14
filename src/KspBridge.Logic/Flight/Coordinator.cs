@@ -42,9 +42,9 @@ namespace KspBridge.Flight
                     return;
                 }
                 Vessel v = FlightGlobals.ActiveVessel;
-                if (v == null || v.persistentId != _plan.VesselId)
+                if (v == null || (v.persistentId != _plan.VesselId && !TryAdoptDocked(v)))
                 {
-                    Abort("vessel_changed", null, null);   // never carried on silently
+                    Abort("vessel_changed", null, null);   // never carried on silently (a watched dock is adopted instead)
                     return;
                 }
                 if (v.state == Vessel.State.DEAD)
@@ -97,6 +97,64 @@ namespace KspBridge.Flight
             {
                 Abort("error", null, e.Message);
             }
+        }
+
+        // ---- docking (design 0032 decisions 5, 29) ----------------------------------------------------------------------
+
+        private static uint _dockPort;   // the running dock step's own port part (persistentId); 0 = no watch
+
+        /// <summary>A coupling that involved the watched port was seen (onPartCouple).</summary>
+        public static bool DockCoupled { get; private set; }
+
+        /// <summary>portId 0 stops watching. coupled restores a coupling seen before a reload.</summary>
+        public static void WatchDock(uint portId, bool coupled)
+        {
+            _dockPort = portId;
+            DockCoupled = portId != 0 && coupled;
+        }
+
+        /// <summary>FlightScene's onPartCouple: marks the coupling when the watched port is one of the two parts.</summary>
+        public static void OnCouple(Part from, Part to)
+        {
+            if (_dockPort != 0 && ((from != null && from.persistentId == _dockPort) || (to != null && to.persistentId == _dockPort)))
+            {
+                DockCoupled = true;
+                Safe(() => UnityEngine.Debug.Log("[KspBridge] dock coupled: from=" + from?.vessel?.persistentId + " to=" + to?.vessel?.persistentId));
+            }
+        }
+
+        /// <summary>Adopts the merged vessel as the plan's vessel, only for a running dock step whose own port coupled and is
+        /// on v. True also when it was adopted already (the docked event is written once).</summary>
+        public static bool TryAdoptDocked(Vessel v)
+        {
+            if (!Running || !DockCoupled || !(_mode is DockMode d) || v == null || !Contains(v, _dockPort))
+            {
+                return false;
+            }
+            if (d.Done)
+            {
+                return v.persistentId == _plan.VesselId;
+            }
+            _plan.VesselId = v.persistentId;   // Handover.CapturePlan saves it as vessel_id
+            AttitudeController.Retarget(v);    // the pre-plan SAS/RCS record stays
+            d.MarkDocked(v);
+            return true;
+        }
+
+        /// <summary>The plan's vessel is being absorbed by the watched docking: not a loss (OnVesselDestroy).</summary>
+        public static bool IsDockAbsorb(Vessel dying) =>
+            Running && _dockPort != 0 && DockCoupled && dying != null && dying.persistentId == _plan.VesselId;
+
+        private static bool Contains(Vessel v, uint partId)
+        {
+            foreach (Part p in v.parts)
+            {
+                if (p.persistentId == partId)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>The only way the running mode ends: clears _mode first so End runs once. Never throws.</summary>
@@ -628,6 +686,7 @@ namespace KspBridge.Flight
                 Command = ComputeCommand(v, ut, _plan, _mode, true);   // as Tick: the first OnFlyByWire already has a command
                 AttitudeController.Attach(v, hp);                       // SAS is off by now: keep the handed-over state
                 AttitudeController.LoadIntegral(hp.ControllerIntegral);
+                (_mode as DockMode)?.RestoreWatch();                    // the dock watch is static state: restored only here, in step 2
                 Safe(() => UnityEngine.Debug.Log("[KspBridge] handover in: " + CommandLog() + " integral " + IntegralLog()
                     + " attitude_error " + _t.Num["attitude_error"].ToString("F3") + " main_throttle " + FlightInputHandler.state.mainThrottle.ToString("F3")));
                 FlightEvents.Add("logic_reloaded", _step, Reloaded(true));

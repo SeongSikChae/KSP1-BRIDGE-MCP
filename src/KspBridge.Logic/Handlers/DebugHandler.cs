@@ -22,6 +22,16 @@ namespace KspBridge.Handlers
                 DebugState.SetInputLock(b.Has("mask") ? ParseMask(b.GetString("mask")) : (ulong?)null);
                 return DebugState.Status();
             });
+            yield return Post("dock_reject", b =>
+            {
+                double n = b.GetDouble("count");
+                if (n != Math.Floor(n) || n < 0 || n > 10)
+                {
+                    throw ApiException.BadRequest("count must be an integer 0..10 (0 releases)");
+                }
+                DebugState.DockRejectLeft = (int)n;
+                return DebugState.Status();
+            });
             yield return Post("input_locks_error", b =>
             {
                 DebugState.InputLocksError = b.GetBool("on");

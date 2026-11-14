@@ -108,10 +108,17 @@ namespace KspBridge.Flight.Modes
                 Report("rcs_unavailable", new Dictionary<string, object> { ["reason"] = rcsWhy });
             }
 
-            if (_phase == Phase.Wait && !FlightEvents.InTrial && !_reported.Contains("phase_wait"))
+            if (!FlightEvents.InTrial && !_reported.Contains("phase_wait"))
             {
-                _reported.Add("phase_wait");   // the starting phase is reported once too (wait → kill → close, design 0032 decision 31)
-                Enter(Phase.Wait, d, relV.magnitude);
+                // The starting phase is reported once too, then the changes the trial made (its events are dropped): wait → kill →
+                // close in order (design 0032 decision 31; unit 9 measurement: a pass already due moved to close inside the trial).
+                _reported.Add("phase_wait");
+                PhaseEvent(Phase.Wait, d, relV.magnitude);
+                foreach (Pending p in _pending)
+                {
+                    PhaseEvent(p.Phase, p.Distance, p.Speed);
+                }
+                _pending.Clear();
             }
             if (_phase == Phase.Wait)
             {
@@ -198,19 +205,35 @@ namespace KspBridge.Flight.Modes
             return new ModeCommand(AttitudeTarget.Vector(dv.normalized), throttle) { Translate = Vector3.zero };
         }
 
+        private struct Pending
+        {
+            public Phase Phase;
+            public double Distance;
+            public double Speed;
+        }
+
+        private readonly List<Pending> _pending = new List<Pending>();   // phase changes made in the trial, reported on the first real tick
+
         private void Enter(Phase p, double d, double relV)
         {
             _phase = p;
             Log("phase " + p + ": d=" + F(d, 1) + " rel_v=" + F(relV, 2));
-            if (!FlightEvents.InTrial)
+            if (FlightEvents.InTrial)
             {
-                FlightEvents.Add("approach_phase", Coordinator.StepIndex, new Dictionary<string, object>
-                {
-                    ["phase"] = p == Phase.Wait ? "wait" : p == Phase.Kill ? "kill" : "close",
-                    ["distance"] = R(d),
-                    ["relative_speed"] = R(relV),
-                });
+                _pending.Add(new Pending { Phase = p, Distance = d, Speed = relV });
+                return;
             }
+            PhaseEvent(p, d, relV);
+        }
+
+        private static void PhaseEvent(Phase p, double d, double relV)
+        {
+            FlightEvents.Add("approach_phase", Coordinator.StepIndex, new Dictionary<string, object>
+            {
+                ["phase"] = p == Phase.Wait ? "wait" : p == Phase.Kill ? "kill" : "close",
+                ["distance"] = R(d),
+                ["relative_speed"] = R(relV),
+            });
         }
 
         private void Report(string type, Dictionary<string, object> data)

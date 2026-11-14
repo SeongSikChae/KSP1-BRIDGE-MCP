@@ -67,10 +67,11 @@ namespace KspBridge.Flight
             Control.ManualControl.StopPulse("scene");   // independent of the plan check (a plan and a pulse never run together)
         }
 
-        /// <summary>Always aborts, even when separation switched the vessel; a plan is never carried over to another vessel.</summary>
+        /// <summary>Aborts, even when separation switched the vessel; a plan is never carried over to another vessel, except the
+        /// merged vessel of a watched dock step (design 0032 decision 29).</summary>
         private void OnVesselChange(Vessel v)
         {
-            if (Coordinator.Running)
+            if (Coordinator.Running && !Coordinator.TryAdoptDocked(v))
             {
                 Coordinator.Abort("vessel_changed", null, null);
             }
@@ -81,7 +82,7 @@ namespace KspBridge.Flight
         /// the active vessel's object (state DEAD only), so it never fires for our target (decompile checked).</summary>
         private void OnVesselDestroy(Vessel v)
         {
-            if (Coordinator.Running && v != null && v.persistentId == Coordinator.TargetVesselId)
+            if (Coordinator.Running && v != null && v.persistentId == Coordinator.TargetVesselId && !Coordinator.IsDockAbsorb(v))
             {
                 Coordinator.Abort("vessel_lost", null, null);
             }
@@ -99,6 +100,7 @@ namespace KspBridge.Flight
             {
                 Control.ManualControl.StopPulse("docked");
             }
+            Coordinator.OnCouple(a.from, a.to);   // a watched dock step adopts the merged vessel (before the vessel change / destroy)
         }
     }
 }

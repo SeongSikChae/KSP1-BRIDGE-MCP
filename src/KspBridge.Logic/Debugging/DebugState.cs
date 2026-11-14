@@ -106,6 +106,10 @@ namespace KspBridge.Debugging
         /// <summary>debug_throttle_hold: written to the engine's currentThrottle every FixedUpdate before Coordinator.Tick.</summary>
         public static volatile Hold ThrottleHold;
 
+        /// <summary>debug_dock_reject: the next N dock attempts stop 2 m before contact and count as failed (design 0032
+        /// decision 34). Main thread only (the dock mode reads and decrements it).</summary>
+        public static int DockRejectLeft;
+
         /// <summary>The part's first ModuleEngines (multi-mode engines: first mode only); null when the part is not on the vessel
         /// or has no engine. A plain loop: Tick calls it every physics tick.</summary>
         public static ModuleEngines FindEngine(Vessel v, uint partId)
@@ -271,6 +275,7 @@ namespace KspBridge.Debugging
             AddPartTimeout = false;
             StageDelayS = 0;
             ThrottleHold = null;
+            DockRejectLeft = 0;
             StartFailures = HandoverFailures = 0;
             if (InputLockMask.HasValue)
             {
@@ -288,6 +293,7 @@ namespace KspBridge.Debugging
             return new Dictionary<string, object>
             {
                 ["stage_delay_s"] = StageDelayS,
+                ["dock_reject_left"] = DockRejectLeft,
                 ["throttle_hold"] = ThrottleHold is Hold h
                     ? new Dictionary<string, object> { ["part_id"] = (double)h.PartId, ["throttle"] = (double)h.Throttle }
                     : null,

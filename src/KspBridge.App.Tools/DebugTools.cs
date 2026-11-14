@@ -22,6 +22,13 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/debug/input_lock", new { mask }, ct);
 
+        [McpServerTool(Name = "debug_dock_reject", Destructive = true)]
+        [Description(Flag + "make the next count dock attempts of the flight-plan mode dock fail on purpose: the vessel stops 2 m before " +
+            "contact (outside the ports' magnetic capture), and after 5 s at rest the attempt counts as failed (dock_attempt {forced: true}), " +
+            "then it backs off and retries; more failures than retries end in plan_aborted dock_failed. 0 releases (debug_clear too). Returns get_status.debug.")]
+        public Task<string> DockReject([Description("Attempts to fail, 0..10; 0 releases")] int count, CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/debug/dock_reject", new { count }, ct);
+
         [McpServerTool(Name = "debug_input_locks_error", Destructive = true)]
         [Description(Flag + "make listing the input locks fail, so get_status returns input_locks null with input_locks_error " +
             "(other fields unchanged). Returns get_status.debug.")]
