@@ -257,6 +257,17 @@ namespace KspBridge.App
         public Task<string> LeaveFlight(CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/leave", new { }, ct);
 
+        [McpServerTool(Name = "open_tracking_station", Destructive = true)]
+        [Description("Go to the Tracking Station: from the space center like its building, or from flight like the pause menu's Tracking Station button " +
+            "(saves; a running flight plan is aborted, reason tracking_station). Returns {accepted, from} at once: poll get_status until " +
+            "reset.requested_scene is TRACKSTATION and reset.scene_ready. {accepted, already_open} when already there: nothing loads, check " +
+            "get_status.scene only. Refused before anything changes: tracking_station_unavailable (disabled by the game settings, or in flight the " +
+            "vessel cannot be left now: in the atmosphere, under acceleration, moving on the surface, about to crash, on a ladder), recovery_pending, " +
+            "switch_pending, scene_loading, no_game, not_supported (mission games), scene_not_allowed (editor and other scenes), no_active_vessel. " +
+            "tracking_station_failed (500) when saving or loading failed after the checks; its message says if the flight plan was already aborted.")]
+        public Task<string> OpenTrackingStation(CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/scene/tracking_station", new { }, ct);
+
         [McpServerTool(Name = "recover_vessel", Destructive = true)]
         [Description("Recover vessels like the game, without the recovery result dialog. In flight: the active vessel (landed or splashed " +
             "on the home body; get_status reset.can_recover), via the space center like the game's recover button; a running plan is " +
