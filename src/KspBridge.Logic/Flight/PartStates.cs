@@ -54,6 +54,75 @@ namespace KspBridge.Flight
             return new Dictionary<string, object> { ["vessel"] = v.vesselName, ["id"] = (double)v.persistentId, ["parts"] = rows };
         }
 
+        /// <summary>
+        /// Presses one part action window button (UIPartActionButton.OnClick in flight): a module event is first sent to the
+        /// symmetry counterparts' part-level event lists, then invoked; a part-level event is only invoked.
+        /// </summary>
+        public static object Invoke(Vessel v, RequestBody b)
+        {
+            uint id = PartIdFromBody(b);
+            string module = b.GetString("module");
+            string eventName = b.GetString("event");
+            int? moduleIndex = b.Has("module_index") ? ModuleIndex(b) : (int?)null;
+            Part p = v.parts.FirstOrDefault(x => x.persistentId == id) ?? throw PartNotFound(id);
+            BaseEventList events = FindTarget(p, module, moduleIndex, out PartModule target, out int? index);
+            BaseEvent e = events[eventName] ?? throw new ApiException(404, "event_not_found", eventName + " is not an event of " + module
+                + " on " + p.partInfo.name + " (events: " + string.Join(", ", events.Select(x => x.name).ToArray()) + ")");
+            string reason = !Listed(e) ? "inactive" : Unavailable(e, p);
+            if (reason != null)
+            {
+                throw new ApiException(409, "event_unavailable", module + "." + eventName + " cannot be pressed in the part action window now: " + reason);
+            }
+
+            uint before = v.persistentId;
+            List<object> counterparts = new List<object>();
+            try
+            {
+                if (target != null)
+                {
+                    foreach (Part s in p.symmetryCounterparts)
+                    {
+                        counterparts.Add(new Dictionary<string, object> { ["part_id"] = (double)s.persistentId, ["sent"] = s.Events.Send(e.id) });
+                    }
+                }
+                e.Invoke();
+            }
+            catch (Exception ex)
+            {
+                string error = ex.GetType().Name + ": " + ex.Message;
+                Record(id, p, module, index, eventName, counterparts, false, false, error);
+                throw new ApiException(500, "event_failed", error);
+            }
+
+            bool changed = FlightGlobals.ActiveVessel == null || FlightGlobals.ActiveVessel.persistentId != before;
+            bool separated = p == null || p.vessel != v;
+            Record(id, p, module, index, eventName, counterparts, changed, separated, null);
+            Dictionary<string, object> r = new Dictionary<string, object>
+            {
+                ["part_id"] = (double)id,
+                ["part"] = p != null ? p.partInfo.name : null,
+                ["module"] = module,
+                ["index"] = index,
+                ["event"] = eventName,
+                ["title"] = e.guiName,
+                ["counterparts"] = counterparts,
+                ["vessel_changed"] = changed,
+                ["separated"] = separated,
+                ["part_vessel_id"] = p != null && p.vessel != null ? (object)(double)p.vessel.persistentId : null,
+                ["state_error"] = null,
+            };
+            try
+            {
+                r["module_state"] = target == null ? DescribePartLevel(p) : DescribeModule(p, target, index.Value);
+            }
+            catch (Exception ex)   // the event already ran: answer 200 so a retry does not press a toggle twice
+            {
+                r["module_state"] = null;
+                r["state_error"] = ex.GetType().Name + ": " + ex.Message;
+            }
+            return r;
+        }
+
         /// <summary>CanActivateEvent steps 1·2: the event is in the window's list at all.</summary>
         internal static bool Listed(BaseEvent e) =>
             !(e.advancedTweakable && !GameSettings.ADVANCED_TWEAKABLES) && e.guiActive && e.active && !e.EventIsDisabledByVariant;
@@ -108,6 +177,94 @@ namespace KspBridge.Flight
                 throw ApiException.BadRequest("part_id must be an integer part id (persistentId) 0.." + uint.MaxValue);
             }
             return (uint)v;
+        }
+
+        /// <summary>DebugHandler.PartId's rule and text, for a body value.</summary>
+        private static uint PartIdFromBody(RequestBody b)
+        {
+            double v = b.GetDouble("part_id");
+            if (!(v >= 0 && v <= uint.MaxValue) || v != Math.Floor(v))
+            {
+                throw ApiException.BadRequest("part_id must be an integer part id (persistentId) 0.." + uint.MaxValue);
+            }
+            return (uint)v;
+        }
+
+        private static int ModuleIndex(RequestBody b)
+        {
+            double v = b.GetDouble("module_index");
+            if (!(v >= 0 && v <= int.MaxValue) || v != Math.Floor(v))
+            {
+                throw ApiException.BadRequest("module_index must be an integer >= 0 (index from get_vessel_parts)");
+            }
+            return (int)v;
+        }
+
+        /// <summary>The event list to press in (design 0041 invoke_part_event step 4); target null = part-level.</summary>
+        private static BaseEventList FindTarget(Part p, string module, int? moduleIndex, out PartModule target, out int? index)
+        {
+            if (module == PartLevel)
+            {
+                if (moduleIndex != null)
+                {
+                    throw ApiException.BadRequest("module_index is not used with module \"" + PartLevel + "\" (part-level events)");
+                }
+                target = null;
+                index = null;
+                return p.Events;
+            }
+            if (moduleIndex != null)
+            {
+                int i = moduleIndex.Value;
+                if (i >= p.Modules.Count || p.Modules[i].moduleName != module)
+                {
+                    throw new ApiException(404, "module_not_found", "module " + i + " of " + p.partInfo.name + " is not " + module
+                        + " (" + (i < p.Modules.Count ? p.Modules[i].moduleName : "only " + p.Modules.Count + " modules") + ")");
+                }
+                index = i;
+            }
+            else
+            {
+                List<int> named = Enumerable.Range(0, p.Modules.Count).Where(i => p.Modules[i].moduleName == module).ToList();
+                if (named.Count == 0)
+                {
+                    throw new ApiException(404, "module_not_found", module + " is not on " + p.partInfo.name
+                        + " (modules: " + string.Join(", ", p.Modules.Cast<PartModule>().Select(x => x.moduleName).Distinct().ToArray()) + ")");
+                }
+                List<int> enabled = named.Where(i => p.Modules[i].isEnabled).ToList();
+                if (enabled.Count > 1)
+                {
+                    throw new ApiException(409, "ambiguous_module", p.partInfo.name + " has several enabled " + module
+                        + " modules; give module_index (" + string.Join(", ", enabled.Select(i => i.ToString(CultureInfo.InvariantCulture)).ToArray()) + ")");
+                }
+                index = enabled.Count == 1 ? enabled[0] : named[0];
+            }
+            target = p.Modules[index.Value];
+            if (!target.isEnabled)
+            {
+                throw new ApiException(409, "event_unavailable", module + " on " + p.partInfo.name + " is disabled (module disabled)");
+            }
+            return target.Events;
+        }
+
+        /// <summary>part_event in get_flight_events and a [KspBridge] KSP.log line (proposal decision 10).</summary>
+        private static void Record(uint id, Part p, string module, int? index, string ev, List<object> counterparts, bool changed, bool separated, string error)
+        {
+            string name = p != null ? p.partInfo.name : null;
+            FlightEvents.Add("part_event", Coordinator.Running ? Coordinator.StepIndex : -1, new Dictionary<string, object>
+            {
+                ["part_id"] = (double)id,
+                ["part"] = name,
+                ["module"] = module,
+                ["index"] = index,
+                ["event"] = ev,
+                ["counterparts"] = counterparts,
+                ["vessel_changed"] = changed,
+                ["separated"] = separated,
+                ["error"] = error,
+            });
+            UnityEngine.Debug.Log("[KspBridge] part_event " + name + " (" + id + ") " + module + "." + ev
+                + (error != null ? " failed: " + error : separated ? " separated" : ""));
         }
 
         internal static ApiException PartNotFound(uint id) =>
