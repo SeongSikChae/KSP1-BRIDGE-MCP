@@ -66,6 +66,7 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/flight/part_event", (m, b, q) => Flight.PartStates.Invoke(Guard.ActiveVessel(), b));
             yield return new Route("GET", "/api/flight/commnet", (m, b, q) => CommNetState.Describe(Guard.ActiveVessel()));
             yield return new Route("POST", "/api/flight/part_field", (m, b, q) => Flight.PartStates.SetField(Guard.ActiveVessel(), b));
+            yield return new Route("POST", "/api/flight/resource_flow", (m, b, q) => Flight.PartStates.SetFlow(Guard.ActiveVessel(), b));
         }
 
         private static string Empty(string s) => string.IsNullOrEmpty(s) ? null : s;   // as EditorHandler.Empty: ?x= means no x

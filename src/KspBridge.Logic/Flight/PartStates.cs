@@ -246,6 +246,50 @@ namespace KspBridge.Flight
             }, "part_field " + p.partInfo.name + " (" + id + ") " + module + "." + name + " " + FieldValue(old) + " -> " + FieldValue(value)
                 + (error != null ? " failed: " + error : ""));
 
+        /// <summary>
+        /// The resource row's flow button (UIPartActionResource.FlowBtnToggled): this part only, no symmetry. The flight window
+        /// builds the row with a null control, so the check is always TWEAKABLES_ANYCONTROL (design 0043).
+        /// </summary>
+        public static object SetFlow(Vessel v, RequestBody b)
+        {
+            uint id = PartIdFromBody(b);
+            string name = b.GetString("resource");
+            bool enabled = b.GetBool("enabled");
+            Part p = v.parts.FirstOrDefault(x => x.persistentId == id) ?? throw PartNotFound(id);
+            PartResource r = p.Resources[name] ?? throw new ApiException(404, "resource_not_found", name + " is not in " + p.partInfo.name
+                + " (resources: " + string.Join(", ", p.Resources.Cast<PartResource>().Select(x => x.resourceName).ToArray()) + ")");
+            if (!FlowToggleable(r))
+            {
+                throw new ApiException(409, "flow_not_toggleable", name + " in " + p.partInfo.name + " has no flow button (no-flow resource or hidden)");
+            }
+            if (!Unlocked(ControlTypes.TWEAKABLES_ANYCONTROL))
+            {
+                throw new ApiException(409, "flow_locked", "the flow of " + name + " cannot be changed now: input_locked (TWEAKABLES_ANYCONTROL)");
+            }
+            bool before = r.flowState;
+            r.flowState = enabled;
+            if (before != enabled)
+            {
+                Log("resource_flow", new Dictionary<string, object>
+                {
+                    ["part_id"] = (double)id,
+                    ["part"] = p.partInfo.name,
+                    ["resource"] = name,
+                    ["before"] = before,
+                    ["flow_enabled"] = r.flowState,
+                }, "resource_flow " + p.partInfo.name + " (" + id + ") " + name + " " + before + " -> " + r.flowState);
+            }
+            MonoUtilities.RefreshPartContextWindow(p);
+            return new Dictionary<string, object>
+            {
+                ["part_id"] = (double)id,
+                ["part"] = p.partInfo.name,
+                ["resource"] = name,
+                ["before"] = before,
+                ["flow_enabled"] = r.flowState,
+            };
+        }
+
         /// <summary>A flight event (step -1 without a plan) and the same line in KSP.log (proposal decision 10).</summary>
         internal static void Log(string type, Dictionary<string, object> data, string line)
         {
