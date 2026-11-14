@@ -12,6 +12,7 @@ namespace KspBridge.Flight
         Separate,
         Settle,
         Ignite,
+        Paused,   // appended: the handover saves the int (#13)
     }
 
     /// <summary>staging_options of a plan (validated at submit).</summary>
@@ -23,11 +24,13 @@ namespace KspBridge.Flight
         public double MaxSettleS;
         public double MaxSeparateQ;        // kPa: a parallel separation waits while the dynamic pressure is above this (#16)
         public double MaxSeparateQWaitS;   // s: then it separates anyway (separation_forced)
+        public double MaxFlameoutPauseS;   // s of wanted thrust a flamed-out engine with propellant may take to relight (#13)
 
         public static readonly StagingOptions Default = new StagingOptions
         {
             TailoffRatio = 0.05, MaxTailoffS = 5, SettleDistance = 2, MaxSettleS = 3,
             MaxSeparateQ = 25, MaxSeparateQWaitS = 30,   // TestB: boosters hit the core at 35 kPa and above, none at 30 (0027 unit 2)
+            MaxFlameoutPauseS = 3,                       // KSP relights on the next tick that asks for propellant (0023)
         };
 
         public static StagingOptions Parse(object raw, string path)
@@ -37,7 +40,7 @@ namespace KspBridge.Flight
                 return Default;
             }
             Dictionary<string, object> o = raw as Dictionary<string, object> ?? throw Plan.Invalid(path, "must be an object");
-            Plan.UnknownKeys(o, new[] { "tailoff_ratio", "max_tailoff_s", "settle_distance", "max_settle_s", "max_separate_q", "max_separate_q_wait_s" }, path);
+            Plan.UnknownKeys(o, new[] { "tailoff_ratio", "max_tailoff_s", "settle_distance", "max_settle_s", "max_separate_q", "max_separate_q_wait_s", "max_flameout_pause_s" }, path);
             return new StagingOptions
             {
                 TailoffRatio = Plan.OptionalNumber(o, "tailoff_ratio", path, 0, 1, Default.TailoffRatio),
@@ -46,6 +49,7 @@ namespace KspBridge.Flight
                 MaxSettleS = Plan.OptionalNumber(o, "max_settle_s", path, 0, 600, Default.MaxSettleS),
                 MaxSeparateQ = Plan.OptionalNumber(o, "max_separate_q", path, 0, 1000, Default.MaxSeparateQ),
                 MaxSeparateQWaitS = Plan.OptionalNumber(o, "max_separate_q_wait_s", path, 0, 600, Default.MaxSeparateQWaitS),
+                MaxFlameoutPauseS = Plan.OptionalNumber(o, "max_flameout_pause_s", path, 0, 600, Default.MaxFlameoutPauseS),
             };
         }
     }
@@ -64,6 +68,7 @@ namespace KspBridge.Flight
         private static double _burnoutUt, _separateUt, _settleUt;
         private static double _heldUt;                     // UT the dynamic-pressure wait began (0: none)
         private static double _heldS;                      // length of that wait once it ended (staging_completed.held_s)
+        private static double _pauseUt;                    // UT a flameout pause began (flameout_resumed.pause_s; 0: none)
         private static int _ticks;
         private static bool _parallel;
         private static double _lastUt = double.NegativeInfinity;
@@ -84,6 +89,7 @@ namespace KspBridge.Flight
                     case StagingState.Separate: return "separate";
                     case StagingState.Settle: return "settle";
                     case StagingState.Ignite: return "ignite";
+                    case StagingState.Paused: return "paused";
                     default: return "none";
                 }
             }
@@ -93,6 +99,9 @@ namespace KspBridge.Flight
         /// With auto_stage, "previous mode throttle > 0 + no lit engine + engine in the next stage" already entered Ignite in Update,
         /// so later-stage engines alone never wait.</summary>
         public static bool Pending => _state != StagingState.None || _onStart != null || _onStartQueued;
+
+        /// <summary>A flameout pause (#13): Coordinator keeps the mode throttle so KSP can relight (it skips the check at throttle 0).</summary>
+        public static bool Paused => _state == StagingState.Paused;
 
         /// <summary>Tick order (c): on_start request, then burnout detection and state transitions, before the mode runs.</summary>
         /// <param name="send">False in Submit's trial: register and transition only, never call ActivateNextStage.</param>
@@ -142,9 +151,44 @@ namespace KspBridge.Flight
                             ["thrust"] = Math.Round(EngineModel.ThrustSum(v), 3),
                         });
                     }
+                    else if (!EngineModel.AnyOperational(v) && PausedEngine(v))
+                    {
+                        Enter(StagingState.Paused, ut);   // before the ignition entry: never fire the next stage over a pause
+                        _pauseUt = ut;
+                        Event("flameout_pause", v);
+                    }
                     else if (t.PrevModeThrottle > 0 && !EngineModel.AnyOperational(v) && NextStageHasEngine(v))
                     {
                         Enter(StagingState.Ignite, ut);   // ignition owner: never wait with a lit-engine-less vessel and an engine stage ahead
+                    }
+                    break;
+
+                case StagingState.Paused:
+                    if (EngineModel.AnyOperational(v))
+                    {
+                        FlightEvents.Add("flameout_resumed", Coordinator.StepIndex, new Dictionary<string, object>
+                        {
+                            ["stage"] = v.currentStage,
+                            ["pause_s"] = Math.Round(ut - _pauseUt, 3),
+                        });
+                        ResetSequence(ut);
+                    }
+                    else if (!PausedEngine(v))
+                    {
+                        ResetSequence(ut);   // the engine ran dry, shut down or left meanwhile: the regular checks run again this tick,
+                        if (!plan.AutoStage)
+                        {
+                            break;           // the top-of-Update guard: a plan without auto_stage never starts a new sequence
+                        }
+                        goto case StagingState.None;   // so a burnout or an ignition entry keeps Pending true before ComputeCommand looks
+                    }
+                    else if (!(t.PrevModeThrottle > 0))
+                    {
+                        _since = ut;         // no thrust wanted: KSP cannot relight at throttle 0 and no_thrust cannot fire, so the wait restarts
+                    }
+                    else if (ut - _since > o.MaxFlameoutPauseS)
+                    {
+                        EndWithLatch(v, "flameout_timeout", ut);   // Pending false: throttle > 0 then aborts with no_thrust
                     }
                     break;
 
@@ -291,6 +335,7 @@ namespace KspBridge.Flight
             _before = null;
             _burnoutUt = _separateUt = _settleUt = 0;
             _heldUt = _heldS = 0;
+            _pauseUt = 0;
         }
 
         private static void EndWithLatch(Vessel v, string kind, double ut)
@@ -392,6 +437,20 @@ namespace KspBridge.Flight
         private static bool Spent(Vessel v, ModuleEngines e) =>
             (e.flameout && (!e.EngineIgnited || !EngineModel.HasPropellantCached(e)))
             || (e.part.inverseStage >= v.currentStage && !e.EngineIgnited && !EngineModel.HasPropellantCached(e));
+
+        /// <summary>An ignited flamed-out engine with propellant left: KSP relights it once the throttle asks for propellant (#13).</summary>
+        private static bool PausedEngine(Vessel v)
+        {
+            ModuleEngines[] es = EngineModel.Engines(v);
+            for (int i = 0; i < es.Length; i++)
+            {
+                if (es[i].flameout && es[i].EngineIgnited && EngineModel.HasPropellantCached(es[i]))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         /// <summary>Burnout by fuel only (never by throttle): ≥ 1 spent engine and no lit unflamed engine, or a spent engine in J_next.</summary>
         private static bool BurnedOut(Vessel v)
@@ -840,6 +899,7 @@ namespace KspBridge.Flight
                 ["settle_ut"] = _settleUt,
                 ["held_ut"] = _heldUt,
                 ["held_s"] = _heldS,
+                ["pause_ut"] = _pauseUt,
                 ["ticks"] = (double)_ticks,
                 ["parallel"] = _parallel,
                 ["last_ut"] = _lastUt,
@@ -863,6 +923,7 @@ namespace KspBridge.Flight
             _settleUt = Handover.D(d, "settle_ut");
             _heldUt = Handover.D(d, "held_ut", 0);
             _heldS = Handover.D(d, "held_s", 0);
+            _pauseUt = Handover.D(d, "pause_ut", 0);
             _ticks = (int)Handover.D(d, "ticks", 0);
             _parallel = Handover.B(d, "parallel");
             _lastUt = Handover.D(d, "last_ut", double.NegativeInfinity);
