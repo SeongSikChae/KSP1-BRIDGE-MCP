@@ -126,9 +126,11 @@ namespace KspBridge.App.Tests
             await tools.SetTarget(clear: true, ct: ct);
             await tools.PlanManeuver("transfer_body", periapsis: 30000, ct: ct);
             await tools.PlanManeuver("rendezvous_phase", distance: 150, ct: ct);
+            await tools.SwitchVessel(12345, ct);
 
             var r = handler.Requests;
-            Assert.HasCount(7, r);
+            Assert.HasCount(8, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/switch", (string?)"""{"vessel_id":12345}"""), r[7]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"rendezvous_phase","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":150}"""), r[6]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessels?include_debris=false", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessels?include_debris=true", (string?)null), r[1]);

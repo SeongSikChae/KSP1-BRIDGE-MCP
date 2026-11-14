@@ -13,7 +13,8 @@ namespace KspBridge.App
             "and reset {scene_ready (false from a scene load request until that scene is ready; FLIGHT only after its initial save), " +
             "requested_scene, loading_seconds (while loading; if it keeps growing, reload_mod), can_recover, can_revert_launch, " +
             "can_revert_editor, revert_editor_facility, revert_unavailable [reasons], recovery (last flight-scene recover_vessel " +
-            "{state pending|done|failed, vessel, id, crew, funds, science, reputation, error})}; the can_* flags are judged only in a " +
+            "{state pending|done|failed, vessel, id, crew, funds, science, reputation, error}), switch (last switch_vessel " +
+            "{state pending|done|failed, vessel, id, path in_scene|reload, warp_lowered, unpacked, already_active, error})}; the can_* flags are judged only in a " +
             "loaded flight scene and are false elsewhere; translate {active, vessel_id, ended} (last rcs_translate pulse in any scene, null before any); " +
             "debug (debug tool state, null unless GameData/KspBridge/debug.cfg enables the debug tools).")]
         public Task<string> GetStatus(CancellationToken ct)
@@ -75,9 +76,24 @@ namespace KspBridge.App
         [Description("Vessels in the flight scene, nearest to the active vessel first: id (persistentId, as get_flight / get_status), name, type, situation, body, " +
             "orbit {apoapsis, periapsis, eccentricity, inclination, period, body}, active, loaded (inside physics range), distance m, " +
             "docking_ports [{part_id, node_type (size, e.g. size1), state, free}] (from the save snapshot when unloaded). Debris, flags and space objects " +
-            "are left out unless include_debris. Flight scene only (not_in_flight).")]
+            "are left out unless include_debris. Flight, space center or tracking station (not_in_flight elsewhere); outside flight active is false and " +
+            "distance null, in the game's order.")]
         public Task<string> ListVessels([Description("true = also debris, flags and space objects")] bool include_debris = false, CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Get, "api/vessels?include_debris=" + (include_debris ? "true" : "false"), null, ct);
+
+        [McpServerTool(Name = "switch_vessel", Destructive = true)]
+        [Description("Make another vessel the active vessel, like the Tracking Station's Fly or the map's Switch To: vessel_id from list_vessels. Returns " +
+            "{accepted, vessel, id, path in_scene (loaded vessel, no scene reload) | reload (the flight scene is opened on it, the game saves first), " +
+            "warp_lowered (time warp was stopped)} or {accepted, already_active}. Poll get_status reset.switch {state pending|done|failed, error, unpacked} " +
+            "until it is not pending; get_flight then shows the new vessel. Flight, space center or tracking station. Refused before anything changes: " +
+            "plan_running (abort_flight first), switch_pending, recovery_pending, scene_loading, no_game, not_supported (mission games), scene_not_allowed, " +
+            "no_active_vessel, vessel_not_found, not_switchable (flag, space object, not owned), switch_unavailable (a reload would leave the active vessel " +
+            "in the atmosphere, under acceleration, moving on the surface, about to crash or with a kerbal on a ladder). Failed after acceptance: " +
+            "switch_refused, switch_failed (reset.switch.error; the message says if time warp was stopped).")]
+        public Task<string> SwitchVessel(
+            [Description("Vessel id (persistentId) from list_vessels")] double vessel_id,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/switch", new { vessel_id }, ct);
 
         [McpServerTool(Name = "set_target", Destructive = true)]
         [Description("Set the active vessel's target like the player: a body (body name, e.g. Mun), a vessel (vessel_id from list_vessels), a docking port " +
