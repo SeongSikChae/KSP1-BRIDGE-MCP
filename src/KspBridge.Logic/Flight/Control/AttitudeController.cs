@@ -13,8 +13,8 @@ namespace KspBridge.Flight.Control
     /// </summary>
     public static class AttitudeController
     {
-        private const float KStop = 0.8f;
-        private const float OmegaMax = 0.5f;
+        internal const float KStop = 0.8f;      // internal: ControllerTrace evaluates the same curve
+        internal const float OmegaMax = 0.5f;
         private const float Kp = 4f;
         private const float Ki = 0.4f;
 

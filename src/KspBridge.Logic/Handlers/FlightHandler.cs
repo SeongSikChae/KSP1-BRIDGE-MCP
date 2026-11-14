@@ -62,6 +62,22 @@ namespace KspBridge.Handlers
             });
             yield return new Route("GET", "/api/flight/events", (m, b, q) =>
                 Events.Since(ParseLong(q["since"], 0, "since"), (int)Math.Max(1, Math.Min(Events.Capacity, ParseLong(q["limit"], 100, "limit")))));
+            yield return new Route("GET", "/api/flight/controller_trace", (m, b, q) =>
+            {
+                Vessel v = Guard.ActiveVessel();
+                double seconds = ParseDouble(q["seconds"], 10, 1, 20, "seconds");
+                int? step = null;
+                if (!string.IsNullOrEmpty(q["step"]))
+                {
+                    long s = ParseLong(q["step"], 0, "step");
+                    if (s < 1 || s > 50)
+                    {
+                        throw ApiException.BadRequest("step must be an integer in [1, 50]");
+                    }
+                    step = (int)s;
+                }
+                return Flight.Control.ControllerTrace.Describe(v, seconds, step);
+            });
             yield return new Route("GET", "/api/flight/parts", (m, b, q) => Flight.PartStates.List(Guard.ActiveVessel(), Empty(q["part_id"]), Empty(q["module"])));   // qualified: KSP has a global PartStates enum
             yield return new Route("POST", "/api/flight/part_event", (m, b, q) => Flight.PartStates.Invoke(Guard.ActiveVessel(), b));
             yield return new Route("GET", "/api/flight/commnet", (m, b, q) => CommNetState.Describe(Guard.ActiveVessel()));
@@ -85,6 +101,21 @@ namespace KspBridge.Handlers
             if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long value) || value < 0)
             {
                 throw ApiException.BadRequest(name + " must be a non-negative integer");
+            }
+            return value;
+        }
+
+        private static double ParseDouble(string text, double defaultValue, double min, double max, string name)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return defaultValue;
+            }
+            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                || double.IsNaN(value) || double.IsInfinity(value) || value < min || value > max)
+            {
+                throw ApiException.BadRequest(name + " must be a number in [" + min.ToString(CultureInfo.InvariantCulture) + ", "
+                    + max.ToString(CultureInfo.InvariantCulture) + "]");
             }
             return value;
         }
