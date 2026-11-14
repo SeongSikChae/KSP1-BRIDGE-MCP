@@ -256,8 +256,7 @@ namespace KspBridge.Flight
             string name = b.GetString("resource");
             bool enabled = b.GetBool("enabled");
             Part p = v.parts.FirstOrDefault(x => x.persistentId == id) ?? throw PartNotFound(id);
-            PartResource r = p.Resources[name] ?? throw new ApiException(404, "resource_not_found", name + " is not in " + p.partInfo.name
-                + " (resources: " + string.Join(", ", p.Resources.Cast<PartResource>().Select(x => x.resourceName).ToArray()) + ")");
+            PartResource r = p.Resources[name] ?? throw ResourceNotFound(p, name);
             if (!FlowToggleable(r))
             {
                 throw new ApiException(409, "flow_not_toggleable", name + " in " + p.partInfo.name + " has no flow button (no-flow, hidden or empty resource row)");
@@ -452,6 +451,10 @@ namespace KspBridge.Flight
             UnityEngine.Debug.Log("[KspBridge] part_event " + name + " (" + id + ") " + module + "." + ev
                 + (error != null ? " failed: " + error : separated ? " separated" : ""));
         }
+
+        internal static ApiException ResourceNotFound(Part p, string name) =>
+            new ApiException(404, "resource_not_found", name + " is not in " + p.partInfo.name
+                + " (resources: " + string.Join(", ", p.Resources.Cast<PartResource>().Select(x => x.resourceName).ToArray()) + ")");
 
         internal static ApiException PartNotFound(uint id) =>
             new ApiException(404, "part_not_found", "part " + id + " is not in the active vessel (use get_vessel_parts for part ids)");

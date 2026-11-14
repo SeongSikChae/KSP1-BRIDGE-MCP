@@ -89,6 +89,7 @@ namespace KspBridge
             Flight.Control.ManualControl.Tick();   // never throws
             FlightReset.Tick();   // never throws
             VesselSwitch.Tick();  // never throws
+            Flight.ResourceTransfer.Tick();   // never throws
         }
 
         public IList<string> Stop()
@@ -126,6 +127,7 @@ namespace KspBridge
             {
                 UnityEngine.Debug.LogError("[KspBridge] part loss unhook failed: " + e);
             }
+            Flight.ResourceTransfer.Stop("logic_stop");   // never throws; before Coordinator.Stop hands the event buffer over
             IList<string> released = Coordinator.Stop(_context);   // never throws
             try
             {

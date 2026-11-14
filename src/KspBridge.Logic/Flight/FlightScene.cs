@@ -65,6 +65,7 @@ namespace KspBridge.Flight
                 Coordinator.Abort("scene", null, null);
             }
             Control.ManualControl.StopPulse("scene");   // independent of the plan check (a plan and a pulse never run together)
+            ResourceTransfer.Stop("scene");   // never throws
         }
 
         /// <summary>Aborts, even when separation switched the vessel; a plan is never carried over to another vessel, except the
