@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace KspBridge.Flight.Modes
 {
     /// <summary>
-    /// circularize: waits (WarpToUt) until the burn start before apoapsis (half the burn time and half the spool-up early), then burns along
+    /// circularize: waits (WarpToUt once aligned, WarpGate) until the burn start before apoapsis (half the burn time and half the spool-up early), then burns along
     /// the Δv vector from the current orbital velocity to the circular velocity at the current position, throttling down over the last
     /// 2 s of Δv. Below 10 m/s the burn direction is locked so the 5° attitude gate stays still. Done when the remaining Δv is within
     /// tolerance + engine tailoff, or after the lock when Δv starts to grow again or the eccentricity stops dropping for EccFlatTicks
@@ -27,7 +27,14 @@ namespace KspBridge.Flight.Modes
         /// <summary>Attitude error (deg) above which the mode does not burn.</summary>
         internal const double AttitudeGateDeg = 5;   // shared with ExecuteNodeMode (constants only)
 
+        /// <summary>Angular rate (rad/s) above which a wait step does not request warp yet (design 0048 decision 1).</summary>
+        internal const double WarpAlignRate = 0.02;
+
+        /// <summary>Unaligned this long (s) while a warp is still worth it: warp_unavailable align_wait.</summary>
+        internal const double AlignWaitS = 30;
+
         private readonly double _tolerance;
+        private double _alignSince = double.NaN;   // wait start while unaligned (WarpGate)
         private bool _burning;
         private Vector3d? _lockedDir;   // Orbit frame (orbit.pos / orbit.vel)
         private double _prevDv = double.PositiveInfinity;
@@ -48,6 +55,40 @@ namespace KspBridge.Flight.Modes
         }
 
         public bool Done { get; private set; }
+
+        /// <summary>Wait steps request warp only once aligned (rails warp keeps the inertial attitude, so the burn direction stays
+        /// aligned through it). Our running warp counts as aligned: attitude_error is NaN on rails, and dropping WarpToUt would
+        /// make the Coordinator stop it.</summary>
+        internal static bool WarpAligned(Vessel v, Telemetry t)
+        {
+            if (Warp.Requested)
+            {
+                return true;
+            }
+            double err = t.Num["attitude_error"];
+            return !double.IsNaN(err) && err <= AttitudeGateDeg && v.angularVelocity.magnitude <= WarpAlignRate;
+        }
+
+        /// <summary>WarpToUt for a wait step: the target once aligned, else null; reports align_wait after AlignWaitS unaligned
+        /// while 15 s or more are left (Warp.Request's own floor).</summary>
+        internal static double? WarpGate(Vessel v, Telemetry t, double targetUt, ref double alignSince)
+        {
+            double ut = Planetarium.GetUniversalTime();
+            if (WarpAligned(v, t))
+            {
+                alignSince = double.NaN;
+                return targetUt;
+            }
+            if (double.IsNaN(alignSince))
+            {
+                alignSince = ut;
+            }
+            else if (ut - alignSince > AlignWaitS && targetUt - ut >= 15)
+            {
+                Warp.AlignWait();
+            }
+            return null;
+        }
 
         public void Begin(Vessel v, Telemetry t)
         {
@@ -72,7 +113,7 @@ namespace KspBridge.Flight.Modes
                 double start = utAp - burn / 2 - EngineModel.SpoolUpS(v) / 2;
                 if (!pastAp && ut < start)
                 {
-                    return new ModeCommand(AttitudeTarget.Vector(Horizontal(v)), 0) { WarpToUt = start };
+                    return new ModeCommand(AttitudeTarget.Vector(Horizontal(v)), 0) { WarpToUt = WarpGate(v, t, start, ref _alignSince) };
                 }
                 _burning = true;   // start already passed or apoapsis passed: burn now (no WarpToUt, the Coordinator releases warp)
                 Log("burn start: past_ap=" + pastAp + " tta=" + F(o.timeToAp, 1) + " dv_ap=" + F(dvAp, 2) + " burn=" + F(burn, 2) +

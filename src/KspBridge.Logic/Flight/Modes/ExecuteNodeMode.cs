@@ -5,7 +5,7 @@ using System.Collections.Generic;
 namespace KspBridge.Flight.Modes
 {
     /// <summary>
-    /// execute_node: burns the earliest KSP maneuver node. Waits (WarpToUt) until node UT − burn time/2 − spool-up/2 (burn time
+    /// execute_node: burns the earliest KSP maneuver node. Waits (WarpToUt once aligned, CircularizeMode.WarpGate) until node UT − burn time/2 − spool-up/2 (burn time
     /// across stages, EngineModel.BurnTimeStaged), then burns along the node's remaining Δv (GetBurnVector), throttling down over the
     /// last 2 s of Δv and only while attitude_error ≤ CircularizeMode.AttitudeGateDeg. Below CircularizeMode.LockDv the direction is
     /// locked. Done when the remaining Δv is within tolerance + engine tailoff, or after the lock when it grows again on a fired tick;
@@ -41,6 +41,7 @@ namespace KspBridge.Flight.Modes
         private Vector3d? _lockedDir;   // world
         private double _prevDv = double.PositiveInfinity;
         private bool _gated;   // log only
+        private double _alignSince = double.NaN;   // wait start while unaligned (CircularizeMode.WarpGate)
 
         private ExecuteNodeMode(double tolerance, double lateLimit)
         {
@@ -95,7 +96,7 @@ namespace KspBridge.Flight.Modes
                 double start = n.UT - bt / 2 - EngineModel.SpoolUpS(v) / 2;
                 if (ut < start)
                 {
-                    return new ModeCommand(aim, 0) { WarpToUt = start };
+                    return new ModeCommand(aim, 0) { WarpToUt = CircularizeMode.WarpGate(v, t, start, ref _alignSince) };
                 }
                 double late = ut - start;
                 if (late > _lateLimit)
