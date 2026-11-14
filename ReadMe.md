@@ -198,6 +198,8 @@ stdout은 MCP 채널이므로 콘솔 로그는 모두 stderr로 나갑니다. �
 | 발사 | `launch_craft` | Tools |
 | 비행 계획 | `submit_flight_plan`, `replace_flight_steps`, `abort_flight` | Tools |
 | 비행 조회 | `get_flight`, `get_flight_events` | Tools |
+| 궤도 기동 | `add_maneuver_node`, `update_maneuver_node`, `remove_maneuver_node`, `plan_maneuver` | Tools |
+| 기체·목표 | `list_vessels`, `set_target` | Tools |
 | 시간 가속 | `set_time_warp` | Tools |
 | 리셋·회수 | `revert_flight`, `leave_flight`, `recover_vessel` | Tools |
 | SAS·RCS | `set_sas`, `set_rcs`, `rcs_translate` | Tools |
@@ -218,6 +220,9 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 | `coast` | 스로틀 0, 기준 방향(기본 `prograde`, `none`이면 자세 제어 없음) 유지. 시간 조건이면 대기권 밖에서 레일 가속, 목표 15~10초 전에 해제 | `until` 필수 |
 | `circularize` | 원지점 전 시작 시각까지 기다렸다가(가속 포함) 원궤도화 연소. 시작 시각이나 원지점이 이미 지났으면 바로 연소, 자세 오차 5° 넘으면 스로틀 0 | 남은 Δv ≤ 잔여 추력 Δv + `tolerance`(0.5 m/s). 10 m/s 아래에서 방향을 고정한 뒤 Δv가 다시 커지거나 이심률이 5틱 동안 줄지 않아도 완료 |
 | `land` | 하강 중인 기체를 엔진 감속으로 착륙(동력 착륙). 지면 고도 = radar 고도 − 기체 바닥까지 거리. 최대 추력 × `margin`(0.8)으로 멈출 거리가 지면에 닿고 자세가 목표와 15° 이내면 연소 시작(여유가 없거나 `final_altitude`(20 m) 아래면 자세와 관계없이 시작). `final_altitude` 아래에서는 `final_speed`(2 m/s)로 하강. 자세는 수평 속도 1 m/s당 5°까지 수직에서 surface retrograde 쪽으로 기움. `gear_altitude`(500 m, `false`면 끔) 아래에서 Gear group 켬. 시간 가속은 하지 않으므로 긴 낙하는 앞 단계 `coast`로 | 접지 뒤 스로틀 0, 지표 속도 0.5 m/s·각속도 0.05 rad/s 미만이 2초 이어지면 완료 |
+| `execute_node` | 첫 기동 노드를 실행. 연소 시작(노드 시각 − 단별 연소 시간의 절반)까지 가속으로 기다렸다가 남은 Δv 방향으로 연소. 자세 오차 5°(끝 무렵 방향 고정 뒤 1°) 넘으면 스로틀 0. 시작 시각이 `late_limit_s`(10초) 넘게 지났으면 `node_missed` | 남은 Δv ≤ 잔여 추력 Δv + `tolerance`(0.2 m/s), 또는 방향 고정 뒤 Δv가 다시 커지면 완료하고 노드를 지움 |
+| `approach` | target 기체(또는 도킹 포트의 기체)에 다가감. 최근접 시각까지 가속으로 기다리고, 상대 속도를 없앤 뒤 `max_speed`(10 m/s) 이하로 접근(속도 오차 2 m/s 넘으면 주 엔진, 아래는 RCS 병진). 포트 target이면 포트 앞 `distance` 지점으로, 기체 뒤쪽이면 옆으로 돌아서 감. 예측 최근접 거리가 10 km를 넘으면 `target_too_far` | 목표 지점(기체는 `distance`(50 m) 안, 포트는 앞점 2 m 안)에서 상대 속도 0.2 m/s 미만이 3초 이어지면 완료 |
+| `dock` | target 도킹 포트(크기가 같고 비어 있어야 함)에 자기 포트를 맞춰 RCS 병진으로 결합. 자기 포트를 조종 기준으로 쓰고, 축 정렬(자세 오차 2° 이하)일 때만 전진. 접촉 뒤 결합이 안 되면 10 m 물러났다 다시 시도(`retries` 2), 넘으면 `dock_failed`. 맞는 포트가 여럿이면 `port`(부품 id) | 결합하면 완료. 계획은 결합 기체로 이어지고, 단계가 끝나면 조종 기준 부품을 되돌림 |
 
 발사부터 궤도까지 한 계획으로 날리는 예입니다(첫 점화는 `on_start: ["stage"]`가 필요합니다).
 
@@ -255,13 +260,41 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 - **추력 없음**: Mode가 스로틀 > 0을 원하는데 작동 중인 엔진이 없고 기다릴 스테이징도 없을 때입니다(엔진 없는 `coast`는 해당 없음). 제출과 `replace_flight_steps`(현재 단계 포함)는 409 `no_thrust`, 실행 중이면 `plan_aborted {reason: no_thrust}`입니다.
 - **RCS 사용**(모든 단계 공통 키 `rcs`): `true`·`false`면 그 단계가 시작될 때 RCS 그룹을 그 값으로 맞춥니다. 켜 두면 RCS 토크가 자세 제어에 더해집니다(진공에서 휠 토크가 작은 기체에 유용). 계획이 RCS를 바꾼 뒤 `rcs`를 생략한 단계가 시작되면 계획 전 상태로 되돌리고, 계획이 끝날 때도 되돌립니다. 단계 중에는 강제하지 않으므로 그 사이 키로 바꾼 RCS는 다음 단계 시작이나 계획 종료 때 다시 맞춰집니다. 스로틀 연동(`useThrottle`)이 켜진 RCS 부품은 RCS가 켜져 있으면 추진 중 스로틀에 따라 분사합니다(스톡 동작).
 - 실행 중인 계획의 뒤 단계(또는 현재 단계부터)는 `replace_flight_steps`로 바꿉니다. `abort_flight`는 스로틀 0, 시간 가속 해제(사용자가 건 가속 포함), SAS를 계획 전 상태와 모드로, RCS를 계획이 바꿨으면 계획 전 상태로 되돌리고 제어를 놓습니다(`plan_aborted {reason: user}`, 계획이 없으면 409 `no_plan`).
-- **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`, `revert`(`revert_flight`), `recover`(`recover_vessel`), `leave`(`leave_flight`).
+- **중단 reason**: `condition`(abort 조건), `timeout`, `user`, `no_thrust`, `error`, `scene`(씬 전환), `vessel_changed`(활성 기체 변경), `vessel_lost`(기체 파괴), `reload_incompatible`, `revert`(`revert_flight`), `recover`(`recover_vessel`), `leave`(`leave_flight`), 궤도 기동 Mode의 `no_node`, `node_missed`, `no_target`, `target_too_far`, `port_incompatible`, `dock_failed`. 궤도 기동 Mode의 이 사유는 첫 단계에서 나면 제출이 같은 코드의 409로 거부되고 아무것도 바뀌지 않습니다. 도킹으로 생긴 결합 기체로 바뀌는 것은 `vessel_changed`·`vessel_lost`로 보지 않습니다.
+- **궤도 기동 이벤트**: `node_burn_start`(`dv_planned`, `dv_remaining`, `burn_time`, `late_s`), `insufficient_dv`(단계 Δv가 노드보다 적음, 연소는 계속), `node_burn_done`(`reason` `dv`·`dv_growing`, `dv_executed`, `dv_remaining`, `orbit_after`), `approach_phase`(`wait`·`kill`·`close`), `approach_done`(`distance`, `relative_speed`, `goal` `vessel`·`port`), `rcs_unavailable`(`reason` `rcs_off`·`no_thrusters`·`no_propellant`), `dock_attempt`(`attempt`, `forced`, `contact_speed`, `lateral_error`), `docked`(`vessel_id`, `name`, `parts`, `attempts`), 그리고 계획과 관계없이 `soi_changed`(`vessel_id`, `from`, `to`).
 - **부품 진단 이벤트**: 계획 실행 여부와 관계없이, 로드된 기체(떨어져 나간 잔해 포함) 부품의 소멸과 원인을 `get_flight_events`와 KSP.log(`[KspBridge] part_...` 줄)에 같은 내용으로 남깁니다. `active`는 활성 기체 소속인지이고, `step`은 계획이 실행 중일 때 그 단계 번호, 아니면 -1입니다. 부품 이벤트는 계획 이벤트와 따로 보관(각 500건)하고 같은 `seq`로 이어 붙여 돌려주므로, 기체가 크게 부서져도 계획 이벤트가 밀려나지 않습니다. 오래된 이벤트가 밀려나면 `truncated`가 true입니다.
   - `part_lost`: 부품이 사라지기 직전 상태(기체 동압 `q_kpa`, `g`, 온도·한계). 회수·잔해 정리·EVA 탑승처럼 기체째 없어지는 경우는 남지 않습니다.
   - `part_collision`: 충돌(`kind` `part`·`crash`·`splashdown`, 상대 `other`, 상대 속도 `speed` m/s, `crash_tolerance`). 충돌로 부서진 부품은 `part_lost` 바로 뒤에 옵니다(KSP가 부품을 터뜨린 뒤 충돌 이벤트를 보냄).
   - `part_limit`: 과열·과압·과G(`kind` `overheat`·`pressure`·`g`, `msg` "현재 / 한계").
   - `part_joint_break`: 하중으로 접합부가 끊김(`parent`, 끊은 힘 `force`). 디커플러·도킹 해제 같은 정상 분리는 남지 않습니다.
   - KSP 자체 로그는 충돌 내용을 `VERBOSE_DEBUG_LOG`가 켜져 있을 때만 남기므로, 원인 확인은 이 이벤트로 합니다.
+
+### 궤도 기동
+
+KSP 기동 노드를 만들고(`add_maneuver_node` 직접, 또는 `plan_maneuver` 계산) 비행 계획 `execute_node` 단계로 실행합니다. 노드는 `get_flight.maneuver_nodes`, 목표는 `get_flight.target`(최근접 거리 `closest_approach` 포함)에 보입니다. 노드·목표 도구는 계획 실행 중에는 409 `plan_running`입니다.
+
+| 도구 | 하는 일 |
+| --- | --- |
+| `add_maneuver_node` | 궤도 위치(`at` `apoapsis`, `periapsis`, `ascending_node`, `descending_node`) 또는 `ut`에 노드를 만듦. Δv는 `prograde`, `normal`, `radial`(m/s) |
+| `update_maneuver_node`, `remove_maneuver_node` | `index`(0 = 가장 이른 노드)로 바꾸거나 지움. `remove_maneuver_node`는 `all: true`로 모두 |
+| `plan_maneuver` | `kind`별로 노드를 계산해 만듦: `change_apoapsis`, `change_periapsis`, `circularize`, `change_inclination`, `hohmann`(노드 2개), `transfer_body`(천체 전이), `capture`(SOI 진입 뒤 포획), `rendezvous_phase`(최근접 `distance`가 되는 전이), `correct_approach`(최근접 보정). 응답에 `total_dv`, `burn_time`, `dv_short`, KSP 예측 궤도 `predicted` |
+| `list_vessels` | 비행 씬의 기체 목록(가까운 순, 궤도·도킹 포트 `part_id`·크기·비어 있는지) |
+| `set_target` | target을 천체(`body`), 기체(`vessel_id`), 도킹 포트(`vessel_id` + `port`, 기체가 로드돼 있어야 함) 또는 해제(`clear`)로 둠 |
+
+- 30초 안의 궤도 위치 노드는 한 바퀴 뒤로 미룹니다(연소 준비 시간). 기존 노드는 `append: true`가 아니면 바꿉니다.
+- 랑데부·도킹은 `set_target` 기체 → `plan_maneuver rendezvous_phase` → `execute_node` → (필요하면 `correct_approach` → `execute_node`) → `approach` → `set_target` 포트 → `approach`(포트 앞점) → `dock` 순서입니다. `dock`·`approach` 단계는 `rcs: true`를 함께 주세요.
+- **알려진 제약**: `execute_node`는 늦게 시작하거나 긴 연소에서 남은 Δv가 0.2 m/s를 조금 넘을 수 있습니다(실측 0.22~0.28). `transfer_body`는 KSP 예측과 실제 근지점이 수십 km 다를 수 있습니다(Mun 실측 목표 30 km, 실제 93 km). `rendezvous_phase` 하나로는 최근접이 1 km 넘게 남을 수 있어(실측 예측 1,384 m) `correct_approach`로 줄입니다.
+
+```json
+{
+  "steps": [
+    { "name": "근접", "mode": "approach", "distance": 30, "rcs": true },
+    { "name": "도킹", "mode": "dock", "rcs": true, "timeout_s": 900 }
+  ]
+}
+```
+
+- 설계는 [궤도기동 설계 문서](docs/ksp-bridge/0032-궤도기동-설계.md), 단위별 구현과 실측은 [궤도기동 개발 문서](docs/ksp-bridge/0033-궤도기동-개발.md)에 있습니다.
 
 ### 리셋·회수
 
@@ -322,6 +355,7 @@ KSPBRIDGE_DEBUG
 | `debug_throttle_hold` | 엔진 하나의 자체 스로틀(`currentThrottle`)을 물리 틱마다 `throttle`(0~1)로 고정해 계획의 스로틀을 무시하게 함. 실행 중인 비행 계획이 있어야 하고(없으면 409 `no_plan`), 계획이 끝나거나 중단되면 해제. `throttle` null이면 해제. 부품이 활성 기체를 떠나도 해제 |
 | `debug_reload_fault` | 다음 `reload_mod` 한 번을 실패시킴. `start_failures` 1: 새 Logic 시작 실패(로더가 이전 Logic 재시작), 2: 이전 Logic 재시작도 실패(이중 실패, `get_status.logic_error`). `handover_failures` 1~3: 핸드오버 직렬화를 그 단계까지 실패(1: 계획 중단·이벤트 유지, 2: 이벤트 커서만, 3: 아무것도 넘기지 않음·epoch 변경). `start_failures` ≥ 1과 `handover_failures` 3은 함께 쓸 수 없음. 둘 다 0이면 해제 |
 | `debug_add_part_timeout` | `on` true면 부모에 붙이는 `add_part`가 메인 스레드 무응답처럼 `timeout`으로 실패. 만들어진 부품은 나중에 치워지고 Player.log에 `discarded N loose part(s) after a timeout`. 루트 배치는 영향 없음 |
+| `debug_dock_reject` | `dock` Mode의 다음 `count`(0~10)번 시도를 접촉 2 m 앞에서 멈춰 실패로 처리(`dock_attempt {forced: true}`). 재시도·`dock_failed` 경로 확인용. `0`이면 해제 |
 
 - 설계는 [디버그도구 설계 문서](docs/ksp-bridge/0019-디버그도구-설계.md), 단위별 구현과 실측은 [디버그도구 개발 문서](docs/ksp-bridge/0020-디버그도구-개발.md)에 있습니다.
 

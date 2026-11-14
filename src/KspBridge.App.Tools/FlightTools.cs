@@ -116,7 +116,7 @@ namespace KspBridge.App
             "at ascending_node|descending_node|auto, default auto = the node at the larger radius; any point when already coplanar), " +
             "hohmann (altitude of the target circular orbit; two nodes: transfer and arrival circularization; at apoapsis|periapsis|ut|auto, auto = now + 60 s), " +
             "transfer_body (needs a body target orbiting the same parent, e.g. set_target Mun, and a near-circular orbit; periapsis = wanted periapsis altitude inside the body's SOI; " +
-            "one transfer node; returns computed_periapsis and predicted.encounter / encounter_periapsis from KSP; correct after the SOI change with change_periapsis at ut), " +
+            "one transfer node; returns computed_periapsis and predicted.encounter / encounter_periapsis from KSP; the actual periapsis after the burn can differ by tens of km, check it after the SOI change), " +
             "capture (at the periapsis of the current orbit, also a hyperbola after an SOI entry; altitude = wanted apoapsis, default the periapsis altitude = circular), " +
             "rendezvous_phase (needs a vessel or docking-port target on the same body; both orbits near-circular e ≤ 0.05 and within 1° of each other, else orbits_not_coplanar_circular; " +
             "altitudes at least 1 km apart, else no_transfer_window; one transfer node timed so the closest approach is distance, default 200 m), " +
@@ -180,7 +180,18 @@ namespace KspBridge.App
             "events landing_infeasible (accel judged before and during the burn, dv only during it; once each; a burning tick where it holds gets throttle 1 " +
             "unless the axis is still turning after a forced start or points below the horizon), touchdown, landed {tilt_deg, tipped}; throttle 0 after touchdown " +
             "and completes by itself once landed and still (speed < 0.5 m/s, angular speed < 0.05 rad/s) for 2 s, so add timeout_s if it may keep sliding; " +
-            "submitted on an already landed vessel it reports touchdown and landed at once (refused with no_thrust if no engine is running; on the pad, PRELAUNCH is not landed, so the step does not end by itself); no warp: put a coast step before it). " +
+            "submitted on an already landed vessel it reports touchdown and landed at once (refused with no_thrust if no engine is running; on the pad, PRELAUNCH is not landed, so the step does not end by itself); no warp: put a coast step before it); " +
+            "execute_node (the first maneuver node, e.g. from plan_maneuver; tolerance 0.2 m/s, late_limit_s 10: warps to the burn start (half the burn before the node, " +
+            "staged burn time), burns along the node's remaining Δv only while attitude_error <= 5 deg (1 deg once the direction is locked near the end), " +
+            "completes when the remaining Δv is within tolerance or starts growing and removes the node; events node_burn_start, insufficient_dv, node_burn_done); " +
+            "approach (set_target vessel or docking port first; distance 50 m (1..1000), max_speed 10 m/s: warps to the closest approach, kills the relative velocity, " +
+            "then closes at most max_speed (main engine for velocity errors above 2 m/s, RCS translation below; engine only without RCS); a port target is approached to the point distance in front of the port, around the target " +
+            "when behind it; completes holding at the goal below 0.2 m/s for 3 s; the closest approach must be within 10 km (rendezvous first); events approach_phase, approach_done, rcs_unavailable); " +
+            "dock (target a free docking port of the same size; port = own port part id when more than one fits, retries 2 (0..10): uses the own port as the control point, " +
+            "aligns with the target port axis and translates in with RCS (rcs true recommended), backs off 10 m and retries when contact does not couple; " +
+            "on docking the plan continues on the merged vessel and the control point is restored when the step ends; events dock_attempt, docked, rcs_unavailable). " +
+            "First-step refusals (409, nothing applied) and later plan_aborted reasons of these modes: no_node, node_missed (burn start passed by more than late_limit_s), " +
+            "no_target, target_too_far, port_incompatible, dock_failed (retries used up or no RCS translation). " +
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
@@ -266,6 +277,11 @@ namespace KspBridge.App
             "landing_infeasible {reason accel|dv, a_req, a_max, a_max_basis best|actual, dv_need, dv_left, altitude} (land; once per step and reason; " +
             "altitude = ground height of the vessel bottom, not the sea-level altitude; dv_need/dv_left are null for accel, a_req is null below final_altitude), " +
             "touchdown {vertical_speed (up positive, negative when descending), horizontal_speed, situation} (land; first ground contact, or the first tick when submitted already landed), landed {tilt_deg, tipped (tilt > 45), time_since_touchdown_s} (land; on completion), " +
+            "node_burn_start {dv_planned, dv_remaining, burn_time, late_s, node_ut}, insufficient_dv {dv_node, dv_available} (execute_node; the burn still runs), " +
+            "node_burn_done {reason dv|dv_growing, dv_planned, dv_executed, dv_remaining, burn_s, orbit_after} (execute_node), " +
+            "approach_phase {phase wait|kill|close, distance, relative_speed}, approach_done {distance, relative_speed, goal vessel|port} (approach), " +
+            "rcs_unavailable {reason rcs_off|no_thrusters|no_propellant} (approach, dock), dock_attempt {attempt, forced (debug_dock_reject), contact_speed, lateral_error}, " +
+            "docked {vessel_id, name, parts, attempts} (dock), soi_changed {vessel_id, from, to} (any vessel; step -1 without a plan), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +
