@@ -21,8 +21,14 @@ namespace KspBridge.Flight
         public double MaxTailoffS;
         public double SettleDistance;
         public double MaxSettleS;
+        public double MaxSeparateQ;        // kPa: a parallel separation waits while the dynamic pressure is above this (#16)
+        public double MaxSeparateQWaitS;   // s: then it separates anyway (separation_forced)
 
-        public static readonly StagingOptions Default = new StagingOptions { TailoffRatio = 0.05, MaxTailoffS = 5, SettleDistance = 2, MaxSettleS = 3 };
+        public static readonly StagingOptions Default = new StagingOptions
+        {
+            TailoffRatio = 0.05, MaxTailoffS = 5, SettleDistance = 2, MaxSettleS = 3,
+            MaxSeparateQ = 25, MaxSeparateQWaitS = 30,   // TestB: boosters hit the core at 35 kPa and above, none at 30 (0027 unit 2)
+        };
 
         public static StagingOptions Parse(object raw, string path)
         {
@@ -31,13 +37,15 @@ namespace KspBridge.Flight
                 return Default;
             }
             Dictionary<string, object> o = raw as Dictionary<string, object> ?? throw Plan.Invalid(path, "must be an object");
-            Plan.UnknownKeys(o, new[] { "tailoff_ratio", "max_tailoff_s", "settle_distance", "max_settle_s" }, path);
+            Plan.UnknownKeys(o, new[] { "tailoff_ratio", "max_tailoff_s", "settle_distance", "max_settle_s", "max_separate_q", "max_separate_q_wait_s" }, path);
             return new StagingOptions
             {
                 TailoffRatio = Plan.OptionalNumber(o, "tailoff_ratio", path, 0, 1, Default.TailoffRatio),
                 MaxTailoffS = Plan.OptionalNumber(o, "max_tailoff_s", path, 0, 600, Default.MaxTailoffS),
                 SettleDistance = Plan.OptionalNumber(o, "settle_distance", path, 0, 1000, Default.SettleDistance),
                 MaxSettleS = Plan.OptionalNumber(o, "max_settle_s", path, 0, 600, Default.MaxSettleS),
+                MaxSeparateQ = Plan.OptionalNumber(o, "max_separate_q", path, 0, 1000, Default.MaxSeparateQ),
+                MaxSeparateQWaitS = Plan.OptionalNumber(o, "max_separate_q_wait_s", path, 0, 600, Default.MaxSeparateQWaitS),
             };
         }
     }
@@ -54,6 +62,7 @@ namespace KspBridge.Flight
         private static StagingState _state = StagingState.None;
         private static double _since;                     // UT the current state was entered
         private static double _burnoutUt, _separateUt, _settleUt;
+        private static double _heldUt;                     // UT the dynamic-pressure wait began (0: none)
         private static int _ticks;
         private static bool _parallel;
         private static double _lastUt = double.NegativeInfinity;
@@ -159,6 +168,19 @@ namespace KspBridge.Flight
                             EndWithLatch(v, "out_of_stages", ut);
                             break;
                         }
+                        if (_parallel)
+                        {
+                            _parallel = IsParallel(v);   // the core may run dry while the boosters wait
+                            if (!_parallel)
+                            {
+                                _since = ut;             // serial from here: the throttle-down wait starts now
+                                _ticks = 0;
+                            }
+                        }
+                        if (_parallel && !HeldForQ(v, o, ut))
+                        {
+                            break;
+                        }
                         if (!_parallel)
                         {
                             if (newTick)
@@ -180,7 +202,7 @@ namespace KspBridge.Flight
                     {
                         case StageRequest.Result.Done:
                             _request = null;
-                            Staged(v, "separate");
+                            StagedSeparate(v);
                             if (_parallel)
                             {
                                 Enter(StagingState.Ignite, ut);
@@ -250,6 +272,7 @@ namespace KspBridge.Flight
                 ["stage"] = v.currentStage,
                 ["tailoff_s"] = hadSequence ? Math.Round(_separateUt - _burnoutUt, 3) : 0.0,
                 ["settle_s"] = hadSequence && !_parallel && _settleUt > 0 ? Math.Round(ut - _settleUt, 3) : 0.0,
+                ["held_s"] = _heldUt > 0 ? Math.Round(ut - _heldUt, 3) : 0.0,
                 ["ignited"] = t.PrevModeThrottle > 0,   // the mode wanted thrust last tick (false while coasting up)
             });
             ResetSequence(ut);
@@ -262,6 +285,7 @@ namespace KspBridge.Flight
             _parallel = false;
             _before = null;
             _burnoutUt = _separateUt = _settleUt = 0;
+            _heldUt = 0;
         }
 
         private static void EndWithLatch(Vessel v, string kind, double ut)
@@ -276,6 +300,40 @@ namespace KspBridge.Flight
 
         private static void Staged(Vessel v, string reason) =>
             FlightEvents.Add("staged", Coordinator.StepIndex, new Dictionary<string, object> { ["stage"] = v.currentStage, ["reason"] = reason });
+
+        /// <summary>A separation's staged event carries the dynamic pressure it happened at (#16).</summary>
+        private static void StagedSeparate(Vessel v) =>
+            FlightEvents.Add("staged", Coordinator.StepIndex, new Dictionary<string, object>
+            {
+                ["stage"] = v.currentStage,
+                ["reason"] = "separate",
+                ["q_kpa"] = Math.Round(v.dynamicPressurekPa, 3),
+            });
+
+        /// <summary>Parallel separation gate (#16): above max_separate_q a booster dropped into the airflow decelerates faster than
+        /// the decoupler pushes it aside and hits the core. True = separate now.</summary>
+        private static bool HeldForQ(Vessel v, StagingOptions o, double ut)
+        {
+            double q = v.dynamicPressurekPa;
+            if (!(q > o.MaxSeparateQ))
+            {
+                return true;
+            }
+            if (_heldUt == 0)
+            {
+                _heldUt = ut;
+                QEvent("separation_held", v, q);
+            }
+            if (ut - _heldUt < o.MaxSeparateQWaitS)
+            {
+                return false;
+            }
+            QEvent("separation_forced", v, q);
+            return true;
+        }
+
+        private static void QEvent(string type, Vessel v, double q) =>
+            FlightEvents.Add(type, Coordinator.StepIndex, new Dictionary<string, object> { ["stage"] = v.currentStage, ["q_kpa"] = Math.Round(q, 3) });
 
         // ---- on_start ----
 
@@ -683,7 +741,14 @@ namespace KspBridge.Flight
             }
             if (_request != null && _request.Sent && v.currentStage < _request.StageBefore)
             {
-                Staged(v, _state == StagingState.Separate ? "separate" : "ignite");
+                if (_state == StagingState.Separate)
+                {
+                    StagedSeparate(v);
+                }
+                else
+                {
+                    Staged(v, "ignite");
+                }
             }
             if (_onStart != null && _onStart.Sent && v.currentStage < _onStart.StageBefore)
             {
@@ -748,6 +813,7 @@ namespace KspBridge.Flight
                 ["burnout_ut"] = _burnoutUt,
                 ["separate_ut"] = _separateUt,
                 ["settle_ut"] = _settleUt,
+                ["held_ut"] = _heldUt,
                 ["ticks"] = (double)_ticks,
                 ["parallel"] = _parallel,
                 ["last_ut"] = _lastUt,
@@ -769,6 +835,7 @@ namespace KspBridge.Flight
             _burnoutUt = Handover.D(d, "burnout_ut");
             _separateUt = Handover.D(d, "separate_ut");
             _settleUt = Handover.D(d, "settle_ut");
+            _heldUt = Handover.D(d, "held_ut", 0);
             _ticks = (int)Handover.D(d, "ticks", 0);
             _parallel = Handover.B(d, "parallel");
             _lastUt = Handover.D(d, "last_ut", double.NegativeInfinity);
@@ -801,7 +868,14 @@ namespace KspBridge.Flight
             StagingState state = (StagingState)(int)Handover.D(staging, "state", 0);
             if (request != null && request.Sent && v.currentStage < request.StageBefore)
             {
-                Staged(v, state == StagingState.Separate ? "separate" : "ignite");
+                if (state == StagingState.Separate)
+                {
+                    StagedSeparate(v);
+                }
+                else
+                {
+                    Staged(v, "ignite");
+                }
             }
             if (onStart != null && onStart.Sent && v.currentStage < onStart.StageBefore)
             {
