@@ -173,6 +173,96 @@ namespace KspBridge.Flight.Maneuver
             radial = Vector3d.Exclude(prograde, r).normalized;
         }
 
+        // ---- analytic burns (plan_maneuver) -------------------------------------------------------------------------------
+
+        /// <summary>A node to create: UT and Δv as a world vector.</summary>
+        public struct NodeSpec
+        {
+            public double Ut;
+            public Vector3d DvWorld;
+
+            public NodeSpec(double ut, Vector3d dvWorld)
+            {
+                Ut = ut;
+                DvWorld = dvWorld;
+            }
+        }
+
+        /// <summary>Makes the node point an apsis and puts the other apsis at newR: the velocity becomes horizontal with the
+        /// speed of the ellipse through rNow and newR. raiseApo: newR is the apoapsis (must be ≥ the node radius), else the
+        /// periapsis (≤ the node radius); the opposite meaning is a 400.</summary>
+        public static NodeSpec ChangeApsis(Orbit o, double ut, double newR, bool raiseApo)
+        {
+            StateWorld(o, ut, out Vector3d r, out Vector3d vel);
+            double rNow = r.magnitude;
+            if (raiseApo ? newR < rNow : newR > rNow)
+            {
+                double alt = rNow - o.referenceBody.Radius;
+                throw ApiException.BadRequest((raiseApo ? "apoapsis below" : "periapsis above") + " the node point altitude "
+                    + alt.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m");
+            }
+            double a = (rNow + newR) / 2;
+            double vNew = Math.Sqrt(o.referenceBody.gravParameter * (2 / rNow - 1 / a));
+            Vector3d horiz = Vector3d.Exclude(r, vel).normalized;
+            return new NodeSpec(ut, horiz * vNew - vel);
+        }
+
+        /// <summary>Circular orbit through the node point: horizontal velocity at the circular speed.</summary>
+        public static NodeSpec Circularize(Orbit o, double ut)
+        {
+            StateWorld(o, ut, out Vector3d r, out Vector3d vel);
+            double vCirc = Math.Sqrt(o.referenceBody.gravParameter / r.magnitude);
+            Vector3d horiz = Vector3d.Exclude(r, vel).normalized;
+            return new NodeSpec(ut, horiz * vCirc - vel);
+        }
+
+        /// <summary>The orbit after applying n to o (state vectors at n.Ut).</summary>
+        public static Orbit After(Orbit o, NodeSpec n)
+        {
+            Vector3d pos = o.getRelativePositionAtUT(n.Ut);
+            Vector3d vel = o.getOrbitalVelocityAtUT(n.Ut) + n.DvWorld.xzy;   // world → orbit frame (swizzle is its own inverse)
+            Orbit after = new Orbit();
+            after.UpdateFromStateVectors(pos, vel, o.referenceBody, n.Ut);
+            return after;
+        }
+
+        /// <summary>Hohmann transfer to a circular orbit of radius r2: the transfer burn at ut1 and the circularization at the
+        /// other apsis half a transfer period later.</summary>
+        public static List<NodeSpec> Hohmann(Orbit o, double r2, double ut1)
+        {
+            StateWorld(o, ut1, out Vector3d r, out _);
+            NodeSpec burn1 = ChangeApsis(o, ut1, r2, raiseApo: r2 > r.magnitude);
+            Orbit transfer = After(o, burn1);
+            double ut2 = ut1 + Math.PI * Math.Sqrt(Math.Pow(transfer.semiMajorAxis, 3) / o.referenceBody.gravParameter);
+            return new List<NodeSpec> { burn1, Circularize(transfer, ut2) };
+        }
+
+        /// <summary>
+        /// Plane change at ut (a node of o on the plane with refNormal, or any point when they are coplanar): keeps the radial
+        /// and horizontal speeds and turns the horizontal direction about the radius so the new orbit normal is incDeg from
+        /// refNormal, on the side nearer the current normal.
+        /// </summary>
+        public static NodeSpec ChangeInclination(Orbit o, double ut, Vector3d refNormal, double incDeg)
+        {
+            StateWorld(o, ut, out Vector3d r, out Vector3d vel);
+            Vector3d rHat = r.normalized;
+            Vector3d n = NormalWorld(o, ut);
+            Vector3d refN = Vector3d.Exclude(rHat, refNormal).normalized;   // the node point lies in the plane: refN ⟂ r̂
+            Vector3d side = Vector3d.Cross(rHat, refN).normalized;
+            double i = incDeg * Math.PI / 180;
+            Vector3d n1 = Math.Cos(i) * refN + Math.Sin(i) * side;
+            Vector3d n2 = Math.Cos(i) * refN - Math.Sin(i) * side;
+            Vector3d nNew = Vector3d.Dot(n1, n) >= Vector3d.Dot(n2, n) ? n1 : n2;
+            double vr = Vector3d.Dot(vel, rHat);
+            Vector3d vh = vel - vr * rHat;
+            Vector3d hDir = Vector3d.Cross(nNew, rHat).normalized;   // ⟂ r̂ and ⟂ the new normal
+            if (Vector3d.Dot(hDir, vh) < 0)
+            {
+                hDir = -hDir;
+            }
+            return new NodeSpec(ut, vr * rHat + vh.magnitude * hDir - vel);
+        }
+
         internal static object Num(double x) => double.IsNaN(x) || double.IsInfinity(x) ? null : (object)Math.Round(x, 3);
 
         internal static bool Finite(double x) => !double.IsNaN(x) && !double.IsInfinity(x);

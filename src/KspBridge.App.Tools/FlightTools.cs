@@ -85,6 +85,26 @@ namespace KspBridge.App
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/nodes/add", new { at, ut, prograde, normal, radial }, ct);
 
+        [McpServerTool(Name = "plan_maneuver", Destructive = true)]
+        [Description("Compute and create KSP maneuver nodes for a target orbit on the active vessel (execute them with the flight-plan mode execute_node, one node per step). " +
+            "kind: change_apoapsis (altitude; at apoapsis|periapsis|ut, default periapsis: the node point becomes the periapsis), " +
+            "change_periapsis (altitude; at default apoapsis), circularize (at default apoapsis), " +
+            "change_inclination (inclination deg against the target's orbit plane when the target orbits the same body, else the equator; " +
+            "at ascending_node|descending_node|auto, default auto = the node at the larger radius; any point when already coplanar), " +
+            "hohmann (altitude of the target circular orbit; two nodes: transfer and arrival circularization; at apoapsis|periapsis|ut|auto, auto = now + 60 s). " +
+            "Altitudes are above sea level, above the atmosphere and inside the SOI. Existing nodes are replaced unless append: true (plans from the orbit after the last node). " +
+            "Not while a flight plan runs (plan_running). Errors: bad_request (an apoapsis below / periapsis above the node point, altitude out of range, at not allowed), " +
+            "no_solution (undefined time or a non-finite result), nodes_unavailable. Returns {maneuver_nodes, created, total_dv, burn_time, dv_short, predicted (KSP's orbit after the last node)}.")]
+        public Task<string> PlanManeuver(
+            [Description("change_apoapsis, change_periapsis, circularize, change_inclination or hohmann")] string kind,
+            [Description("Target altitude m above sea level (change_apoapsis, change_periapsis, hohmann)")] double? altitude = null,
+            [Description("Target inclination deg (change_inclination)")] double? inclination = null,
+            [Description("Node position: apoapsis, periapsis, ascending_node, descending_node, ut or auto (allowed values depend on kind)")] string? at = null,
+            [Description("Node time (game UT seconds) with at ut")] double? ut = null,
+            [Description("true = keep the existing nodes and plan after the last one")] bool? append = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append }, ct);
+
         [McpServerTool(Name = "update_maneuver_node", Destructive = true)]
         [Description("Change a maneuver node of the active vessel: index from get_flight.maneuver_nodes (0 = earliest); only the given fields change " +
             "(ut not in the past; prograde, normal, radial m/s). Not while a flight plan runs (plan_running). Errors: nodes_unavailable, bad_request " +

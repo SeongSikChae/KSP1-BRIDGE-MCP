@@ -99,9 +99,13 @@ namespace KspBridge.App.Tests
             await tools.UpdateManeuverNode(0, normal: 50, ct: ct);
             await tools.RemoveManeuverNode(1, ct: ct);
             await tools.RemoveManeuverNode(all: true, ct: ct);
+            await tools.PlanManeuver("hohmann", altitude: 120000, ct: ct);
+            await tools.PlanManeuver("change_inclination", inclination: 5, at: "auto", append: true, ct: ct);
 
             var r = handler.Requests;
-            Assert.HasCount(5, r);
+            Assert.HasCount(7, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"hohmann","altitude":120000,"inclination":null,"at":null,"ut":null,"append":null}"""), r[5]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"change_inclination","altitude":null,"inclination":5,"at":"auto","ut":null,"append":true}"""), r[6]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":"apoapsis","ut":null,"prograde":100,"normal":0,"radial":0}"""), r[0]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":null,"ut":1234.5,"prograde":0,"normal":-20,"radial":3}"""), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/update", (string?)"""{"index":0,"ut":null,"prograde":null,"normal":50,"radial":null}"""), r[2]);
