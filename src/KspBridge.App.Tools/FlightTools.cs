@@ -84,8 +84,10 @@ namespace KspBridge.App
             "minus the vessel bottom; starts the burn when the vertical stopping distance at margin × full thrust reaches the ground and the axis is within 15 deg " +
             "of the target, or regardless of attitude once there is no margin left or below final_altitude; then holds final_speed below final_altitude; " +
             "the attitude tilts from vertical toward surface retrograde by 5 deg per m/s of horizontal speed; turns on the Gear group at gear_altitude; " +
-            "events landing_infeasible (accel|dv, once each), touchdown, landed {tilt_deg, tipped}; throttle 0 after touchdown and completes by itself once landed " +
-            "and still (speed < 0.5 m/s, angular speed < 0.05 rad/s) for 2 s; no warp: put a coast step before it). " +
+            "events landing_infeasible (accel judged before and during the burn, dv only during it; once each; a burning tick where it holds gets throttle 1 " +
+            "unless the axis is still turning after a forced start or points below the horizon), touchdown, landed {tilt_deg, tipped}; throttle 0 after touchdown " +
+            "and completes by itself once landed and still (speed < 0.5 m/s, angular speed < 0.05 rad/s) for 2 s, so add timeout_s if it may keep sliding; " +
+            "submitted on an already landed vessel it reports touchdown and landed at once (refused with no_thrust if no engine is running; on the pad, PRELAUNCH is not landed, so the step does not end by itself); no warp: put a coast step before it). " +
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight, orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
@@ -168,8 +170,9 @@ namespace KspBridge.App
             "staging_completed {stage, tailoff_s, settle_s, held_s (dynamic-pressure wait), ignited}, separation_held {stage, q_kpa}, " +
             "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage, pause_s}, " +
             "out_of_stages, ignite_blocked, stage_failed, warp_started, warp_stopped {rate, until_ut} (plan warps only), warp_unavailable {reason player_warp|not_supported|mode_switch_refused}, " +
-            "landing_infeasible {reason accel|dv, a_req, a_max, a_max_basis best|actual, dv_need, dv_left, altitude} (land; once per step and reason), " +
-            "touchdown {vertical_speed, horizontal_speed, situation} (land; first contact), landed {tilt_deg, tipped (tilt > 45), time_since_touchdown_s} (land; on completion), " +
+            "landing_infeasible {reason accel|dv, a_req, a_max, a_max_basis best|actual, dv_need, dv_left, altitude} (land; once per step and reason; " +
+            "altitude = ground height of the vessel bottom, not the sea-level altitude; dv_need/dv_left are null for accel, a_req is null below final_altitude), " +
+            "touchdown {vertical_speed (up positive, negative when descending), horizontal_speed, situation} (land; first ground contact, or the first tick when submitted already landed), landed {tilt_deg, tipped (tilt > 45), time_since_touchdown_s} (land; on completion), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
             "part_lost {part, part_id, vessel_id, active, vessel, q_kpa, g, temp, max_temp, skin_temp, skin_max_temp} (not for whole-vessel removal: recovery, debris cleanup, EVA boarding), " +

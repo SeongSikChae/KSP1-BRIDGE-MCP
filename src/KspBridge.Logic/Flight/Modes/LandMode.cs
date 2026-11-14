@@ -188,7 +188,7 @@ namespace KspBridge.Flight.Modes
 
             if (!_burning)
             {
-                Judge(v, t, h, vv, aReq, maxAccel, "best", g);   // before the burn too, against the best attitude
+                Judge(v, t, h, vv, aReq, maxAccel, "best", g, false);   // before the burn: accel only, against the best attitude
                 // normal start: axis near the actual target direction (not the tilt limit), judged with the target's cos so
                 // an axis tilted past the target does not start high; forced starts: near the ground, or no margin even
                 // with a vertical axis
@@ -232,7 +232,7 @@ namespace KspBridge.Flight.Modes
             // misaligned (after a forced start, before the first alignment): judge against the best attitude and do not
             // force full throttle, so a still-turning axis neither reports a false accel nor burns hard the wrong way
             double aCap = misaligned ? maxAccel : aMaxV;
-            if (Judge(v, t, h, vv, aReq, aCap, misaligned ? "best" : "actual", g) && !misaligned && cos > 0)
+            if (Judge(v, t, h, vv, aReq, aCap, misaligned ? "best" : "actual", g, true) && !misaligned && cos > 0)
             {
                 throttle = 1;   // this tick only; back to the computed throttle once it clears
             }
@@ -250,8 +250,8 @@ namespace KspBridge.Flight.Modes
 
         /// <summary>Infeasibility on this tick (no latch). aCap: MaxAccel (best attitude) before the burn and while _aligning
         /// after a forced start, otherwise the actual vertical capacity aMaxV; basis says which. Reports once per step and
-        /// reason.</summary>
-        private bool Judge(Vessel v, Telemetry t, double h, double vv, double aReq, double aCap, string basis, double g)
+        /// reason. checkDv: the dv reason is judged only while burning (before it the descent still loses speed to drag).</summary>
+        private bool Judge(Vessel v, Telemetry t, double h, double vv, double aReq, double aCap, string basis, double g, bool checkDv)
         {
             if (!(vv > _finalSpeed))
             {
@@ -264,7 +264,7 @@ namespace KspBridge.Flight.Modes
                 Report("accel", aReq, aCap, basis, double.NaN, double.NaN, h);
             }
             double dvLeft = t.Num["total_dv"];
-            if (!double.IsNaN(dvLeft) && aCap > g)
+            if (checkDv && !double.IsNaN(dvLeft) && aCap > g)   // dv only while burning: before it, drag is not counted and would report a false shortfall
             {
                 double dvNeed = v.srfSpeed + g * vv / (aCap - g);   // speed + gravity loss over the vertical stop
                 if (dvLeft < dvNeed)

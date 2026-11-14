@@ -245,7 +245,8 @@ MCP 클라이언트(Planner)가 단계 목록으로 계획을 세워 `submit_fli
 }
 ```
 
-- **착륙 이벤트**(`land`): `landing_infeasible`(`reason` `accel`: 최대 추력으로도 못 멈춤, `dv`: 남은 Δv 부족. `a_max_basis` `best`는 최선 자세 기준, `actual`은 실제 기체 축 기준. 단계마다 이유별 1회. 판정이 참인 연소 중 틱은 스로틀 1), `touchdown`(처음 접지한 순간의 `vertical_speed`·`horizontal_speed`), `landed`(완료 때 `tilt_deg`, 45° 넘으면 `tipped: true`). 부품 손상은 아래 부품 진단 이벤트로 확인합니다.
+- **착륙 이벤트**(`land`): `landing_infeasible`(`reason` `accel`: 최대 추력으로도 못 멈춤(연소 전에도 판정), `dv`: 남은 Δv 부족(연소 중에만 판정. 연소 전 고속 하강은 대기 항력을 계산에 넣지 않아 오보가 나기 때문). `a_max_basis` `best`는 최선 자세 기준, `actual`은 실제 기체 축 기준. `altitude`는 기체 바닥의 지면 고도로 `get_flight`의 해수면 `altitude`와 다릅니다. 값이 없는 필드는 null(`accel`이면 `dv_need`·`dv_left`, `final_altitude` 아래면 `a_req`). 단계마다 이유별 1회. 판정이 참인 연소 중 틱은 스로틀 1이지만, 강제 시작 뒤 자세가 아직 목표와 15° 안에 들지 않았거나 기체 축이 수평 아래면 올리지 않음), `touchdown`(처음 접지한 순간의 `vertical_speed`(위쪽 양수, 하강 접지는 음수)·`horizontal_speed`), `landed`(완료 때 `tilt_deg`, 45° 넘으면 `tipped: true`). 부품 손상은 아래 부품 진단 이벤트로 확인합니다.
+- 접지 뒤 계속 미끄러지면 정지 조건을 채우지 못해 단계가 끝나지 않으므로, 필요하면 `timeout_s`를 두세요. 이미 착지한 기체에 `land`를 내면 첫 틱에 `touchdown`, 2초 뒤 `landed`로 끝납니다(엔진이 꺼져 있으면 409 `no_thrust`로 거부. 발사대의 `PRELAUNCH`는 착지로 보지 않으므로 단계가 스스로 끝나지 않음). Player.log에는 `[KspBridge] land` 줄(연소 시작·Gear·바닥 거리·접지, 연소 중과 접지 뒤 10초는 1초 간격 진단)이 남습니다.
 - 착륙 다리가 엔진 노즐보다 짧으면 노즐로 접지해 넘어질 수 있습니다. 다리를 노즐보다 아래까지 닿게 붙이세요(실측 기체는 LT-2를 연료통 맨 아래에 붙임).
 
 - 조건(`until`, `abort`)은 `{var, op, value, for_s?}`, `{all: [...]}`, `{any: [...]}`, 배열 `[...]`(= `all`)입니다. `op`는 `<`, `<=`, `>`, `>=`, `==`, `!=`이고, 문자열 변수(`situation`, `staging`)는 `==`, `!=`만 됩니다. 값을 모르는(null) 변수는 거짓입니다. 예: `{"var": "apoapsis", "op": ">=", "value": 150000}`.
