@@ -71,6 +71,18 @@ namespace KspBridge.Flight.Modes
         /// <summary>Interval (s) of the burn telemetry log line.</summary>
         private const double DiagS = 0.25;
 
+        /// <summary>Surface speed (m/s) below which a landed vessel counts as still.</summary>
+        private const double StillSpeed = 0.5;
+
+        /// <summary>Seconds the vessel must stay landed and still to complete.</summary>
+        private const double StillS = 2;
+
+        /// <summary>Tilt (deg) from vertical above which the landed event reports tipped.</summary>
+        private const double TippedDeg = 45;
+
+        private bool _touched;
+        private double _touchUt;
+        private double _stillSince = double.NaN;   // NaN = not still
         private readonly List<string> _infeasible = new List<string>();   // landing_infeasible reasons already reported
         private double _diagUt;
         private bool _burning;
@@ -99,6 +111,41 @@ namespace KspBridge.Flight.Modes
             double vv = -v.verticalSpeed;   // down positive
             double vh = Vector3d.Exclude(up, v.srf_velocity).magnitude;
             double cos = Vector3d.Dot(v.ReferenceTransform.up, up);
+
+            // after the first touchdown: throttle 0, hold vertical, complete once landed and still for StillS
+            bool landed = v.situation == Vessel.Situations.LANDED || v.situation == Vessel.Situations.SPLASHED;
+            double ut = Planetarium.GetUniversalTime();
+            // Not in the submit trial: its events are committed after plan_started with the previous plan's step index
+            // (the Coordinator sets the step after the trial); the first real Tick records the touchdown.
+            if (landed && !_touched && !FlightEvents.InTrial)
+            {
+                _touched = true;
+                _touchUt = ut;
+                Log("touchdown: vv=" + F(v.verticalSpeed, 2) + " vh=" + F(vh, 2) + " sit=" + v.situation + " h=" + F(h, 2));
+                FlightEvents.Add("touchdown", Coordinator.StepIndex, new Dictionary<string, object>
+                {
+                    ["vertical_speed"] = R(v.verticalSpeed),
+                    ["horizontal_speed"] = R(vh),
+                    ["situation"] = v.situation.ToString(),
+                });
+            }
+            if (_touched)
+            {
+                _stillSince = landed && v.srfSpeed < StillSpeed ? (double.IsNaN(_stillSince) ? ut : _stillSince) : double.NaN;
+                if (!double.IsNaN(_stillSince) && ut - _stillSince >= StillS && !Done)
+                {
+                    double tilt = Vector3d.Angle(v.ReferenceTransform.up, up);
+                    Log("landed: tilt=" + F(tilt, 1) + " since_touchdown=" + F(ut - _touchUt, 2));
+                    FlightEvents.Add("landed", Coordinator.StepIndex, new Dictionary<string, object>
+                    {
+                        ["tilt_deg"] = R(tilt),
+                        ["tipped"] = tilt > TippedDeg,
+                        ["time_since_touchdown_s"] = R(ut - _touchUt),
+                    });
+                    Done = true;
+                }
+                return new ModeCommand(AttitudeTarget.Vector(up), 0);
+            }
 
             // Never in the submit trial: a failed submit must leave the vessel unchanged; the first real Tick turns it on.
             if (!_gearDone && !double.IsNaN(_gearAlt) && h <= _gearAlt && !FlightEvents.InTrial)
@@ -218,7 +265,7 @@ namespace KspBridge.Flight.Modes
 
         private void Report(string reason, double aReq, double aMax, string basis, double need, double left, double h)
         {
-            if (_infeasible.Contains(reason))
+            if (_infeasible.Contains(reason) || FlightEvents.InTrial)   // trial: reported on the first real Tick instead
             {
                 return;   // once per step and reason
             }
@@ -316,10 +363,42 @@ namespace KspBridge.Flight.Modes
 
         private static string F(double x, int digits) => x.ToString("F" + digits, CultureInfo.InvariantCulture);
 
-        public Dictionary<string, object> Save() => new Dictionary<string, object>();
+        public Dictionary<string, object> Save() => new Dictionary<string, object>
+        {
+            ["burning"] = _burning,
+            ["aligning"] = _aligning,
+            ["gear_done"] = _gearDone,
+            ["infeasible"] = new List<object>(_infeasible),
+            ["touched"] = _touched,
+            ["touch_ut"] = _touchUt,
+            ["still_since"] = double.IsNaN(_stillSince) ? null : (object)_stillSince,
+            ["gear_settle_until"] = _gearSettleUntil > 0 ? (object)_gearSettleUntil : null,
+        };
 
+        /// <summary>Restores Save's keys. The bottom offset is re-measured on the first Height (_partCount = -1), and
+        /// _measuredUt = 0 lets the 0.5 s re-measure continue while gear_settle_until has not passed.</summary>
         public void Load(Vessel v, Dictionary<string, object> state)
         {
+            _burning = Handover.B(state, "burning");
+            _aligning = Handover.B(state, "aligning");
+            _gearDone = Handover.B(state, "gear_done");
+            _touched = Handover.B(state, "touched");
+            _touchUt = Handover.D(state, "touch_ut", 0);
+            _stillSince = Handover.D(state, "still_since", double.NaN);
+            _gearSettleUntil = Handover.D(state, "gear_settle_until", 0);
+            _infeasible.Clear();
+            if (state.TryGetValue("infeasible", out object list) && list is List<object> reasons)
+            {
+                foreach (object reason in reasons)
+                {
+                    if (reason is string s)
+                    {
+                        _infeasible.Add(s);
+                    }
+                }
+            }
+            _partCount = -1;
+            _measuredUt = 0;
         }
     }
 }
