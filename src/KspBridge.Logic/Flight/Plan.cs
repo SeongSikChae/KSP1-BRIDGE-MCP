@@ -14,14 +14,17 @@ namespace KspBridge.Flight
     /// <summary>A validated flight plan for one vessel. Parse rejects anything invalid with 400 invalid_plan "path: reason".</summary>
     public sealed class Plan
     {
-        private static readonly string[] PlanKeys = { "auto_stage", "staging_options", "abort", "steps" };
-        private static readonly string[] StepKeys = { "name", "mode", "on_start", "until", "abort", "timeout_s", "rcs" };
+        private static readonly string[] PlanKeys = { "auto_stage", "staging_options", "abort", "monitor", "steps" };
+        private static readonly string[] StepKeys = { "name", "mode", "on_start", "until", "abort", "timeout_s", "rcs", "monitor" };
 
         public string Id;
         public PlanState State;
         public bool AutoStage;
         public StagingOptions StagingOptions = StagingOptions.Default;
         public Condition Abort;
+
+        /// <summary>Plan key monitor (partial; merged with the step's at run time); null = omitted.</summary>
+        public FlightMonitor.Settings Monitor;
         public List<Step> Steps;
         public uint VesselId;
         public uint ControlPartId;
@@ -49,6 +52,8 @@ namespace KspBridge.Flight
             };
             raw.TryGetValue("staging_options", out object so);
             plan.StagingOptions = StagingOptions.Parse(so, "staging_options");
+            raw.TryGetValue("monitor", out object mon);
+            plan.Monitor = FlightMonitor.Settings.Parse(mon, "monitor");
             List<object> steps = raw.TryGetValue("steps", out object s) ? s as List<object> : null;
             if (steps == null || steps.Count == 0)
             {
@@ -192,6 +197,9 @@ namespace KspBridge.Flight
 
             /// <summary>Step key rcs: applied once when the step starts (AttitudeController.ApplyStepRcs); null = omitted.</summary>
             public bool? Rcs;
+
+            /// <summary>Step key monitor (partial; overrides the plan's per key at run time); null = omitted.</summary>
+            public FlightMonitor.Settings Monitor;
             public Func<IFlightMode> CreateMode;
 
             /// <summary>The step object as given (reload handover).</summary>
@@ -252,6 +260,10 @@ namespace KspBridge.Flight
                 if (o.TryGetValue("rcs", out object r) && r != null)
                 {
                     step.Rcs = r as bool? ?? throw Invalid(path + ".rcs", "must be a boolean");
+                }
+                if (o.TryGetValue("monitor", out object mon))
+                {
+                    step.Monitor = FlightMonitor.Settings.Parse(mon, path + ".monitor");
                 }
                 if (o.TryGetValue("name", out object n) && n != null)
                 {
