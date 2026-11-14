@@ -117,22 +117,27 @@ namespace KspBridge.App
             "hohmann (altitude of the target circular orbit; two nodes: transfer and arrival circularization; at apoapsis|periapsis|ut|auto, auto = now + 60 s), " +
             "transfer_body (needs a body target orbiting the same parent, e.g. set_target Mun, and a near-circular orbit; periapsis = wanted periapsis altitude inside the body's SOI; " +
             "one transfer node; returns computed_periapsis and predicted.encounter / encounter_periapsis from KSP; correct after the SOI change with change_periapsis at ut), " +
-            "capture (at the periapsis of the current orbit, also a hyperbola after an SOI entry; altitude = wanted apoapsis, default the periapsis altitude = circular). " +
+            "capture (at the periapsis of the current orbit, also a hyperbola after an SOI entry; altitude = wanted apoapsis, default the periapsis altitude = circular), " +
+            "rendezvous_phase (needs a vessel or docking-port target on the same body; both orbits near-circular e ≤ 0.05 and within 1° of each other, else orbits_not_coplanar_circular; " +
+            "altitudes at least 1 km apart, else no_transfer_window; one transfer node timed so the closest approach is distance, default 200 m), " +
+            "correct_approach (same target; a small prograde/normal/radial correction at ut, or auto = now + 60 s, so the closest approach is distance; no_solution when nothing improves it). " +
+            "rendezvous_phase / correct_approach also return closest_distance, closest_ut, relative_speed_at_closest. " +
             "Orbit-position nodes closer than 30 s move one orbit later. " +
             "Altitudes are above sea level, above the atmosphere and inside the SOI. Existing nodes are replaced unless append: true (plans from the orbit after the last node). " +
             "Not while a flight plan runs (plan_running). Errors: bad_request (an apoapsis below / periapsis above the node point, altitude out of range, at not allowed), " +
             "no_solution (undefined time, a non-finite result, an eccentric start orbit for transfer_body, the search time budget), no_target (transfer_body without a body target of the same parent), " +
             "no_encounter (no SOI entry found), nodes_unavailable. Returns {maneuver_nodes, created, total_dv, burn_time, dv_short, predicted (KSP's orbit after the last node)}.")]
         public Task<string> PlanManeuver(
-            [Description("change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body or capture")] string kind,
+            [Description("change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture, rendezvous_phase or correct_approach")] string kind,
             [Description("Target altitude m above sea level (change_apoapsis, change_periapsis, hohmann; capture apoapsis)")] double? altitude = null,
             [Description("Target inclination deg (change_inclination)")] double? inclination = null,
             [Description("Node position: apoapsis, periapsis, ascending_node, descending_node, ut or auto (allowed values depend on kind)")] string? at = null,
             [Description("Node time (game UT seconds) with at ut")] double? ut = null,
             [Description("true = keep the existing nodes and plan after the last one")] bool? append = null,
             [Description("Wanted periapsis altitude m inside the target body's SOI (transfer_body)")] double? periapsis = null,
+            [Description("Wanted closest approach m to the target vessel (rendezvous_phase, correct_approach; default 200)")] double? distance = null,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append, periapsis }, ct);
+            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append, periapsis, distance }, ct);
 
         [McpServerTool(Name = "update_maneuver_node", Destructive = true)]
         [Description("Change a maneuver node of the active vessel: index from get_flight.maneuver_nodes (0 = earliest); only the given fields change " +

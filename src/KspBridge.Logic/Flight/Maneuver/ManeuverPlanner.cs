@@ -22,6 +22,14 @@ namespace KspBridge.Flight.Maneuver
         /// ahead with a 3.5 s burn).</summary>
         private const double MinLeadS = 30;
 
+        private static readonly string[] CorrectAt = { "ut", "auto" };
+
+        /// <summary>rendezvous_phase limits (design 0032 decision 14, initial values) and the closest distance default (decision 15).</summary>
+        private const double MaxEcc = 0.05;
+        private const double MaxRelIncDeg = 1.0;
+        private const double MinAltDiffM = 1000;
+        private const double DefaultDistanceM = 200;
+
         public static object Plan(Vessel v, RequestBody b)
         {
             ManualControl.RequireManual(v);
@@ -88,6 +96,47 @@ namespace KspBridge.Flight.Maneuver
                     };
                     break;
                 }
+                case "rendezvous_phase":
+                {
+                    Orbit tgt = TargetVesselOrbit(v, o);
+                    double distance = Distance(b);
+                    double rel = OrbitMath.RelativeInclinationDeg(OrbitMath.NormalWorld(o, start), OrbitMath.NormalWorld(tgt, start));
+                    if (o.eccentricity > MaxEcc || tgt.eccentricity > MaxEcc || rel > MaxRelIncDeg)
+                    {
+                        throw new ApiException(409, "orbits_not_coplanar_circular", "both orbits must be near-circular (e ≤ " + MaxEcc + ") and within "
+                            + MaxRelIncDeg + "° of each other (now e " + F(o.eccentricity, 3) + " / " + F(tgt.eccentricity, 3) + ", " + F(rel, 2) + "°): circularize / change_inclination first");
+                    }
+                    if (Math.Abs(o.semiMajorAxis - tgt.semiMajorAxis) < MinAltDiffM)
+                    {
+                        throw new ApiException(409, "no_transfer_window", "same altitude as the target (within " + MinAltDiffM + " m): raise or lower first (hohmann)");
+                    }
+                    OrbitMath.NodeSpec n = OrbitMath.RendezvousPhase(o, tgt, distance, start + MinLeadS);
+                    if (!OrbitMath.Finite(n.Ut))
+                    {
+                        throw new ApiException(409, "no_solution", "rendezvous search exceeded its time budget");
+                    }
+                    nodes = One(n);
+                    extra = Closest(o, n, tgt);
+                    break;
+                }
+                case "correct_approach":
+                {
+                    Orbit tgt = TargetVesselOrbit(v, o);
+                    double distance = Distance(b);
+                    double ut = ManeuverNodes.ResolveUt(v, o, b, "at", CorrectAt, "auto", start);
+                    if (double.IsNaN(ut))
+                    {
+                        ut = start + AutoLeadS;
+                    }
+                    OrbitMath.NodeSpec n = OrbitMath.CorrectApproach(o, tgt, ut, distance);
+                    if (!OrbitMath.Finite(n.Ut))
+                    {
+                        throw new ApiException(409, "no_solution", "no correction improves the closest approach");
+                    }
+                    nodes = One(n);
+                    extra = Closest(o, n, tgt);
+                    break;
+                }
                 case "capture":
                 {
                     // At the periapsis of the current orbit (a hyperbola after an SOI entry included): the apoapsis goes to
@@ -103,7 +152,7 @@ namespace KspBridge.Flight.Maneuver
                     break;
                 }
                 default:
-                    throw ApiException.BadRequest("unknown kind " + kind + " (change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture)");
+                    throw ApiException.BadRequest("unknown kind " + kind + " (change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture, rendezvous_phase, correct_approach)");
             }
             foreach (OrbitMath.NodeSpec n in nodes)
             {
@@ -129,6 +178,46 @@ namespace KspBridge.Flight.Maneuver
             s.UpdateFlightPlan();
             return Result(v, s, nodes, extra);
         }
+
+        /// <summary>The target vessel's orbit (a docking port target: its vessel) about the same body (409 no_target otherwise).</summary>
+        private static Orbit TargetVesselOrbit(Vessel v, Orbit o)
+        {
+            Vessel tv = v.targetObject is ModuleDockingNode port ? port.vessel : v.targetObject as Vessel;
+            if (tv == null || tv == v || tv.orbit == null)
+            {
+                throw new ApiException(409, "no_target", "this kind needs a vessel or docking port target (set_target vessel_id)");
+            }
+            if (tv.orbit.referenceBody != o.referenceBody)
+            {
+                throw new ApiException(409, "no_target", tv.vesselName + " orbits " + tv.orbit.referenceBody.bodyName + ", not " + o.referenceBody.bodyName);
+            }
+            return tv.orbit;
+        }
+
+        private static double Distance(RequestBody b)
+        {
+            double d = b.GetDouble("distance", DefaultDistanceM);
+            if (d < 0 || d > 100000)
+            {
+                throw ApiException.BadRequest("distance must be in [0, 100000] m");
+            }
+            return d;
+        }
+
+        /// <summary>Our own closest-approach prediction after node n (the response's predicted gets KSP's orbit too).</summary>
+        private static Dictionary<string, object> Closest(Orbit o, OrbitMath.NodeSpec n, Orbit tgt)
+        {
+            double d = OrbitMath.ClosestAfter(o, n, tgt, out double cut);
+            Orbit after = OrbitMath.After(o, n);
+            return new Dictionary<string, object>
+            {
+                ["closest_distance"] = OrbitMath.Num(d),
+                ["closest_ut"] = OrbitMath.Num(cut),
+                ["relative_speed_at_closest"] = OrbitMath.Finite(cut) ? OrbitMath.Num(OrbitMath.RelativeSpeed(after, tgt, cut)) : null,
+            };
+        }
+
+        private static string F(double x, int digits) => x.ToString("F" + digits, System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>The current target as a child body of the orbit's reference body (409 no_target otherwise).</summary>
         private static CelestialBody TargetBody(Vessel v, Orbit o)

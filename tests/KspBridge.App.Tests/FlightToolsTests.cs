@@ -104,8 +104,8 @@ namespace KspBridge.App.Tests
 
             var r = handler.Requests;
             Assert.HasCount(7, r);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"hohmann","altitude":120000,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null}"""), r[5]);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"change_inclination","altitude":null,"inclination":5,"at":"auto","ut":null,"append":true,"periapsis":null}"""), r[6]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"hohmann","altitude":120000,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":null}"""), r[5]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"change_inclination","altitude":null,"inclination":5,"at":"auto","ut":null,"append":true,"periapsis":null,"distance":null}"""), r[6]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":"apoapsis","ut":null,"prograde":100,"normal":0,"radial":0}"""), r[0]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":null,"ut":1234.5,"prograde":0,"normal":-20,"radial":3}"""), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/update", (string?)"""{"index":0,"ut":null,"prograde":null,"normal":50,"radial":null}"""), r[2]);
@@ -125,15 +125,17 @@ namespace KspBridge.App.Tests
             await tools.SetTarget(vessel_id: 12345, port: 678, ct: ct);
             await tools.SetTarget(clear: true, ct: ct);
             await tools.PlanManeuver("transfer_body", periapsis: 30000, ct: ct);
+            await tools.PlanManeuver("rendezvous_phase", distance: 150, ct: ct);
 
             var r = handler.Requests;
-            Assert.HasCount(6, r);
+            Assert.HasCount(7, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"rendezvous_phase","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":150}"""), r[6]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessels?include_debris=false", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessels?include_debris=true", (string?)null), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/target", (string?)"""{"body":"Mun","vessel_id":null,"port":null,"clear":null}"""), r[2]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/target", (string?)"""{"body":null,"vessel_id":12345,"port":678,"clear":null}"""), r[3]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/target", (string?)"""{"body":null,"vessel_id":null,"port":null,"clear":true}"""), r[4]);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"transfer_body","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":30000}"""), r[5]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"transfer_body","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":30000,"distance":null}"""), r[5]);
         }
 
         [TestMethod]

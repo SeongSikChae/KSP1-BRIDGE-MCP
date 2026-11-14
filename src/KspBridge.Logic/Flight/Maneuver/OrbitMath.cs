@@ -426,6 +426,107 @@ namespace KspBridge.Flight.Maneuver
             dist = d(ut);
         }
 
+        /// <summary>Closest approach of the orbit after node n to tgt within one orbit after the node (NaN on failure).</summary>
+        public static double ClosestAfter(Orbit o, NodeSpec n, Orbit tgt, out double ut)
+        {
+            Orbit after = After(o, n);
+            ClosestApproach(after, tgt, n.Ut, SafeSpan(after, n.Ut), out ut, out double d);
+            return d;
+        }
+
+        /// <summary>
+        /// Phasing transfer from near-circular, near-coplanar o to tgt (design 0032 decision 14): departure UT over one synodic
+        /// period with the smallest miss at the transfer's far apsis (coarse scan + golden refine), then a golden refine of the
+        /// departure UT (± one scan step) so the closest approach meets distance. NaN UT when the budget ran out.
+        /// </summary>
+        public static NodeSpec RendezvousPhase(Orbit o, Orbit tgt, double distance, double start)
+        {
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            double mu = o.referenceBody.gravParameter;
+            double r2 = tgt.semiMajorAxis;
+            StateWorld(o, start, out Vector3d r0, out _);
+            bool raise = r2 > r0.magnitude;
+            double synodic = 1 / Math.Abs(1 / o.period - 1 / tgt.period);
+            Func<double, double> miss = t =>
+            {
+                NodeSpec n = ChangeApsis(o, t, r2, raiseApo: raise);
+                Orbit tr = After(o, n);
+                double tFar = t + Math.PI * Math.Sqrt(Math.Pow(tr.semiMajorAxis, 3) / mu);
+                return (tr.getRelativePositionAtUT(tFar) - tgt.getRelativePositionAtUT(tFar)).magnitude;
+            };
+            int samples = 180;
+            double step = synodic / samples, best = start, bestMiss = double.PositiveInfinity;
+            for (int i = 0; i <= samples; i++)
+            {
+                double t = start + step * i;
+                double m = miss(t);
+                if (m < bestMiss)
+                {
+                    bestMiss = m;
+                    best = t;
+                }
+            }
+            best = Golden(miss, Math.Max(start, best - step), best + step, 40);
+            if (sw.Elapsed.TotalSeconds > SearchBudgetS)
+            {
+                return new NodeSpec(double.NaN, Vector3d.zero);
+            }
+            Func<double, double> err = t =>
+            {
+                double d = ClosestAfter(o, ChangeApsis(o, t, r2, raiseApo: raise), tgt, out _);
+                return Finite(d) ? Math.Abs(d - distance) : double.PositiveInfinity;
+            };
+            // The miss is a V with its minimum near zero; the wanted distance sits on either side: refine each side and keep the better.
+            double sideA = Golden(err, Math.Max(start, best - step), best, 30);
+            double sideB = Golden(err, best, best + step, 30);
+            double t1 = err(sideA) <= err(sideB) ? sideA : sideB;
+            return sw.Elapsed.TotalSeconds > SearchBudgetS ? new NodeSpec(double.NaN, Vector3d.zero) : ChangeApsis(o, t1, r2, raiseApo: raise);
+        }
+
+        /// <summary>
+        /// Small correction at ut so the closest approach to tgt meets distance (design 0032 decision 15): coordinate descent on
+        /// prograde/normal/radial with a step of 1 m/s halving to 0.01 m/s, at most 60 evaluations and SearchBudgetS. NaN UT when the
+        /// closest approach did not improve on doing nothing.
+        /// </summary>
+        public static NodeSpec CorrectApproach(Orbit o, Orbit tgt, double ut, double distance)
+        {
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            NodeBasis(o, ut, out Vector3d pro, out Vector3d nor, out Vector3d rad);
+            Vector3d[] axes = { pro, nor, rad };
+            Func<Vector3d, double> f = dv =>
+            {
+                double d = ClosestAfter(o, new NodeSpec(ut, dv), tgt, out _);
+                return Finite(d) ? Math.Abs(d - distance) : double.PositiveInfinity;
+            };
+            Vector3d x = Vector3d.zero;
+            double fx = f(x), f0 = fx, step = 1;
+            int evals = 1;
+            while (step >= 0.01 && evals < 60 && sw.Elapsed.TotalSeconds < SearchBudgetS)
+            {
+                bool improved = false;
+                foreach (Vector3d a in axes)
+                {
+                    foreach (double s in new[] { step, -step })
+                    {
+                        Vector3d y = x + a * s;
+                        double fy = f(y);
+                        evals++;
+                        if (fy < fx)
+                        {
+                            x = y;
+                            fx = fy;
+                            improved = true;
+                        }
+                    }
+                }
+                if (!improved)
+                {
+                    step /= 2;
+                }
+            }
+            return fx < f0 ? new NodeSpec(ut, x) : new NodeSpec(double.NaN, Vector3d.zero);
+        }
+
         /// <summary>Relative speed of two orbits at ut (m/s).</summary>
         public static double RelativeSpeed(Orbit a, Orbit b, double ut) => (a.getOrbitalVelocityAtUT(ut) - b.getOrbitalVelocityAtUT(ut)).magnitude;
 
