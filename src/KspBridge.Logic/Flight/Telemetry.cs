@@ -18,6 +18,7 @@ namespace KspBridge.Flight
             "altitude", "altitude_radar", "vertical_speed", "surface_speed", "orbital_speed",
             "apoapsis", "periapsis", "time_to_apoapsis", "time_to_periapsis", "eccentricity", "inclination",
             "pitch", "heading", "roll", "attitude_error", "dynamic_pressure",
+            "angular_rate", "aoa", "temp_ratio",
             "stage", "stage_dv", "total_dv", "twr", "throttle", "thrust", "ignitable_engines",
             "step_time", "met",
         };
@@ -78,6 +79,9 @@ namespace KspBridge.Flight
             Num["roll"] = roll;
             Num["attitude_error"] = target.HasValue && !AttitudeController.Suspended(v) ? AttitudeController.ErrorDeg(v, target.Value) : double.NaN;
             Num["dynamic_pressure"] = v.dynamicPressurekPa;
+            Num["angular_rate"] = v.packed ? double.NaN : v.angularVelocity.magnitude;
+            Num["aoa"] = v.packed || v.srfSpeed < 1 ? double.NaN : Vector3d.Angle(v.ReferenceTransform.up, v.srf_velocity);
+            Num["temp_ratio"] = MaxTempRatio(v);
 
             Num["stage"] = v.currentStage;
             VesselDeltaV dv = v.VesselDeltaV;
@@ -108,6 +112,21 @@ namespace KspBridge.Flight
         }
 
         /// <summary>Pitch (deg above the horizon), heading (deg from north) and roll (deg) of the control reference in the surface frame.</summary>
+        /// <summary>Highest part temperature / limit, internal or skin (1 = at the limit; parts explode just above). NaN without parts.</summary>
+        internal static double MaxTempRatio(Vessel v)
+        {
+            double max = double.NaN;
+            foreach (Part p in v.parts)
+            {
+                double r = Math.Max(p.maxTemp > 0 ? p.temperature / p.maxTemp : 0, p.skinMaxTemp > 0 ? p.skinTemperature / p.skinMaxTemp : 0);
+                if (double.IsNaN(max) || r > max)
+                {
+                    max = r;
+                }
+            }
+            return max;
+        }
+
         private static void SurfaceAttitude(Vessel v, out double pitch, out double heading, out double roll)
         {
             Quaternion surface = AttitudeTarget.SurfaceRotation(v);

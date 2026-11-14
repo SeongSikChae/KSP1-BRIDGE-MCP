@@ -874,7 +874,7 @@ namespace KspBridge.Flight
                     ["met"] = N(_view.Num["met"]),
                 },
                 ["flight"] = Group("altitude", "altitude_radar", "vertical_speed", "surface_speed", "orbital_speed",
-                    "pitch", "heading", "roll", "dynamic_pressure"),
+                    "pitch", "heading", "roll", "dynamic_pressure", "angular_rate", "aoa", "temp_ratio"),
                 ["orbit"] = With(Group("apoapsis", "periapsis", "time_to_apoapsis", "time_to_periapsis", "eccentricity", "inclination"),
                     "body", v.mainBody.bodyName),
                 ["propulsion"] = With(Group("stage", "stage_dv", "total_dv", "twr", "throttle", "thrust", "ignitable_engines"),
