@@ -136,5 +136,9 @@ namespace KspBridge.Flight.Modes
         {
             _reached = state.TryGetValue("reached", out object r) && r is bool b && b;
         }
+
+        public void End(Vessel v)
+        {
+        }
     }
 }

@@ -61,5 +61,9 @@ namespace KspBridge.Flight.Modes
         public void Load(Vessel v, Dictionary<string, object> state)
         {
         }
+
+        public void End(Vessel v)
+        {
+        }
     }
 }

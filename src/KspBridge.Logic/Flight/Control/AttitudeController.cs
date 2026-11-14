@@ -57,6 +57,23 @@ namespace KspBridge.Flight.Control
             v.OnFlyByWire += Fly;
         }
 
+        /// <summary>Docking adopted a merged vessel: re-binds OnFlyByWire to it and keeps the pre-plan SAS/RCS record
+        /// (no Detach/Record, so the plan end restores the state from before the plan).</summary>
+        public static void Retarget(Vessel v)
+        {
+            if (_v == v)
+            {
+                return;
+            }
+            if (_v != null)
+            {
+                _v.OnFlyByWire -= Fly;
+            }
+            _v = v;
+            v.ActionGroups.SetGroup(KSPActionGroup.SAS, false);
+            v.OnFlyByWire += Fly;
+        }
+
         private static void Record(Vessel v, HandedPlan hp)
         {
             _sasBefore = hp?.SasBefore ?? v.ActionGroups[KSPActionGroup.SAS];
@@ -192,6 +209,13 @@ namespace KspBridge.Flight.Control
                 float throttle = (float)c.Throttle;
                 s.mainThrottle = throttle;
                 FlightInputHandler.state.mainThrottle = throttle;   // kept when the next tick copies the input state into ctrlState
+                if (c.Translate is Vector3 tr)
+                {
+                    // Same tool frame and signs as the rcs_translate pulse (ManualControl).
+                    s.X = ManualControl.SignX * ManualControl.LiftDeadZone(tr.x);
+                    s.Y = ManualControl.SignY * ManualControl.LiftDeadZone(tr.y);
+                    s.Z = ManualControl.SignZ * ManualControl.LiftDeadZone(tr.z);
+                }
 
                 if (!c.Attitude.HasValue)
                 {

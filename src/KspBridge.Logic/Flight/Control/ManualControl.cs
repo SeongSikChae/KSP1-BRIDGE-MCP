@@ -78,7 +78,7 @@ namespace KspBridge.Flight.Control
         }
 
         /// <summary>The checks every manual control tool shares.</summary>
-        private static void RequireManual(Vessel v)
+        internal static void RequireManual(Vessel v)
         {
             FlightReset.RequireNoPendingRecovery();
             FlightReset.RequireSceneReady();
@@ -304,10 +304,25 @@ namespace KspBridge.Flight.Control
         // the dv_local measurement (0015 unit 3). Start values from the decompile: a thruster fires when its direction agrees with
         // inputLin and pushes the vessel the other way (AddForceAtPosition(-vector ...)), and FlightInputHandler negates X and Z for
         // the player's keys (2465~2466): X and Z negative; Y maps to local forward = -y of the tool frame, so its sign is positive.
-        private const float SignX = -1f;
-        private const float SignY = 1f;
-        private const float SignZ = -1f;
-        private const float DeadZone = 0.05f;   // ModuleRCS EPSILON: smaller inputs are dropped
+        internal const float SignX = -1f;
+        internal const float SignY = 1f;
+        internal const float SignZ = -1f;
+        internal const float DeadZone = 0.05f;   // ModuleRCS EPSILON: smaller inputs are dropped
+
+        /// <summary>Plan translation commands below this are treated as 0 (no endless 5 % firing near the goal).</summary>
+        internal const float MinCmd = 0.01f;
+
+        /// <summary>Plan translation per axis: |c| &lt; MinCmd → 0, MinCmd ≤ |c| &lt; DeadZone → ±DeadZone (ModuleRCS drops smaller
+        /// inputs), else clamped to [-1, 1].</summary>
+        internal static float LiftDeadZone(float c)
+        {
+            float a = Math.Abs(c);
+            if (a < MinCmd || float.IsNaN(c))
+            {
+                return 0f;
+            }
+            return a < DeadZone ? Math.Sign(c) * DeadZone : Mathf.Clamp(c, -1f, 1f);
+        }
 
         private static bool _active;            // never judged by Unity's == null: a destroyed vessel compares equal to null
         private static Vessel _pv;

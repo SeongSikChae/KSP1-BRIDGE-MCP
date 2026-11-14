@@ -22,10 +22,10 @@ namespace KspBridge.Flight.Modes
         private const double EccTolerance = 0;
 
         /// <summary>Remaining Δv (m/s) below which the burn direction is locked.</summary>
-        private const double LockDv = 10;
+        internal const double LockDv = 10;   // shared with ExecuteNodeMode (constants only)
 
         /// <summary>Attitude error (deg) above which the mode does not burn.</summary>
-        private const double AttitudeGateDeg = 5;
+        internal const double AttitudeGateDeg = 5;   // shared with ExecuteNodeMode (constants only)
 
         private readonly double _tolerance;
         private bool _burning;
@@ -184,6 +184,10 @@ namespace KspBridge.Flight.Modes
             _prevDv = Handover.D(state, "prev_dv", double.PositiveInfinity);
             _prevEcc = Handover.D(state, "prev_ecc", double.PositiveInfinity);
             _eccFlat = (int)Handover.D(state, "ecc_flat", 0);
+        }
+
+        public void End(Vessel v)
+        {
         }
     }
 }

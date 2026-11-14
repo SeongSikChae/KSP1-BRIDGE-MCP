@@ -89,9 +89,30 @@ namespace KspBridge.Flight
             {
                 Abort("no_thrust", null, e.Message);
             }
+            catch (ModeAbortException e)
+            {
+                Abort(e.Reason, null, e.Message);
+            }
             catch (Exception e)
             {
                 Abort("error", null, e.Message);
+            }
+        }
+
+        /// <summary>The only way the running mode ends: clears _mode first so End runs once. Never throws.</summary>
+        private static void EndMode(Vessel v)
+        {
+            IFlightMode m = _mode;
+            _mode = null;
+            EndQuietly(m, v);
+        }
+
+        /// <summary>End for a mode that is not (or no longer) _mode, e.g. a failed trial's. Never throws.</summary>
+        private static void EndQuietly(IFlightMode m, Vessel v)
+        {
+            if (m != null)
+            {
+                Safe(() => m.End(v));
             }
         }
 
@@ -107,6 +128,7 @@ namespace KspBridge.Flight
         {
             Warp.Stop();
             Warp.ClearLatch();
+            EndMode(v);   // before step_completed; a throwing next BeginStep leaves no mode to end twice
             FlightEvents.Add("step_completed", _step, StepData(_plan, _step));   // the last step too
             if (_step + 1 >= _plan.Steps.Count)
             {
@@ -172,7 +194,7 @@ namespace KspBridge.Flight
             double ut = Planetarium.GetUniversalTime();
             Dictionary<string, object> stagerBefore = AutoStager.Save();
             ModeCommand first;
-            IFlightMode mode;
+            IFlightMode mode = null;   // the trial's own mode: a failed trial ends this one, never the running _mode
             List<FlightEvent> trial;
             FlightEvents.BeginTrial();   // events of the trial calculation go aside
             try
@@ -187,12 +209,21 @@ namespace KspBridge.Flight
             {
                 FlightEvents.EndTrial();
                 AutoStager.Load(stagerBefore);
+                EndQuietly(mode, v);
                 throw new ApiException(409, "no_thrust", "no operational engine and no staging pending (use on_start: [\"stage\"] to ignite)");
+            }
+            catch (ModeAbortException e)
+            {
+                FlightEvents.EndTrial();
+                AutoStager.Load(stagerBefore);
+                EndQuietly(mode, v);
+                throw new ApiException(409, e.Reason, e.Message);
             }
             catch
             {
                 FlightEvents.EndTrial();   // dropped: the next Tick from the restored state makes the same events once
                 AutoStager.Load(stagerBefore);
+                EndQuietly(mode, v);
                 throw;
             }
 
@@ -209,6 +240,7 @@ namespace KspBridge.Flight
                 {
                     FlightEvents.Add("plan_replaced", _step, new Dictionary<string, object> { ["plan_id"] = _plan.Id, ["steps"] = _plan.Steps.Count });
                 }
+                EndMode(v);   // the replaced plan's mode (none when idle)
                 _plan = plan;
                 _mode = mode;
                 _step = 0;
@@ -260,7 +292,7 @@ namespace KspBridge.Flight
                 double ut = Planetarium.GetUniversalTime();
                 Plan trialPlan = _plan.WithSteps(keep, steps);
                 Dictionary<string, object> stagerBefore = AutoStager.Save();
-                IFlightMode mode;
+                IFlightMode mode = null;   // the trial's own mode (see Submit)
                 ModeCommand first;
                 FlightEvents.BeginTrial();
                 try
@@ -275,17 +307,27 @@ namespace KspBridge.Flight
                 {
                     FlightEvents.EndTrial();
                     AutoStager.Load(stagerBefore);
+                    EndQuietly(mode, v);
                     throw new ApiException(409, "no_thrust", "no operational engine and no staging pending (use on_start: [\"stage\"] to ignite)");
+                }
+                catch (ModeAbortException e)
+                {
+                    FlightEvents.EndTrial();
+                    AutoStager.Load(stagerBefore);
+                    EndQuietly(mode, v);
+                    throw new ApiException(409, e.Reason, e.Message);
                 }
                 catch
                 {
                     FlightEvents.EndTrial();
                     AutoStager.Load(stagerBefore);
+                    EndQuietly(mode, v);
                     throw;
                 }
                 try
                 {
                     _plan.ReplaceSteps(keep, steps);
+                    EndMode(v);   // the replaced current step's mode
                     _mode = mode;
                     _stepStartUt = ut;
                     Warp.Stop();        // like NextStep
@@ -358,6 +400,7 @@ namespace KspBridge.Flight
         /// Order: throttle 0 → warp off → SAS restore → OnFlyByWire off.</summary>
         private static void Release()
         {
+            Safe(() => EndMode(PlanVessel() ?? FlightGlobals.ActiveVessel));   // v may be null (vessel lost / changed)
             Command = ModeCommand.Idle;
             Safe(() => AttitudeController.ZeroThrottle());
             Safe(() =>
@@ -596,6 +639,13 @@ namespace KspBridge.Flight
                 Safe(() => FlightEvents.Add("logic_reloaded", _step, Reloaded(false)));
                 Abort("no_thrust", null, e.Message);
             }
+            catch (ModeAbortException e)
+            {
+                // Same path as no thrust: taken over correctly, the mode itself ends the plan with its reason.
+                Safe(() => AttitudeController.Adopt(v, hp));
+                Safe(() => FlightEvents.Add("logic_reloaded", _step, Reloaded(false)));
+                Abort(e.Reason, null, e.Message);
+            }
             catch (Exception e)
             {
                 Incompatible(v, hp, stagerLoaded, e.Message);
@@ -620,7 +670,7 @@ namespace KspBridge.Flight
                 Safe(() => AutoStager.RecordHandedRequests(planVessel, hp.Staging));
             }
             _plan = null;
-            _mode = null;
+            EndMode(v);   // a loaded mode (if any) undoes what it set up
             if (same)
             {
                 Safe(() => AttitudeController.Adopt(v, hp));   // attached already: unchanged

@@ -247,6 +247,43 @@ namespace KspBridge.Flight
             return v.totalMass * (1 - Math.Exp(-dv / ve)) / (f / ve);
         }
 
+        /// <summary>Seconds to deliver dv across stages from the game's VesselDeltaV (current stage down, each stage at its
+        /// average rate deltaVActual / stageBurnTime). shortDv = the stages cannot supply dv: the missing part is timed at the
+        /// last firing stage's rate. +∞ only when no stage can fire (the no-thrust case, via BurnTime). Without stage data
+        /// yet: BurnTime of the current engines.</summary>
+        public static double BurnTimeStaged(Vessel v, double dv, out bool shortDv)
+        {
+            shortDv = false;
+            VesselDeltaV d = v.VesselDeltaV;
+            if (!KspBridge.Check.PerformanceCheck.UpToDate(d))
+            {
+                return BurnTime(v, dv);
+            }
+            double left = dv, time = 0, lastRate = 0;
+            for (int s = v.currentStage; s >= 0 && left > 0; s--)
+            {
+                DeltaVStageInfo info = d.GetStage(s);
+                if (info == null || info.deltaVActual <= 0 || info.stageBurnTime <= 0)
+                {
+                    continue;
+                }
+                double use = Math.Min(left, info.deltaVActual);
+                lastRate = info.deltaVActual / info.stageBurnTime;
+                time += use / lastRate;
+                left -= use;
+            }
+            if (left <= 1e-3)
+            {
+                return time;
+            }
+            if (lastRate <= 0)
+            {
+                return BurnTime(v, dv);
+            }
+            shortDv = true;
+            return time + left / lastRate;
+        }
+
         /// <summary>Full-throttle acceleration of the operational engines at the current pressure (m/s²).</summary>
         public static double MaxAccel(Vessel v)
         {

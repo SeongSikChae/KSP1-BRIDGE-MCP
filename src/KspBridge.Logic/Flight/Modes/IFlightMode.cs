@@ -19,6 +19,10 @@ namespace KspBridge.Flight.Modes
 
         /// <summary>Called instead of Begin when a handed-over plan resumes.</summary>
         void Load(Vessel v, Dictionary<string, object> state);
+
+        /// <summary>Step end: completion, plan replacement, abort/release, a failed handover or a failed trial (the trial's own
+        /// mode only). Called once; undoes game state the mode changed. v may be null; never throws on purpose.</summary>
+        void End(Vessel v);
     }
 
     /// <summary>What the Coordinator hands the Controller. The default value is Idle (throttle 0, no attitude), so reading it
@@ -37,12 +41,16 @@ namespace KspBridge.Flight.Modes
         /// <summary>Warp target UT requested by the mode; null = no warp.</summary>
         public double? WarpToUt;
 
+        /// <summary>RCS translation in the rcs_translate tool frame (x right, y top/dorsal, z nose), each [-1, 1]; null = none.</summary>
+        public UnityEngine.Vector3? Translate;
+
         public ModeCommand(AttitudeTarget? attitude, double throttle)
         {
             Attitude = attitude;
             Throttle = throttle;
             ModeThrottle = throttle;
             WarpToUt = null;
+            Translate = null;
         }
 
         public static ModeCommand Idle => default(ModeCommand);

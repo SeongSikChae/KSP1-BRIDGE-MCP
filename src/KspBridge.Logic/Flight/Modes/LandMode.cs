@@ -413,5 +413,9 @@ namespace KspBridge.Flight.Modes
             _partCount = -1;
             _measuredUt = 0;
         }
+
+        public void End(Vessel v)
+        {
+        }
     }
 }
