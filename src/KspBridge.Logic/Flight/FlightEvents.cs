@@ -115,6 +115,10 @@ namespace KspBridge.Flight
         /// <summary>Following Adds go to a trial list without seq until EndTrial.</summary>
         public static void BeginTrial() => _trial = new List<FlightEvent>();
 
+        /// <summary>True between BeginTrial and EndTrial (Coordinator.Submit's first-command calculation): modes must not
+        /// change the vessel then, since a failed submit has to leave it unchanged.</summary>
+        public static bool InTrial => _trial != null;
+
         /// <summary>Ends the trial and returns its events (the caller commits or drops them).</summary>
         public static List<FlightEvent> EndTrial()
         {
