@@ -308,6 +308,7 @@ namespace KspBridge.Flight
                 }
                 EndMode(v);   // the replaced plan's mode (none when idle)
                 FlightMonitor.Reset();   // after plan_replaced; a replaced plan's alerts end with it
+                Control.ControllerTrace.Clear();   // the trace covers one plan (kept after it ends)
                 _plan = plan;
                 _mode = mode;
                 _step = 0;

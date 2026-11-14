@@ -29,6 +29,9 @@ namespace KspBridge.Flight.Control
         private static ITorqueProvider[] _torque = new ITorqueProvider[0];
         private static Vessel _torqueVessel;
         private static int _torqueParts = -1;
+        private static int[] _torqueKind = new int[0];   // ControllerTrace kind of each _torque entry, rebuilt with it
+        private static readonly Vector3[] _kindSum = new Vector3[ControllerTrace.Kinds];   // last AvailableTorque per kind
+        private static bool _traceFailed;   // a trace failure is logged once; a reload creates fresh statics
 
         /// <summary>The vessel the controller is attached to (null when detached).</summary>
         public static Vessel Target => _v;
@@ -242,12 +245,15 @@ namespace KspBridge.Flight.Control
             Vector3 omega = _v.angularVelocity;
             float dt = TimeWarp.fixedDeltaTime;
             float pitch = 0, roll = 0, yaw = 0;
+            Vector3 want3 = Vector3.zero, alpha3 = Vector3.zero;   // trace only
             for (int i = 0; i < 3; i++)
             {
                 float alpha = Mathf.Max(torque[i] / Mathf.Max(moi[i], 1e-3f), 1e-3f);
                 float want = i == 1 && !target.HasRoll
                     ? 0f   // no roll target: damp the roll rate only
                     : Mathf.Sign(err[i]) * Mathf.Min(Mathf.Sqrt(2 * alpha * Mathf.Abs(err[i])) * KStop, OmegaMax);
+                want3[i] = want;
+                alpha3[i] = alpha;
                 float e = want - omega[i];
                 _integral[i] = Mathf.Clamp(_integral[i] + e * dt, -1, 1);
                 float a = Kp * e + Ki * _integral[i];
@@ -257,7 +263,36 @@ namespace KspBridge.Flight.Control
             s.pitch = pitch;
             s.roll = roll;
             s.yaw = yaw;
+            try
+            {
+                ControllerTrace.Record(_v.persistentId, new ControllerTrace.Sample
+                {
+                    Ut = Planetarium.GetUniversalTime(),
+                    Throttle = Coordinator.Command.Throttle,
+                    Q = _v.dynamicPressurekPa,
+                    Err = err,
+                    Omega = omega,
+                    Want = want3,
+                    Input = new Vector3(pitch, roll, yaw),
+                    Alpha = alpha3,
+                    Moi = moi,
+                    Torque = (Vector3[])_kindSum.Clone(),
+                });
+            }
+            catch (Exception e)
+            {
+                if (!_traceFailed)
+                {
+                    _traceFailed = true;
+                    Debug.LogError("[KspBridge] controller trace: " + e);   // observation only: never aborts the plan
+                }
+            }
         }
+
+        /// <summary>ControllerTrace kind of a torque provider: 0 wheel, 1 gimbal, 2 control surface (incl. ModuleAeroSurface),
+        /// 3 RCS (incl. ModuleRCSFX), 4 other.</summary>
+        private static int KindOf(ITorqueProvider p) =>
+            p is ModuleReactionWheel ? 0 : p is ModuleGimbal ? 1 : p is ModuleControlSurface ? 2 : p is ModuleRCS ? 3 : 4;
 
         /// <summary>
         /// Per-axis error (rad) in ReferenceTransform local space, signed so that turning toward the target needs
@@ -287,12 +322,20 @@ namespace KspBridge.Flight.Control
                 _torqueVessel = v;
                 _torqueParts = v.parts.Count;
                 _torque = v.FindPartModulesImplementing<ITorqueProvider>().ToArray();
+                _torqueKind = new int[_torque.Length];   // same block: lengths always match
+                for (int i = 0; i < _torque.Length; i++)
+                {
+                    _torqueKind[i] = KindOf(_torque[i]);
+                }
             }
+            Array.Clear(_kindSum, 0, _kindSum.Length);
             Vector3 sum = Vector3.zero;
             for (int i = 0; i < _torque.Length; i++)
             {
                 _torque[i].GetPotentialTorque(out Vector3 pos, out Vector3 neg);
-                sum += (Abs(pos) + Abs(neg)) * 0.5f;
+                Vector3 t = (Abs(pos) + Abs(neg)) * 0.5f;
+                sum += t;
+                _kindSum[_torqueKind[i]] += t;   // trace only
             }
             return sum;
         }

@@ -60,6 +60,7 @@ namespace KspBridge.Flight
         // Only a running plan is aborted: Abort releases control, which must not touch the user's throttle otherwise.
         private void OnScene(GameScenes scene)
         {
+            Control.ControllerTrace.Clear();   // with or without a plan: a revert or a KSC trip never keeps old samples
             if (Coordinator.Running)
             {
                 Coordinator.Abort("scene", null, null);
