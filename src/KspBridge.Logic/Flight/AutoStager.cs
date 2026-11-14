@@ -385,10 +385,13 @@ namespace KspBridge.Flight
 
         // ---- engine sets ----
 
-        /// <summary>Spent = flameout || (staged && !EngineIgnited && !HasPropellant). Engines that cannot restart keep the flameout
-        /// flag after Shutdown; SRBs (allowShutdown = false) stay Ignited after flameout (ModuleEngines decompile checked).</summary>
+        /// <summary>Spent = (flameout && (shut down || no propellant)) || (staged && !EngineIgnited && no propellant).
+        /// A flamed-out ignited engine with propellant left is a pause KSP lifts itself (UnFlameout), never a burnout (#13).
+        /// allowRestart = false engines are shut down by Flameout unless allowShutdown = false (Shutdown returns at once: SRBs stay
+        /// Ignited) (ModuleEngines decompile checked).</summary>
         private static bool Spent(Vessel v, ModuleEngines e) =>
-            e.flameout || (e.part.inverseStage >= v.currentStage && !e.EngineIgnited && !EngineModel.HasPropellantCached(e));
+            (e.flameout && (!e.EngineIgnited || !EngineModel.HasPropellantCached(e)))
+            || (e.part.inverseStage >= v.currentStage && !e.EngineIgnited && !EngineModel.HasPropellantCached(e));
 
         /// <summary>Burnout by fuel only (never by throttle): ≥ 1 spent engine and no lit unflamed engine, or a spent engine in J_next.</summary>
         private static bool BurnedOut(Vessel v)

@@ -134,7 +134,8 @@ namespace KspBridge.Flight
             {
                 bool has = HasPropellant(es[i]);
                 _hasProp[es[i]] = has;
-                if (!es[i].flameout && has)
+                // A flamed-out engine counts while still ignited: KSP relights it once propellant flows (a shut-down one never comes back, #13)
+                if (has && (!es[i].flameout || es[i].EngineIgnited))
                 {
                     _ignitable++;
                 }
