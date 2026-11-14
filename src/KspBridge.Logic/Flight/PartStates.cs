@@ -322,7 +322,7 @@ namespace KspBridge.Flight
         /// to block the player's keys while the game window is in the background, which is how an agent usually calls (same as
         /// launch_craft leaving out EditorDriver_AppFocus).
         /// </summary>
-        private static bool Unlocked(ControlTypes control) =>
+        internal static bool Unlocked(ControlTypes control) =>
             !InputLockManager.lockStack.Any(l => l.Key != FocusLock && (l.Value & (ulong)control) != 0);
 
         private const string FocusLock = "flightDriver_ApplicationFocus";
