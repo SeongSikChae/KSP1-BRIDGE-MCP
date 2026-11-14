@@ -111,7 +111,6 @@ namespace KspBridge.Flight
             Str["staging"] = AutoStager.StateName;   // last tick's state at (b); Coordinator refreshes it after (c)
         }
 
-        /// <summary>Pitch (deg above the horizon), heading (deg from north) and roll (deg) of the control reference in the surface frame.</summary>
         /// <summary>Highest part temperature / limit, internal or skin (1 = at the limit; parts explode just above). NaN without parts.</summary>
         internal static double MaxTempRatio(Vessel v)
         {
@@ -127,6 +126,7 @@ namespace KspBridge.Flight
             return max;
         }
 
+        /// <summary>Pitch (deg above the horizon), heading (deg from north) and roll (deg) of the control reference in the surface frame.</summary>
         private static void SurfaceAttitude(Vessel v, out double pitch, out double heading, out double roll)
         {
             Quaternion surface = AttitudeTarget.SurfaceRotation(v);

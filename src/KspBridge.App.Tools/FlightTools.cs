@@ -185,7 +185,8 @@ namespace KspBridge.App
         [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, monitor?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?, rcs?, monitor?}]}. " +
             "monitor (plan and step, optional; a step's keys override the plan's per key, then the defaults): while a plan runs it alerts or aborts on " +
             "flipped (in atmosphere, dynamic_pressure >= flip_min_q_kpa 5, the commanded attitude within flip_aoa_deg of the surface velocity but aoa > flip_aoa_deg 30 " +
-            "for flip_for_s 2; land and retrograde descents are not judged), control_lost (under thrust, attitude_error > lost_error_deg 30 for lost_for_s 5), " +
+            "for flip_for_s 2; land and retrograde descents are not judged), control_lost (under thrust, attitude_error > lost_error_deg 30 for lost_for_s 5 without coming 5 deg closer to the target; " +
+            "a turn that keeps closing in restarts the timer), " +
             "overheat (temp_ratio >= temp_abort 0.95; temp_warn 0.8 only alerts), and only alerts on thrust_waste (under thrust, attitude_error > waste_error_deg 10 " +
             "for waste_for_s 5) and oscillation (osc_flips 6 sign changes of one axis rate >= osc_min_rate 0.05 rad/s within 10 s; cleared below half of that); " +
             "the attitude-error timers pause, not reset, while staging, on rails or while land is still turning after a forced start; enabled false turns the checks " +

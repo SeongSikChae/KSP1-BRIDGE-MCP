@@ -22,7 +22,12 @@ namespace KspBridge.Flight
 
         private static readonly Queue<Sample> _window = new Queue<Sample>();
         private static readonly Dictionary<string, string> _level = new Dictionary<string, string>();   // kind → warn|abort
+        /// <summary>control_lost: an error this much below the one the timer started from (or last restarted from) is a turn
+        /// toward the target, not lost control; the timer restarts from there.</summary>
+        private const double LostProgressDeg = 5;
+
         private static double _flipFor, _lostFor, _wasteFor;
+        private static double _lostFrom = double.NaN;   // attitude_error the control_lost timer counts from
         private static double _lastUt = double.NaN;
         private static double _oscMinRate = 0.05;
         private static bool _running;   // false after EndPlan: the summary shows no current alerts
@@ -57,7 +62,20 @@ namespace KspBridge.Flight
             double cmdAoa = cmd.Attitude.HasValue && v.srfSpeed >= 1
                 ? Vector3d.Angle(cmd.Attitude.Value.Direction(v), v.srf_velocity) : double.NaN;
             Accumulate(ref _flipFor, inAtmo && q >= s.FlipMinQ && cmdAoa <= s.FlipAoaDeg && aoa > s.FlipAoaDeg, v.packed, dt);
-            Accumulate(ref _lostFor, thrusting && err > s.LostErrorDeg, pauseErr, dt);
+            bool lost = thrusting && err > s.LostErrorDeg;
+            if (!pauseErr && lost)
+            {
+                if (double.IsNaN(_lostFrom) || _lostFor == 0)
+                {
+                    _lostFrom = err;
+                }
+                else if (err <= _lostFrom - LostProgressDeg)   // converging on the target: a turn, not lost control
+                {
+                    _lostFrom = err;
+                    _lostFor = 0;
+                }
+            }
+            Accumulate(ref _lostFor, lost, pauseErr, dt);
             Accumulate(ref _wasteFor, thrusting && err > s.WasteErrorDeg, pauseErr, dt);
 
             string abortLevel = s.Abort ? "abort" : "warn";
