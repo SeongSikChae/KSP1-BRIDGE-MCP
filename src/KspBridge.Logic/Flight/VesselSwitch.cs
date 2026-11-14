@@ -112,10 +112,14 @@ namespace KspBridge.Flight
                 };
             }
             string path = flight && target.loaded ? "in_scene" : "reload";
-            if (path == "reload")
+            if (path == "reload" && flight)
             {
-                // unit 2 of development 0036: unit 3 replaces this with the reload execution
-                throw new ApiException(409, "not_supported", "switching to an unloaded vessel or from outside flight is not implemented yet");
+                // the active vessel goes on rails and is saved: refuse what the game's save check refuses (decision 2)
+                ClearToSaveStatus c = FlightGlobals.ClearToSave(false);   // no game log
+                if (c != ClearToSaveStatus.CLEAR)
+                {
+                    throw new ApiException(409, "switch_unavailable", "cannot leave " + active.vesselName + " now: " + c);
+                }
             }
             bool warpLowered = LowerWarp();
             Control.ManualControl.StopPulse("switch");   // no plan runs (checked above): only a pulse can be going
@@ -123,7 +127,15 @@ namespace KspBridge.Flight
             string lowered = warpLowered ? " (time warp was stopped)" : "";
             try
             {
-                if (!FlightGlobals.ForceSetActiveVessel(target))
+                if (!flight)
+                {
+                    // the Tracking Station's Fly order (design 0035: game behaviour)
+                    int idx = FlightGlobals.Vessels.IndexOf(target);
+                    FlightReset.Save();
+                    FlightDriver.StartAndFocusVessel("persistent", idx);
+                }
+                else if (path == "in_scene" ? !FlightGlobals.ForceSetActiveVessel(target)
+                    : !FlightGlobals.SetActiveVessel(target))   // unloaded: the game saves and calls StartAndFocusVessel itself
                 {
                     Finish("failed", "switch_refused", null);
                     throw new ApiException(409, "switch_refused", "the game refused to switch to " + target.vesselName + lowered);

@@ -251,7 +251,7 @@ namespace KspBridge.Flight
 
         /// <summary>The public 3-argument save on every path: the start-scene overload is internal, and a stock game does not use
         /// the start scene (Game.Updated uses it only for mission games, which RequireStockGame refuses).</summary>
-        private static void Save() => GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+        internal static void Save() => GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
 
         /// <summary>Logs instead of throwing, so a failing side step (marker refresh, save after a failure) hides nothing.</summary>
         private static void Safe(Action a)
