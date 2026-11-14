@@ -31,6 +31,7 @@ namespace KspBridge.Flight.Control
         private static int _torqueParts = -1;
         private static int[] _torqueKind = new int[0];   // ControllerTrace kind of each _torque entry, rebuilt with it
         private static readonly Vector3[] _kindSum = new Vector3[ControllerTrace.Kinds];   // last AvailableTorque per kind
+        private static bool _powered = true;   // electric-charge hysteresis state (HasCharge), reset when the vessel changes
         private static bool _traceFailed;   // a trace failure is logged once; a reload creates fresh statics
 
         /// <summary>The vessel the controller is attached to (null when detached).</summary>
@@ -319,6 +320,10 @@ namespace KspBridge.Flight.Control
         {
             if (!ReferenceEquals(v, _torqueVessel) || v.parts.Count != _torqueParts)
             {
+                if (!ReferenceEquals(v, _torqueVessel))
+                {
+                    _powered = true;   // power hysteresis follows the vessel, not its part count (staging keeps it)
+                }
                 _torqueVessel = v;
                 _torqueParts = v.parts.Count;
                 _torque = v.FindPartModulesImplementing<ITorqueProvider>().ToArray();
@@ -329,15 +334,42 @@ namespace KspBridge.Flight.Control
                 }
             }
             Array.Clear(_kindSum, 0, _kindSum.Length);
+            bool power = HasCharge(v);   // one lookup per tick
             Vector3 sum = Vector3.zero;
             for (int i = 0; i < _torque.Length; i++)
             {
+                // GetPotentialTorque ignores power and wheel state: a wheel that is not running gives no torque (design 0055 decision 3)
+                if (_torque[i] is ModuleReactionWheel w && (!power || w.wheelState != ModuleReactionWheel.WheelState.Active))
+                {
+                    continue;
+                }
                 _torque[i].GetPotentialTorque(out Vector3 pos, out Vector3 neg);
                 Vector3 t = (Abs(pos) + Abs(neg)) * 0.5f;
                 sum += t;
                 _kindSum[_torqueKind[i]] += t;   // trace only
             }
             return sum;
+        }
+
+        /// <summary>Electric charge with hysteresis: off once empty, on again at 1% of capacity, so a charge hovering
+        /// near zero does not switch the wheels' torque in and out every tick.</summary>
+        private static bool HasCharge(Vessel v)
+        {
+            PartResourceDefinition ec = PartResourceLibrary.Instance.GetDefinition("ElectricCharge");
+            if (ec == null)
+            {
+                return true;   // no such resource in this game: keep the old behaviour
+            }
+            v.GetConnectedResourceTotals(ec.id, out double amount, out double max);
+            if (_powered && amount <= 1e-6)
+            {
+                _powered = false;
+            }
+            else if (!_powered && max > 0 && amount >= 0.01 * max)
+            {
+                _powered = true;
+            }
+            return _powered;
         }
 
         private static Vector3 Abs(Vector3 x) => new Vector3(Mathf.Abs(x.x), Mathf.Abs(x.y), Mathf.Abs(x.z));
