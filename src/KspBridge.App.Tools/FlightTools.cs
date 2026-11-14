@@ -344,7 +344,7 @@ namespace KspBridge.App
 
         [McpServerTool(Name = "get_controller_trace", ReadOnly = true)]
         [Description("Attitude controller trace of the active vessel's flight plan: the last seconds (1..20, default 10) of the ticks it actually " +
-            "steered (none without a plan or attitude target, while suspended; cleared on reload, scene change, vessel change and when a plan starts; " +
+            "steered (none without a plan or attitude target, while suspended; cleared on reload, scene change, when a plan starts and when another vessel records; only the vessel that recorded sees them; " +
             "kept after a plan ends). Returns {window_s, samples, tick_s, throttle_mean, q_mean, axes {pitch, roll, yaw: {err_rms_deg, err_max_deg, " +
             "osc_hz, osc_amp_deg, osc_peak_ratio, err_offset_deg, input_sat_ratio, alpha_model, alpha_gain, alpha_r2, accel_bias, lag_ticks, lag_r2, " +
             "want_slope_at_amp, torque {wheel, gimbal, surface, rcs, other}}}, series?}. osc_*: strongest 0.2..5 Hz component of the detrended attitude " +

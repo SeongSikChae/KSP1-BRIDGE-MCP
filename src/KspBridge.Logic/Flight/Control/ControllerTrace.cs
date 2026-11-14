@@ -276,10 +276,14 @@ namespace KspBridge.Flight.Control
                     peakF = f;
                 }
             }
+            if (peak < 0)
+            {
+                return;   // NaN in the error (no magnitude compared): all four stay null, never reported as flat
+            }
             double median = Median(mags);
             offsetDeg = em;
             d["err_offset_deg"] = R(offsetDeg, 3);
-            if (!(peak > 0))
+            if (peak == 0)
             {
                 ampDeg = 0;   // a flat error (e.g. roll without a roll target): no frequency to report
                 d["osc_amp_deg"] = 0.0;

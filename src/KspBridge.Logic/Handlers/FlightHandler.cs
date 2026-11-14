@@ -69,8 +69,7 @@ namespace KspBridge.Handlers
                 int? step = null;
                 if (!string.IsNullOrEmpty(q["step"]))
                 {
-                    long s = ParseLong(q["step"], 0, "step");
-                    if (s < 1 || s > 50)
+                    if (!long.TryParse(q["step"], NumberStyles.Integer, CultureInfo.InvariantCulture, out long s) || s < 1 || s > 50)
                     {
                         throw ApiException.BadRequest("step must be an integer in [1, 50]");
                     }
