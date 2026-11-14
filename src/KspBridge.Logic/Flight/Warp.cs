@@ -31,6 +31,8 @@ namespace KspBridge.Flight
         private static string _refusal;    // last KSP refusal logged (log once per change)
         private static bool _requested;    // our WarpTo is alive
         private static bool _cancelled;    // user-cancel latch: no new request within the step
+        private static bool _resumeUsed;   // one re-request per step after an unexpected end (design 0048 decision 2)
+        private static bool _resumePending; // the next warp_started is that re-request
         private static string _unavailable; // reason already reported in this step (warp_unavailable once per step and reason)
         private static double _untilUt = double.NaN;
 
@@ -57,16 +59,26 @@ namespace KspBridge.Flight
             }
         }
 
-        /// <summary>Every tick (order f): our warp ending without our Stop latches (user cancel, or WarpTo stopping by itself).</summary>
+        /// <summary>Every tick (order f): our warp ending without our Stop (user cancel, or WarpTo stopping by itself; the two
+        /// cannot be told apart) allows one re-request in the step; a second such end latches as a user cancel.</summary>
         public static void Sync()
         {
             bool active = Active;
             if (_requested && _wasActive && !active)
             {
                 _requested = false;
-                _cancelled = true;
-                Debug.Log("[KspBridge] warp ended without our Stop (user cancel or WarpTo end): latched for this step");
-                Stopped();
+                if (_resumeUsed)
+                {
+                    _cancelled = true;
+                    Debug.Log("[KspBridge] warp ended without our Stop again: latched for this step (user cancel)");
+                }
+                else
+                {
+                    _resumeUsed = true;
+                    _resumePending = true;
+                    Debug.Log("[KspBridge] warp ended without our Stop (user cancel or WarpTo end): one re-request allowed in this step");
+                }
+                Stopped("unexpected");
             }
             _wasActive = _requested && active;
         }
@@ -128,8 +140,9 @@ namespace KspBridge.Flight
             _requested = true;
             _wasActive = true;
             _untilUt = targetUt;
-            Debug.Log("[KspBridge] warp requested until UT " + targetUt.ToString("F2"));
-            Event("warp_started", null);
+            Debug.Log("[KspBridge] warp requested until UT " + targetUt.ToString("F2") + (_resumePending ? " (re-request)" : ""));
+            Event("warp_started", null, _resumePending ? new Dictionary<string, object> { ["resumed"] = true } : null);
+            _resumePending = false;
         }
 
         /// <summary>Releases our warp, or at a step change and abort any rails warp and pending WarpTo; leaves physics warp alone.</summary>
@@ -156,7 +169,7 @@ namespace KspBridge.Flight
             Debug.Log("[KspBridge] warp stopped by the plan (" + (ours ? "ours" : "not requested by us") + ")");
             if (ours)
             {
-                Stopped();   // no latch: our own release
+                Stopped("plan");   // no latch: our own release
             }
         }
 
@@ -164,6 +177,8 @@ namespace KspBridge.Flight
         public static void ClearLatch()
         {
             _cancelled = false;
+            _resumeUsed = false;
+            _resumePending = false;
             _unavailable = null;
             _refusal = null;
         }
@@ -196,11 +211,20 @@ namespace KspBridge.Flight
 
         internal static bool CanSetMode => SetModeMethod != null;
 
-        private static void Stopped()
+        /// <summary>warp_stopped with who ended it (plan | unexpected) and the time left to until_ut then.</summary>
+        private static void Stopped(string endedBy)
         {
-            Event("warp_stopped", null);
+            double remaining = _untilUt - Planetarium.GetUniversalTime();
+            Event("warp_stopped", null, new Dictionary<string, object>
+            {
+                ["ended_by"] = endedBy,
+                ["remaining_s"] = double.IsNaN(remaining) ? null : (object)System.Math.Round(remaining, 1),
+            });
             _untilUt = double.NaN;
         }
+
+        /// <summary>A wait step stayed unaligned too long (design 0048 decision 1): warp_unavailable align_wait.</summary>
+        public static void AlignWait() => Unavailable("align_wait");
 
         /// <summary>Why a coast step waits without our warp; once per step and reason, so the cause is visible over MCP.</summary>
         private static void Unavailable(string reason)
@@ -214,7 +238,7 @@ namespace KspBridge.Flight
             Event("warp_unavailable", reason);
         }
 
-        private static void Event(string type, string reason)
+        private static void Event(string type, string reason, Dictionary<string, object> extra = null)
         {
             Dictionary<string, object> d = new Dictionary<string, object>
             {
@@ -224,6 +248,13 @@ namespace KspBridge.Flight
             if (reason != null)
             {
                 d["reason"] = reason;
+            }
+            if (extra != null)
+            {
+                foreach (KeyValuePair<string, object> kv in extra)
+                {
+                    d[kv.Key] = kv.Value;
+                }
             }
             FlightEvents.Add(type, Coordinator.StepIndex, d);
         }
