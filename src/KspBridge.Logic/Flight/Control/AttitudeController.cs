@@ -17,6 +17,13 @@ namespace KspBridge.Flight.Control
         internal const float OmegaMax = 0.5f;
         private const float Kp = 4f;
         private const float Ki = 0.4f;
+        internal const float KLin = Kp / 3f;   // outer-loop gain near zero error: a third of the inner rate loop (design 0055 decision 1)
+        private const float FfTau = 0.3f;     // target-rate feedforward low-pass time constant, s (decision 1-2)
+
+        // Target-rate feedforward state (decision 1-2): last target direction (world) and the filtered rate.
+        private static Vector3d _prevDir;
+        private static bool _prevDirValid;
+        private static Vector3 _ff;
 
         private static Vessel _v;
         private static bool _sasBefore;
@@ -57,6 +64,7 @@ namespace KspBridge.Flight.Control
             Record(v, hp);
             _v = v;
             _integral = Vector3.zero;
+            ResetFeedforward();
             v.ActionGroups.SetGroup(KSPActionGroup.SAS, false);
             v.OnFlyByWire += Fly;
         }
@@ -74,6 +82,7 @@ namespace KspBridge.Flight.Control
                 _v.OnFlyByWire -= Fly;
             }
             _v = v;
+            ResetFeedforward();   // the old vessel's target direction is no reference for the new one
             v.ActionGroups.SetGroup(KSPActionGroup.SAS, false);
             v.OnFlyByWire += Fly;
         }
@@ -160,6 +169,7 @@ namespace KspBridge.Flight.Control
             _v = v;
             Record(v, hp);
             _integral = Vector3.zero;
+            ResetFeedforward();
         }
 
         /// <summary>Applies the SAS state recorded at Attach, with its mode; call before Detach. SetGroup alone comes back as
@@ -203,6 +213,7 @@ namespace KspBridge.Flight.Control
             {
                 if (!Coordinator.Running || _v == null)
                 {
+                    ResetFeedforward();
                     return;   // no input unless a plan runs (e.g. a replacement that failed half way)
                 }
                 if (_v.ActionGroups[KSPActionGroup.SAS])
@@ -223,11 +234,13 @@ namespace KspBridge.Flight.Control
 
                 if (!c.Attitude.HasValue)
                 {
+                    ResetFeedforward();
                     return;   // attitude without attitude arguments: throttle only
                 }
                 if (Suspended(_v))
                 {
                     _integral = Vector3.zero;   // attitude_error is not known either
+                    ResetFeedforward();
                     return;
                 }
                 Steer(s, c.Attitude.Value);
@@ -245,14 +258,18 @@ namespace KspBridge.Flight.Control
             Vector3 moi = _v.MOI;
             Vector3 omega = _v.angularVelocity;
             float dt = TimeWarp.fixedDeltaTime;
+            Vector3 ff = Feedforward(target, dt);
             float pitch = 0, roll = 0, yaw = 0;
             Vector3 want3 = Vector3.zero, alpha3 = Vector3.zero;   // trace only
             for (int i = 0; i < 3; i++)
             {
                 float alpha = Mathf.Max(torque[i] / Mathf.Max(moi[i], 1e-3f), 1e-3f);
+                const float g = 1f;   // design 0055 decision 2 (unit 3): the estimated gain of this axis, outer loop only
+                float absErr = Mathf.Abs(err[i]);
                 float want = i == 1 && !target.HasRoll
                     ? 0f   // no roll target: damp the roll rate only
-                    : Mathf.Sign(err[i]) * Mathf.Min(Mathf.Sqrt(2 * alpha * Mathf.Abs(err[i])) * KStop, OmegaMax);
+                    : Mathf.Clamp(ff[i] + Mathf.Sign(err[i]) * Mathf.Min(Mathf.Min(g * KLin * absErr,
+                        Mathf.Sqrt(2 * g * alpha * absErr) * KStop), OmegaMax), -OmegaMax, OmegaMax);
                 want3[i] = want;
                 alpha3[i] = alpha;
                 float e = want - omega[i];
@@ -278,6 +295,7 @@ namespace KspBridge.Flight.Control
                     Alpha = alpha3,
                     Moi = moi,
                     Torque = (Vector3[])_kindSum.Clone(),
+                    Ff = ff,
                 });
             }
             catch (Exception e)
@@ -288,6 +306,36 @@ namespace KspBridge.Flight.Control
                     Debug.LogError("[KspBridge] controller trace: " + e);   // observation only: never aborts the plan
                 }
             }
+        }
+
+        /// <summary>Forgets the last target direction and the filtered rate: plan start, step start or replacement, vessel
+        /// change, and ticks that do not steer.</summary>
+        internal static void ResetFeedforward()
+        {
+            _prevDirValid = false;
+            _ff = Vector3.zero;
+        }
+
+        /// <summary>
+        /// Target-rate feedforward for pitch (x) and yaw (z), rad/s in the err sign convention (design 0055 decision 1-2): the
+        /// target direction's world rotation rate d0 × d1 / dt in vessel axes, low-passed (FfTau). A change faster than the
+        /// controller can follow (1.5·OmegaMax per tick, e.g. a reference switch) is a step and adds nothing. No roll.
+        /// </summary>
+        private static Vector3 Feedforward(AttitudeTarget target, float dt)
+        {
+            Vector3d dirNow = target.Direction(_v).normalized;
+            Vector3 raw = Vector3.zero;
+            if (_prevDirValid && dt > 0 && Vector3d.Angle(_prevDir, dirNow) * Mathf.Deg2Rad <= 1.5 * OmegaMax * dt)
+            {
+                // +x turns the nose (+y) toward +z and +z turns it toward -x: the same signs as the pitch / yaw errors
+                Vector3 wWorld = (Vector3)(Vector3d.Cross(_prevDir, dirNow) / dt);
+                Vector3 wLocal = Quaternion.Inverse(_v.ReferenceTransform.rotation) * wWorld;
+                raw = new Vector3(wLocal.x, 0, wLocal.z);
+            }
+            _ff += (raw - _ff) * (1 - Mathf.Exp(-dt / FfTau));
+            _prevDir = dirNow;
+            _prevDirValid = true;
+            return Vector3.ClampMagnitude(_ff, OmegaMax);
         }
 
         /// <summary>ControllerTrace kind of a torque provider: 0 wheel, 1 gimbal, 2 control surface (incl. ModuleAeroSurface),

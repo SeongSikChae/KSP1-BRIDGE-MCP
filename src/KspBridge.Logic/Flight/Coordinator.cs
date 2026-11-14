@@ -195,6 +195,7 @@ namespace KspBridge.Flight
             Warp.ClearLatch();
             EndMode(v);   // before step_completed; a throwing next BeginStep leaves no mode to end twice
             FlightMonitor.ResetStep();   // monitor_clear of the finished step, before step_completed
+            Control.AttitudeController.ResetFeedforward();   // a new step may switch the target: no feedforward across it
             FlightEvents.Add("step_completed", _step, StepData(_plan, _step));   // the last step too
             if (_step + 1 >= _plan.Steps.Count)
             {
@@ -309,6 +310,7 @@ namespace KspBridge.Flight
                 EndMode(v);   // the replaced plan's mode (none when idle)
                 FlightMonitor.Reset();   // after plan_replaced; a replaced plan's alerts end with it
                 Control.ControllerTrace.Clear();   // the trace covers one plan (kept after it ends)
+                Control.AttitudeController.ResetFeedforward();
                 _plan = plan;
                 _mode = mode;
                 _step = 0;
@@ -398,6 +400,7 @@ namespace KspBridge.Flight
                     EndMode(v);   // the replaced current step's mode
                     _mode = mode;
                     FlightMonitor.ResetStep();
+                    Control.AttitudeController.ResetFeedforward();
                     _stepStartUt = ut;
                     Warp.Stop();        // like NextStep
                     Warp.ClearLatch();

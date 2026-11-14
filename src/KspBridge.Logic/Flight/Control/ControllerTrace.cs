@@ -22,6 +22,7 @@ namespace KspBridge.Flight.Control
             public double Ut, Throttle, Q;
             public Vector3 Err, Omega, Want, Input, Alpha, Moi;   // rad, rad/s, rad/s, ±1, rad/s², t·m²
             public Vector3[] Torque;   // available torque per kind (kN·m), Kinds long, a new array per sample
+            public Vector3 Ff;         // target-rate feedforward added to want (rad/s)
         }
 
         private static readonly Sample[] _buf = new Sample[Capacity];
@@ -156,19 +157,29 @@ namespace KspBridge.Flight.Control
             Oscillation(w, a, contiguous, d, out double offsetDeg, out double ampDeg);
             Fit(w, a, contiguous, d);
 
-            // want_slope_at_amp: slope of the target-rate curve at the oscillation's operating point
+            // want_slope_at_amp: slope of the target-rate curve actually used (linear zone, sqrt, OmegaMax) at the
+            // oscillation's operating point; g = 1 until the gain estimate (design 0055 decision 4)
             object slope = null;
             if (!double.IsNaN(ampDeg))
             {
                 double e = Math.Max(Math.Abs(offsetDeg), ampDeg) / Deg;
                 if (e > 0 && alphaModel > 0)
                 {
-                    slope = Math.Sqrt(2 * alphaModel * e) * AttitudeController.KStop >= AttitudeController.OmegaMax
-                        ? 0.0
-                        : R(AttitudeController.KStop * Math.Sqrt(alphaModel / (2 * e)), 3);
+                    const double g = 1;
+                    double lin = g * AttitudeController.KLin * e, sq = Math.Sqrt(2 * g * alphaModel * e) * AttitudeController.KStop;
+                    slope = Math.Min(lin, sq) >= AttitudeController.OmegaMax ? 0.0
+                        : lin <= sq ? R(g * AttitudeController.KLin, 3)
+                        : R(AttitudeController.KStop * Math.Sqrt(g * alphaModel / (2 * e)), 3);
                 }
             }
             d["want_slope_at_amp"] = slope;
+
+            double ffSq = 0;
+            foreach (Sample s in w)
+            {
+                ffSq += s.Ff[a] * s.Ff[a];
+            }
+            d["ff_rms"] = R(Math.Sqrt(ffSq / n), 4);   // target-rate feedforward, rad/s
 
             var torque = new Dictionary<string, object>();
             for (int k = 0; k < Kinds; k++)
@@ -416,6 +427,7 @@ namespace KspBridge.Flight.Control
                         ["omega"] = R(s.Omega[a], 4),
                         ["want"] = R(s.Want[a], 4),
                         ["input"] = R(s.Input[a], 3),
+                        ["ff"] = R(s.Ff[a], 4),
                     };
                 }
                 list.Add(e);
