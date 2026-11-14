@@ -41,7 +41,7 @@ namespace KspBridge.Handlers
                 {
                     throw ApiException.BadRequest("include_debris must be true or false");
                 }
-                return Flight.Targeting.List(Guard.ActiveVessel(), d == "true");   // qualified: KSP has a global Targeting type
+                return Flight.Targeting.List(VesselSwitch.ListScopeActive(), d == "true");   // qualified: KSP has a global Targeting type
             });
             yield return new Route("POST", "/api/flight/target", (m, b, q) => Flight.Targeting.Set(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/plan_maneuver", (m, b, q) => Flight.Maneuver.ManeuverPlanner.Plan(Guard.ActiveVessel(), b));

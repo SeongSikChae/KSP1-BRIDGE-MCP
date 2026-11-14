@@ -2,6 +2,7 @@ using KspBridge.Flight.Control;
 using KspBridge.Flight.Maneuver;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace KspBridge.Flight
 {
@@ -14,7 +15,7 @@ namespace KspBridge.Flight
         public static object List(Vessel active, bool includeDebris)
         {
             List<Dictionary<string, object>> rows = new List<Dictionary<string, object>>();
-            foreach (Vessel x in FlightGlobals.Vessels)
+            foreach (Vessel x in VesselSwitch.Candidates())
             {
                 if (x == null || x.state == Vessel.State.DEAD)
                 {
@@ -39,8 +40,8 @@ namespace KspBridge.Flight
                     ["docking_ports"] = Ports(x),
                 });
             }
-            rows.Sort((p, q) => Dist(p).CompareTo(Dist(q)));
-            return new Dictionary<string, object> { ["vessels"] = rows };
+            // stable: without an active vessel (space center, tracking station) every distance is unknown and the game's order stays
+            return new Dictionary<string, object> { ["vessels"] = rows.OrderBy(Dist).ToList() };
         }
 
         private static double Dist(Dictionary<string, object> row) => row["distance"] is double d ? d : double.MaxValue;
