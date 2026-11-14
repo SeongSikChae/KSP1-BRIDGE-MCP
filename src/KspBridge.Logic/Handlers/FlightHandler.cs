@@ -62,7 +62,10 @@ namespace KspBridge.Handlers
             });
             yield return new Route("GET", "/api/flight/events", (m, b, q) =>
                 Events.Since(ParseLong(q["since"], 0, "since"), (int)Math.Max(1, Math.Min(Events.Capacity, ParseLong(q["limit"], 100, "limit")))));
+            yield return new Route("GET", "/api/flight/parts", (m, b, q) => Flight.PartStates.List(Guard.ActiveVessel(), Empty(q["part_id"]), Empty(q["module"])));   // qualified: KSP has a global PartStates enum
         }
+
+        private static string Empty(string s) => string.IsNullOrEmpty(s) ? null : s;   // as EditorHandler.Empty: ?x= means no x
 
         private static long ParseLong(string text, long defaultValue, string name)
         {
