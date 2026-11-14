@@ -357,8 +357,10 @@ namespace KspBridge.App
             "its fit (low = an axis with too little input to judge); lag_ticks = extra physics ticks from input to response (0 = none), lag_r2 the fit " +
             "for 1..10 ticks (flat = lag not resolvable); want_slope_at_amp = slope (1/s) of the target-rate curve the controller uses (linear zone " +
             "Kp/3 near zero error, then the stopping curve, 0 at the rate limit) at the oscillation's operating point; ff_rms = RMS of the target-rate " +
-            "feedforward added to want (rad/s). null where data is too short or flat, and the fit values also when the input stays saturated one way. " +
-            "torque = mean available torque per provider kind (kN·m; a reaction wheel that is off or without electric charge counts 0). step (1..50) adds " +
+            "feedforward added to want (rad/s, always a number, 0 without feedforward). Other values are null where data is too short or flat, and " +
+            "the fit values also when the input stays saturated one way. " +
+            "torque = mean available torque per provider kind (kN·m; a reaction wheel that is off, or on a vessel whose electric charge ran out, counts 0 " +
+            "until the charge is back to 1% of capacity). step (1..50) adds " +
             "series [{t, throttle, q, pitch/roll/yaw {err_deg, omega, want, input, ff}}] every step ticks (5 = about 10 Hz; " +
             "1 is about 1000 entries for 20 s). {samples: 0} without data for the active vessel. not_in_flight outside the flight scene.")]
         public Task<string> GetControllerTrace(

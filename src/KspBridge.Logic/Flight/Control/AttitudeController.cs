@@ -39,6 +39,7 @@ namespace KspBridge.Flight.Control
         private static int[] _torqueKind = new int[0];   // ControllerTrace kind of each _torque entry, rebuilt with it
         private static readonly Vector3[] _kindSum = new Vector3[ControllerTrace.Kinds];   // last AvailableTorque per kind
         private static bool _powered = true;   // electric-charge hysteresis state (HasCharge), reset when the vessel changes
+        private static bool _hasWheel;         // the cached providers include a reaction wheel (rebuilt with the cache)
         private static bool _traceFailed;   // a trace failure is logged once; a reload creates fresh statics
 
         /// <summary>The vessel the controller is attached to (null when detached).</summary>
@@ -376,13 +377,15 @@ namespace KspBridge.Flight.Control
                 _torqueParts = v.parts.Count;
                 _torque = v.FindPartModulesImplementing<ITorqueProvider>().ToArray();
                 _torqueKind = new int[_torque.Length];   // same block: lengths always match
+                _hasWheel = false;
                 for (int i = 0; i < _torque.Length; i++)
                 {
                     _torqueKind[i] = KindOf(_torque[i]);
+                    _hasWheel |= _torqueKind[i] == 0;
                 }
             }
             Array.Clear(_kindSum, 0, _kindSum.Length);
-            bool power = HasCharge(v);   // one lookup per tick
+            bool power = !_hasWheel || HasCharge(v);   // one lookup per tick, only when a wheel can use it
             Vector3 sum = Vector3.zero;
             for (int i = 0; i < _torque.Length; i++)
             {
@@ -403,12 +406,20 @@ namespace KspBridge.Flight.Control
         /// near zero does not switch the wheels' torque in and out every tick.</summary>
         private static bool HasCharge(Vessel v)
         {
-            PartResourceDefinition ec = PartResourceLibrary.Instance.GetDefinition("ElectricCharge");
-            if (ec == null)
+            double amount, max;
+            try
             {
-                return true;   // no such resource in this game: keep the old behaviour
+                PartResourceDefinition ec = PartResourceLibrary.Instance.GetDefinition("ElectricCharge");
+                if (ec == null)
+                {
+                    return true;   // no such resource in this game: keep the old behaviour
+                }
+                v.GetConnectedResourceTotals(ec.id, out amount, out max);
             }
-            v.GetConnectedResourceTotals(ec.id, out double amount, out double max);
+            catch (Exception)
+            {
+                return _powered;   // a failed lookup keeps the last state: the torque model must not abort the plan
+            }
             if (_powered && amount <= 1e-6)
             {
                 _powered = false;
