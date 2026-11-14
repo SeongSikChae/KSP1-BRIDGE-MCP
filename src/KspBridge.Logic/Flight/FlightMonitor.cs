@@ -103,6 +103,51 @@ namespace KspBridge.Flight
             _lastUt = double.NaN;
         }
 
+        /// <summary>get_flight plan.monitor: statistics of the last 10 s of samples (null when there are none). Values that never
+        /// had a number in the window are null; alerts is empty once the plan has ended.</summary>
+        public static Dictionary<string, object> Summary()
+        {
+            if (_window.Count == 0)
+            {
+                return null;
+            }
+            double firstUt = double.NaN, lastUt = double.NaN;
+            double errMax = double.NaN, errSum = 0, rateMax = double.NaN, aoaMax = double.NaN, tempMax = double.NaN;
+            int errN = 0;
+            foreach (Sample s in _window)
+            {
+                if (double.IsNaN(firstUt))
+                {
+                    firstUt = s.Ut;
+                }
+                lastUt = s.Ut;
+                if (!double.IsNaN(s.Err))
+                {
+                    errMax = Max(errMax, s.Err);
+                    errSum += s.Err;
+                    errN++;
+                }
+                rateMax = Max(rateMax, s.Rate);
+                aoaMax = Max(aoaMax, s.Aoa);
+                tempMax = Max(tempMax, s.Temp);
+            }
+            return new Dictionary<string, object>
+            {
+                ["window_s"] = Math.Round(lastUt - firstUt, 1),
+                ["samples"] = (double)_window.Count,
+                ["attitude_error_max"] = Num(errMax),
+                ["attitude_error_mean"] = errN > 0 ? Num(errSum / errN) : null,
+                ["angular_rate_max"] = Num(rateMax),
+                ["sign_flips"] = (double)MaxFlips(_oscMinRate),
+                ["aoa_max"] = Num(aoaMax),
+                ["temp_ratio_max"] = Num(tempMax),
+                ["alerts"] = _running ? new List<object>(_level.Keys) : new List<object>(),   // ended plan: no current alerts
+            };
+        }
+
+        /// <summary>The larger of the two, ignoring a NaN x.</summary>
+        private static double Max(double max, double x) => double.IsNaN(x) ? max : double.IsNaN(max) || x > max ? x : max;
+
         private static void Add(Sample s)
         {
             _window.Enqueue(s);

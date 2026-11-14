@@ -861,6 +861,7 @@ namespace KspBridge.Flight
                     ["step_time"] = Running ? N(Planetarium.GetUniversalTime() - _stepStartUt) : null,
                     ["attitude_error"] = N(_view.Num["attitude_error"]),
                     ["warp"] = Warp.Active,
+                    ["monitor"] = FlightMonitor.Summary(),
                     ["event_seq"] = FlightEvents.LastSeq,
                     ["epoch"] = FlightEvents.Epoch,
                 };
