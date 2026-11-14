@@ -31,6 +31,9 @@ namespace KspBridge.Handlers
             yield return new Route("POST", "/api/flight/sas", (m, b, q) => Flight.Control.ManualControl.SetSas(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/rcs", (m, b, q) => Flight.Control.ManualControl.SetRcs(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/translate", (m, b, q) => Flight.Control.ManualControl.Translate(Guard.ActiveVessel(), b));
+            yield return new Route("POST", "/api/flight/nodes/add", (m, b, q) => Flight.Maneuver.ManeuverNodes.Add(Guard.ActiveVessel(), b));
+            yield return new Route("POST", "/api/flight/nodes/update", (m, b, q) => Flight.Maneuver.ManeuverNodes.Update(Guard.ActiveVessel(), b));
+            yield return new Route("POST", "/api/flight/nodes/remove", (m, b, q) => Flight.Maneuver.ManeuverNodes.Remove(Guard.ActiveVessel(), b));
             yield return new Route("POST", "/api/flight/revert", (m, b, q) => FlightReset.Revert(b.GetString("target")));
             yield return new Route("POST", "/api/flight/leave", (m, b, q) => FlightReset.Leave());
             yield return new Route("POST", "/api/vessel/recover", (m, b, q) => FlightReset.Recover(b));

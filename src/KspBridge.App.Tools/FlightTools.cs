@@ -27,7 +27,9 @@ namespace KspBridge.App
         [McpServerTool(Name = "get_flight", ReadOnly = true)]
         [Description("Active vessel flight state: vessel, flight, orbit, propulsion, plan ({state:idle} without a plan; plan.warp = warp in effect: rails rate or a warp-to) " +
             "and time_warp {mode rails|physics, rate_index, rate, auto_warp (a warp-to pending or running)}, " +
-            "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}, rcs {on, parts, monopropellant {amount, max} or null}, translate (last rcs_translate pulse, see rcs_translate; null before any)} (null with controls_error if it could not be read). " +
+            "controls {sas {on, mode, speed_mode orbit|surface|target (navball speed display), available_modes}, rcs {on, parts, monopropellant {amount, max} or null}, translate (last rcs_translate pulse, see rcs_translate; null before any)} (null with controls_error if it could not be read), " +
+            "maneuver_nodes [{index, ut, time_to, prograde, normal, radial (m/s), dv, burn_time (s across stages; null when no stage can fire), dv_short (the stages cannot supply dv), " +
+            "orbit_after {apoapsis, periapsis, eccentricity, inclination, period, body} (KSP's prediction after the node; null until computed)}] (KSP maneuver nodes, earliest first). " +
             "Field names match flight-plan condition variables; null means not known yet (e.g. stage_dv while the game recalculates).")]
         public Task<string> GetFlight(CancellationToken ct)
             => client.SendAsync(HttpMethod.Get, "api/flight", null, ct);
@@ -67,6 +69,43 @@ namespace KspBridge.App
             [Description("Nose (+) / tail (-), [-1, 1]")] double z = 0,
             CancellationToken ct = default)
             => client.SendAsync(HttpMethod.Post, "api/flight/translate", new { seconds, x, y, z }, ct);
+
+        [McpServerTool(Name = "add_maneuver_node", Destructive = true)]
+        [Description("Add a KSP maneuver node to the active vessel at an orbit position (at: apoapsis, periapsis, ascending_node, descending_node; " +
+            "nodes are relative to the target's orbit plane when the target orbits the same body, else the equator) or at ut (game time, not in the past); " +
+            "give at or ut. Δv components prograde, normal, radial in m/s (default 0). Not while a flight plan runs (plan_running). " +
+            "Errors: nodes_unavailable (no patched conics, e.g. tracking station level), no_solution (the position is undefined: nodes of a coplanar orbit, " +
+            "apoapsis of a hyperbola, a passed periapsis), bad_request. Returns {maneuver_nodes} as in get_flight.")]
+        public Task<string> AddManeuverNode(
+            [Description("apoapsis, periapsis, ascending_node, descending_node or ut")] string? at = null,
+            [Description("Node time (game UT seconds) when at is ut or omitted")] double? ut = null,
+            [Description("Prograde Δv m/s")] double prograde = 0,
+            [Description("Normal Δv m/s")] double normal = 0,
+            [Description("Radial (out) Δv m/s")] double radial = 0,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/nodes/add", new { at, ut, prograde, normal, radial }, ct);
+
+        [McpServerTool(Name = "update_maneuver_node", Destructive = true)]
+        [Description("Change a maneuver node of the active vessel: index from get_flight.maneuver_nodes (0 = earliest); only the given fields change " +
+            "(ut not in the past; prograde, normal, radial m/s). Not while a flight plan runs (plan_running). Errors: nodes_unavailable, bad_request " +
+            "(index out of range). Returns {maneuver_nodes}.")]
+        public Task<string> UpdateManeuverNode(
+            [Description("Node index from get_flight.maneuver_nodes")] int index,
+            [Description("New node time (game UT seconds)")] double? ut = null,
+            [Description("Prograde Δv m/s")] double? prograde = null,
+            [Description("Normal Δv m/s")] double? normal = null,
+            [Description("Radial (out) Δv m/s")] double? radial = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/nodes/update", new { index, ut, prograde, normal, radial }, ct);
+
+        [McpServerTool(Name = "remove_maneuver_node", Destructive = true)]
+        [Description("Remove a maneuver node of the active vessel by index, or all of them with all: true (give one of the two). " +
+            "Not while a flight plan runs (plan_running). Returns {maneuver_nodes}.")]
+        public Task<string> RemoveManeuverNode(
+            [Description("Node index from get_flight.maneuver_nodes")] int? index = null,
+            [Description("true = remove every node")] bool? all = null,
+            CancellationToken ct = default)
+            => client.SendAsync(HttpMethod.Post, "api/flight/nodes/remove", new { index, all }, ct);
 
         [McpServerTool(Name = "submit_flight_plan", Destructive = true)]
         [Description("Start a flight plan on the active vessel (replaces a running plan). plan = {auto_stage?, staging_options?, abort?, steps:[{name?, mode, ...mode args, on_start?, until?, abort?, timeout_s?, rcs?}]}. " +

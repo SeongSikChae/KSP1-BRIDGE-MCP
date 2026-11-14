@@ -818,6 +818,15 @@ namespace KspBridge.Flight
             {
                 result["controls_error"] = controlsError;
             }
+            try
+            {
+                result["maneuver_nodes"] = Maneuver.ManeuverNodes.List(v);
+            }
+            catch (Exception e)   // isolated like controls
+            {
+                result["maneuver_nodes"] = null;
+                result["maneuver_nodes_error"] = e.GetType().Name + ": " + e.Message;
+            }
             return result;
         }
 

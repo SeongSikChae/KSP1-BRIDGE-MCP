@@ -89,6 +89,27 @@ namespace KspBridge.App.Tests
         }
 
         [TestMethod]
+        public async Task ManeuverNodeToolsMapToHttpRequests()
+        {
+            (FlightTools tools, RecordingHandler handler) = Create();
+            CancellationToken ct = CancellationToken.None;
+
+            await tools.AddManeuverNode("apoapsis", prograde: 100, ct: ct);
+            await tools.AddManeuverNode(ut: 1234.5, normal: -20, radial: 3, ct: ct);
+            await tools.UpdateManeuverNode(0, normal: 50, ct: ct);
+            await tools.RemoveManeuverNode(1, ct: ct);
+            await tools.RemoveManeuverNode(all: true, ct: ct);
+
+            var r = handler.Requests;
+            Assert.HasCount(5, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":"apoapsis","ut":null,"prograde":100,"normal":0,"radial":0}"""), r[0]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":null,"ut":1234.5,"prograde":0,"normal":-20,"radial":3}"""), r[1]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/update", (string?)"""{"index":0,"ut":null,"prograde":null,"normal":50,"radial":null}"""), r[2]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/remove", (string?)"""{"index":1,"all":null}"""), r[3]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/remove", (string?)"""{"index":null,"all":true}"""), r[4]);
+        }
+
+        [TestMethod]
         public async Task SuccessReturnsDataJson()
         {
             (FlightTools tools, _) = Create();
