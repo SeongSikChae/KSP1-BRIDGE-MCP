@@ -124,6 +124,135 @@ namespace KspBridge.Flight
             return r;
         }
 
+        /// <summary>
+        /// A flight part action window value change (UIPartActionFieldItem.SetFieldValue, scene Flight; design 0043): counterparts
+        /// first when the control affects them in flight, then the part itself with onFieldChanged (old value), only when something
+        /// changes. A game callback that throws part way answers 500 field_failed naming what already changed.
+        /// </summary>
+        public static object SetField(Vessel v, RequestBody b)
+        {
+            uint id = PartIdFromBody(b);
+            string module = b.GetString("module");
+            string name = b.GetString("field");
+            object raw = b.GetRaw("value") ?? throw ApiException.BadRequest("'value' is required");
+            int? moduleIndex = b.Has("module_index") ? ModuleIndex(b) : (int?)null;
+            Part p = v.parts.FirstOrDefault(x => x.persistentId == id) ?? throw PartNotFound(id);
+            PartModule target = FindModule(p, module, moduleIndex, "field_not_editable", "part-level fields", out int? index);
+            BaseFieldList fields = target == null ? p.Fields : target.Fields;
+            BaseField f = fields[name];
+            if (f == null || !Shown(f))
+            {
+                throw new ApiException(404, "field_not_found", name + " is not a field the part action window shows for " + module + " on "
+                    + p.partInfo.name + " (fields: " + string.Join(", ", fields.Cast<BaseField>().Where(Shown).Select(x => x.name).ToArray()) + ")");
+            }
+            UI_Control c = EditableControl(f)
+                ?? throw new ApiException(409, "field_not_editable", module + "." + name + " is shown but cannot be changed in flight");
+            if (!Unlocked(FieldLock(c)))
+            {
+                throw new ApiException(409, "field_locked", module + "." + name + " cannot be changed now: input_locked ("
+                    + (c.requireFullControl ? "TWEAKABLES_FULLONLY" : "TWEAKABLES_ANYCONTROL") + ")");   // the enum's ToString names composite flags
+            }
+            object value = Editor.PartSettings.Convert(f, raw);
+            Editor.PartSettings.CheckRange(f, c, value);
+
+            object old = f.GetValue(f.host);
+            bool changed = !Equals(old, value);
+            List<Part> group = new List<Part> { p };
+            List<object> written = new List<object>();   // counterpart ids whose value was set
+            bool own = false;
+            try
+            {
+                if ((c.affectSymCounterparts & UI_Scene.Flight) != UI_Scene.None)
+                {
+                    foreach (Part s in p.symmetryCounterparts.Where(s => s != null))
+                    {
+                        if (target == null)
+                        {
+                            changed |= !Equals(s.Fields.GetValue(name), value);
+                            s.Fields.SetValue(name, value);   // part-level: value only, no events (SetSymCounterpartValue)
+                            written.Add((double)s.persistentId);
+                        }
+                        else
+                        {
+                            PartModule sm = Editor.PartSettings.CounterpartModule(s, index.Value, target);
+                            if (sm == null)
+                            {
+                                continue;
+                            }
+                            changed |= !Equals(sm.Fields.GetValue(name), value);
+                            sm.Fields.SetValue(name, value);
+                            written.Add((double)s.persistentId);
+                            BaseField sf = sm.Fields[name];
+                            sf?.uiControlEditor?.onSymmetryFieldChanged?.Invoke(f, value);
+                            sf?.uiControlFlight?.onSymmetryFieldChanged?.Invoke(f, value);
+                        }
+                        group.Add(s);
+                    }
+                }
+                if (changed)
+                {
+                    f.SetValue(value, f.host);
+                    own = true;
+                    c.onFieldChanged?.Invoke(f, old);
+                    LogField(id, p, module, index, name, old, value, written, true, null);
+                }
+            }
+            catch (Exception ex)   // a game callback failed part way (design 0043 step 8): say what already changed
+            {
+                string error = ex.GetType().Name + ": " + ex.Message;
+                LogField(id, p, module, index, name, old, value, written, own, error);
+                throw new ApiException(500, "field_failed", error + " (value already set on counterparts [" + string.Join(", ", written.Select(x => x.ToString()).ToArray())
+                    + "]" + (own ? " and on the part itself" : "") + "; read get_vessel_parts before retrying)");
+            }
+            finally
+            {
+                foreach (Part s in group)
+                {
+                    MonoUtilities.RefreshPartContextWindow(s);
+                }
+            }
+            return new Dictionary<string, object>
+            {
+                ["part_id"] = (double)id,
+                ["part"] = p.partInfo.name,
+                ["module"] = module,
+                ["index"] = index,
+                ["field"] = name,
+                ["old"] = FieldValue(old),
+                ["value"] = FieldValue(f.GetValue(f.host)),
+                ["changed"] = changed,
+                ["values"] = group.Select(s => (object)new Dictionary<string, object>
+                {
+                    ["part_id"] = (double)s.persistentId,
+                    ["value"] = FieldValue(target == null ? s.Fields.GetValue(name)
+                        : (s == p ? target : Editor.PartSettings.CounterpartModule(s, index.Value, target))?.Fields.GetValue(name)),
+                }).ToList(),
+            };
+        }
+
+        private static void LogField(uint id, Part p, string module, int? index, string name, object old, object value, List<object> written, bool own, string error) =>
+            Log("part_field", new Dictionary<string, object>
+            {
+                ["part_id"] = (double)id,
+                ["part"] = p.partInfo.name,
+                ["module"] = module,
+                ["index"] = index,
+                ["field"] = name,
+                ["old"] = FieldValue(old),
+                ["value"] = FieldValue(value),
+                ["counterparts"] = written,
+                ["own"] = own,
+                ["error"] = error,
+            }, "part_field " + p.partInfo.name + " (" + id + ") " + module + "." + name + " " + FieldValue(old) + " -> " + FieldValue(value)
+                + (error != null ? " failed: " + error : ""));
+
+        /// <summary>A flight event (step -1 without a plan) and the same line in KSP.log (proposal decision 10).</summary>
+        internal static void Log(string type, Dictionary<string, object> data, string line)
+        {
+            FlightEvents.Add(type, Coordinator.Running ? Coordinator.StepIndex : -1, data);
+            UnityEngine.Debug.Log("[KspBridge] " + line);
+        }
+
         /// <summary>CanActivateEvent steps 1·2: the event is in the window's list at all.</summary>
         internal static bool Listed(BaseEvent e) =>
             !(e.advancedTweakable && !GameSettings.ADVANCED_TWEAKABLES) && e.guiActive && e.active && !e.EventIsDisabledByVariant;
