@@ -30,6 +30,17 @@ namespace KspBridge.Flight.Modes
         private double _dvShortSince = double.NaN;
         private double _attLostSince = double.NaN;
 
+        // #22 U4 correction burn state (Save/Load)
+        private bool _corrDecided;
+        private bool _correcting;
+        private Vector3d _corrDv = Vector3d.zero;   // inertial, world axes
+        private double _corrUsed;
+        private double _corrStartUt;
+        private double _corrPredUt = double.NaN;    // last prediction UT counted for divergence
+        private double _corrPrevErr = double.NaN;
+        private int _corrGrowing;
+        private double _corrUsedAtPred;             // _corrUsed at the last counted prediction
+
         private LandMode(double margin, double finalAlt, double finalSpeed, double gearAlt, LandingTarget target)
         {
             _margin = margin;
@@ -109,6 +120,33 @@ namespace KspBridge.Flight.Modes
         /// <summary>Axis-to-command angle (deg) and duration (s) that count as a lost attitude in the loop.</summary>
         private const double AttitudeLostDeg = 30;
         private const double AttitudeLostS = 1;
+
+        /// <summary>#22 decision 5: correct above the atmosphere when the predicted error is over this (m).</summary>
+        private const double CorrectStartM = 100;
+
+        /// <summary>Correction converged below this predicted error (m).</summary>
+        private const double CorrectDoneM = 20;
+
+        /// <summary>Correction time limit from its start, alignment included (s).</summary>
+        private const double CorrectMaxS = 60;
+
+        /// <summary>Throttle 0 until the axis is within this of the correction direction (deg).</summary>
+        private const double CorrectAlignDeg = 5;
+
+        /// <summary>Throttle = remaining Δv / (max accel × this): tapers over the last seconds.</summary>
+        private const double CorrectTaperS = 2;
+
+        /// <summary>Lowest throttle once aligned, so the remaining Δv runs out instead of tapering forever.</summary>
+        private const double CorrectMinThrottle = 0.05;
+
+        /// <summary>Consecutive predicted error increases that end the correction as diverged.</summary>
+        private const int CorrectGrowMax = 3;
+
+        /// <summary>Δv (m/s) applied between two predictions for an error increase to count toward divergence.</summary>
+        private const double CorrectGrowMinDv = 0.05;
+
+        /// <summary>Angular rate (rad/s) below which the axis counts as settled for the correction burn.</summary>
+        private const double CorrectAlignRate = 0.02;
 
         /// <summary>Final-segment speed gain (1/s).</summary>
         private const double FinalGain = 1;
@@ -241,6 +279,16 @@ namespace KspBridge.Flight.Modes
             double aReq = vv > 0 && h > _finalAlt
                 ? (vv * vv - _finalSpeed * _finalSpeed) / (2 * (h - _finalAlt)) + g
                 : double.NaN;
+
+            // #22 decision 5: one correction burn above the atmosphere, decided on the first real tick
+            if (_track != null && !_burning && !FlightEvents.InTrial)
+            {
+                ModeCommand? corr = Correction(v, t, ut, h, vv, g, maxAccel);
+                if (corr != null)
+                {
+                    return corr.Value;
+                }
+            }
 
             // #22 decision 6: while burning toward a kept target, a horizontal velocity loop (τ) once the relative horizontal
             // speed fits under the tilt cap; otherwise the #17 formula (surface retrograde, stopping at −srf_velocity).
@@ -556,6 +604,132 @@ namespace KspBridge.Flight.Modes
 
         /// <summary>#22 decision 6: |want| = min(|d| / tGoV, √(2·a_hLim·|d|), |d| / (4τ)) toward the target; tGoV to the
         /// vertical-first height, a_hLim = 0.5·g·tan 30°; |d|/(4τ) with the τ loop is critically damped.</summary>
+        /// <summary>#22 decision 5: decides once on the first real tick (the tracker has just fixed the target and predicted),
+        /// then runs the correction burn until a stop condition. null: no correction command this tick, the normal flow goes on
+        /// from the same tick (no burn start judgement while correcting).</summary>
+        private ModeCommand? Correction(Vessel v, Telemetry t, double ut, double h, double vv, double g, double maxAccel)
+        {
+            CelestialBody body = v.mainBody;
+            bool above = !body.atmosphere || v.altitude >= body.atmosphereDepth;
+            if (!_corrDecided)
+            {
+                _corrDecided = true;
+                if (!_track.Active)
+                {
+                    return null;   // no target (unresolved vessel): nothing to correct
+                }
+                double err0 = _track.PredictionError(body);
+                if (_track.Prediction == null)
+                {
+                    _track.Unreachable("no_impact", "correction", null);
+                    Log("correction: no impact");
+                    return null;
+                }
+                if (!above || err0 <= CorrectStartM)
+                {
+                    Log("correction: skipped above=" + above + " err=" + F(err0, 1));
+                    return null;
+                }
+                if (!_track.SolveCorrection(v, ut, out _corrDv))
+                {
+                    _track.Unreachable("no_solution", "correction", new Dictionary<string, object> { ["error_m"] = R(err0) });
+                    Log("correction: no solution err=" + F(err0, 1));
+                    return null;
+                }
+                double dvLeft = t.Num["total_dv"];
+                if (_corrDv.magnitude > dvLeft)
+                {
+                    _track.Unreachable("dv", "correction", new Dictionary<string, object>
+                    {
+                        ["dv_need"] = R(_corrDv.magnitude),
+                        ["dv_left"] = R(dvLeft),
+                    });
+                    Log("correction: dv need=" + F(_corrDv.magnitude, 1) + " left=" + F(dvLeft, 1));
+                    return null;   // keep landing with the burn-time guidance
+                }
+                _correcting = true;
+                _corrStartUt = ut;
+                _corrUsed = 0;
+                _corrPredUt = _track.PredictionUt;
+                _corrPrevErr = err0;
+                _corrGrowing = 0;
+                _corrUsedAtPred = 0;
+                FlightEvents.Add("landing_correction_start", Coordinator.StepIndex, new Dictionary<string, object>
+                {
+                    ["error_m"] = R(err0),
+                    ["dv"] = R(_corrDv.magnitude),
+                });
+                Log("correction start: err=" + F(err0, 1) + " dv=" + F(_corrDv.magnitude, 2) + " h=" + F(h, 0));
+            }
+            if (!_correcting)
+            {
+                return null;
+            }
+
+            double err = _track.PredictionError(body);
+            // a new prediction: count consecutive increases, only across predictions with Δv applied in between
+            // (U4 1st run: sub-metre changes of the unpowered prediction while coasting counted as divergence)
+            if (_track.PredictionUt != _corrPredUt)
+            {
+                _corrPredUt = _track.PredictionUt;
+                if (!double.IsNaN(err) && !double.IsNaN(_corrPrevErr) && _corrUsed - _corrUsedAtPred >= CorrectGrowMinDv)
+                {
+                    _corrGrowing = err > _corrPrevErr ? _corrGrowing + 1 : 0;
+                }
+                _corrPrevErr = err;
+                _corrUsedAtPred = _corrUsed;
+            }
+            // distance to stop the descent at full thrust; ×2 ≥ ground height leaves no margin for the braking burn
+            double stopDist = maxAccel > g ? Math.Max(vv, 0) * Math.Max(vv, 0) / (2 * (maxAccel - g)) : double.PositiveInfinity;
+            string stop = err < CorrectDoneM ? "converged"
+                : _corrUsed >= _corrDv.magnitude ? "dv_applied"
+                : !above ? "atmosphere"
+                : _corrGrowing >= CorrectGrowMax ? "diverged"
+                : stopDist * 2 >= h ? "no_margin"
+                : ut - _corrStartUt >= CorrectMaxS ? "timeout"
+                : null;
+            if (stop != null)
+            {
+                _correcting = false;
+                FlightEvents.Add("landing_correction_done", Coordinator.StepIndex, new Dictionary<string, object>
+                {
+                    ["error_m"] = R(err),
+                    ["dv_used"] = R(_corrUsed),
+                    ["dv"] = R(_corrDv.magnitude),
+                    ["reason"] = stop,
+                    ["elapsed_s"] = R(ut - _corrStartUt),
+                });
+                if (stop == "diverged")
+                {
+                    _track.Unreachable("correction_diverged", "correction", new Dictionary<string, object> { ["error_m"] = R(err) });
+                }
+                Log("correction done: " + stop + " err=" + F(err, 1) + " used=" + F(_corrUsed, 2) + "/" + F(_corrDv.magnitude, 2) +
+                    " elapsed=" + F(ut - _corrStartUt, 1));
+                return null;
+            }
+
+            Vector3d dir = _corrDv.normalized;
+            double axisErr = Vector3d.Angle(v.ReferenceTransform.up, dir);
+            double rem = _corrDv.magnitude - _corrUsed;
+            // aligned = within 5° and settled (U4 1st run: the 129° slew swung through 5° and kept turning away)
+            bool aligned = axisErr <= CorrectAlignDeg && v.angularVelocity.magnitude <= CorrectAlignRate;
+            double throttle = !aligned ? 0 : Clamp(rem / (maxAccel * CorrectTaperS), CorrectMinThrottle, 1);
+            // Δv applied along the correction direction since the last tick (thrust kN / mass t = m/s²)
+            double thrust = t.Num["thrust"];
+            if (v.totalMass > 0 && !double.IsNaN(thrust))
+            {
+                _corrUsed += thrust / v.totalMass * Math.Max(0, Math.Cos(axisErr * Deg)) * TimeWarp.fixedDeltaTime;
+            }
+            if (ut - _diagUt >= DiagS)
+            {
+                _diagUt = ut;
+                Log("correction: err=" + F(err, 1) + " growing=" + _corrGrowing + " used=" + F(_corrUsed, 2) + "/" + F(_corrDv.magnitude, 2) +
+                    " axis_err=" + F(axisErr, 1) + " ang_vel=" + F(v.angularVelocity.magnitude, 3) + " thr=" + F(throttle, 3) + " stop_dist=" + F(stopDist, 0) + " h=" + F(h, 0) +
+                    " elapsed=" + F(ut - _corrStartUt, 1));
+            }
+            return new ModeCommand(AttitudeTarget.Vector(dir), throttle);
+        }
+
         private Vector3d Want(Vessel v, Vector3d up, double h, double hV, double vv, double g)
         {
             Vector3d d = Vector3d.Exclude(up, _track.TargetWorld(v) - v.CoMD);
@@ -626,6 +800,16 @@ namespace KspBridge.Flight.Modes
                 state["a_cmd_ut"] = _aCmdUt;
                 state["dv_short_since"] = double.IsNaN(_dvShortSince) ? null : (object)_dvShortSince;
                 state["att_lost_since"] = double.IsNaN(_attLostSince) ? null : (object)_attLostSince;
+                state["correction_decided"] = _corrDecided;
+                state["correcting"] = _correcting;
+                state["corr_dv_x"] = _corrDv.x;
+                state["corr_dv_y"] = _corrDv.y;
+                state["corr_dv_z"] = _corrDv.z;
+                state["corr_used"] = _corrUsed;
+                state["corr_start_ut"] = _corrStartUt;
+                state["corr_prev_err"] = double.IsNaN(_corrPrevErr) ? null : (object)_corrPrevErr;
+                state["corr_growing"] = (double)_corrGrowing;
+                state["corr_used_at_pred"] = _corrUsedAtPred;
             }
             return state;
         }
@@ -662,6 +846,15 @@ namespace KspBridge.Flight.Modes
                 _aCmdUt = Handover.D(state, "a_cmd_ut", 0);
                 _dvShortSince = Handover.D(state, "dv_short_since", double.NaN);
                 _attLostSince = Handover.D(state, "att_lost_since", double.NaN);
+                _corrDecided = Handover.B(state, "correction_decided");
+                _correcting = Handover.B(state, "correcting");
+                _corrDv = new Vector3d(Handover.D(state, "corr_dv_x", 0), Handover.D(state, "corr_dv_y", 0), Handover.D(state, "corr_dv_z", 0));
+                _corrUsed = Handover.D(state, "corr_used", 0);
+                _corrStartUt = Handover.D(state, "corr_start_ut", 0);   // the 60 s limit keeps counting across the reload
+                _corrPrevErr = Handover.D(state, "corr_prev_err", double.NaN);
+                _corrGrowing = (int)Handover.D(state, "corr_growing", 0);
+                _corrUsedAtPred = Handover.D(state, "corr_used_at_pred", 0);
+                _corrPredUt = double.NaN;   // the tracker predicts again on the first tick after the load
             }
         }
 

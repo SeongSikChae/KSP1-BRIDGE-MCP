@@ -69,6 +69,21 @@ namespace KspBridge.Flight.Landing
 
         public Impact Prediction => _pred;
 
+        /// <summary>UT of the last unpowered prediction (a new one arrives about once a second).</summary>
+        public double PredictionUt => _predUt;
+
+        /// <summary>Great-circle distance (m) from the current prediction to the target; NaN without one.</summary>
+        public double PredictionError(CelestialBody body) =>
+            _pred == null || !Active ? double.NaN : ImpactPredictor.Distance(body, _pred.Lat, _pred.Lon, _lat, _lon);
+
+        /// <summary>Correction solve (#22 U4) on the current state with the kept target and drag model (call only while Active).</summary>
+        public bool SolveCorrection(Vessel v, double ut, out Vector3d dvWorld)
+        {
+            CelestialBody body = v.mainBody;
+            return ImpactCorrection.Solve(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag,
+                                          _lat, _lon, out dvWorld);
+        }
+
         /// <summary>World position of the fixed target on the terrain (call only while Active).</summary>
         public Vector3d TargetWorld(Vessel v) => v.mainBody.GetWorldSurfacePosition(_lat, _lon, _alt);
 

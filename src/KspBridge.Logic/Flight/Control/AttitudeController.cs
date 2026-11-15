@@ -274,7 +274,15 @@ namespace KspBridge.Flight.Control
                 want3[i] = want;
                 alpha3[i] = alpha;
                 float e = want - omega[i];
-                _integral[i] = Mathf.Clamp(_integral[i] + e * dt, -1, 1);
+                // conditional integration (anti-windup, #22 U4): no integration while the output is saturated and e would
+                // push it further. With a small alpha (one wheel in vacuum) the wound-up Ki term held full input past the
+                // stopping curve and the axis overshot by 25..35° each way.
+                float next = Mathf.Clamp(_integral[i] + e * dt, -1, 1);
+                float aNext = Kp * e + Ki * next;
+                if (Mathf.Abs(aNext / alpha) <= 1 || Mathf.Sign(e) != Mathf.Sign(aNext))
+                {
+                    _integral[i] = next;
+                }
                 float a = Kp * e + Ki * _integral[i];
                 float input = Mathf.Clamp(-a / alpha, -1, 1);   // a positive input turns the rate negative
                 if (i == 0) pitch = input; else if (i == 1) roll = input; else yaw = input;
