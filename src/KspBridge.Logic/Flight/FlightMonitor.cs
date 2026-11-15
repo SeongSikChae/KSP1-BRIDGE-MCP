@@ -29,6 +29,8 @@ namespace KspBridge.Flight
         private static double _flipFor, _lostFor, _wasteFor;
         private static double _lostFrom = double.NaN;   // attitude_error the control_lost timer counts from
         private static double _lastUt = double.NaN;
+        private static double _drift;            // attitude_drift: accumulated angle the nose moved away from the target by itself (deg)
+        private static Vector3d? _driftPrev;     // nose direction at the last judged tick (null = none: the next tick adds nothing)
         private static double _oscMinRate = 0.05;
         private static bool _running;   // false after EndPlan: the summary shows no current alerts
 
@@ -78,6 +80,44 @@ namespace KspBridge.Flight
             Accumulate(ref _lostFor, lost, pauseErr, dt);
             Accumulate(ref _wasteFor, thrusting && err > s.WasteErrorDeg, pauseErr, dt);
 
+            // attitude_drift: no thrust (or a forced land start still turning, thrust cut by cos) with a commanded attitude.
+            // Paused (kept as is, previous nose dropped) on rails, while staging and when the error is not known.
+            bool driftArmed = (!thrusting || cmd.Aligning) && cmd.Attitude.HasValue;
+            bool driftPause = v.packed || t.Str["staging"] != "none" || double.IsNaN(err);
+            string driftLevel = _level.TryGetValue("attitude_drift", out string dl) ? dl : null;   // unchanged while paused
+            if (driftPause)
+            {
+                _driftPrev = null;
+            }
+            else if (!driftArmed)
+            {
+                ResetDrift();
+                driftLevel = null;
+            }
+            else
+            {
+                Vector3d dir = cmd.Attitude.Value.Direction(v);
+                Vector3d nose = v.ReferenceTransform.up;
+                if (_driftPrev.HasValue)   // change of the nose against the current target only: target moves add nothing
+                {
+                    _drift = Math.Max(0, _drift + Vector3d.Angle(nose, dir) - Vector3d.Angle(_driftPrev.Value, dir));
+                }
+                _driftPrev = nose;
+                if (err > s.DriftErrorDeg && _drift >= s.DriftGrowthDeg)
+                {
+                    driftLevel = "warn";
+                }
+                else if (err <= s.DriftErrorDeg)
+                {
+                    if (driftLevel != null)
+                    {
+                        ResetDrift();   // cleared: a new episode accumulates from 0
+                    }
+                    driftLevel = null;
+                }
+                // else: above the limit, not (or no longer) accumulated: keep the current level until it comes back under
+            }
+
             string abortLevel = s.Abort ? "abort" : "warn";
             string abort = null;
             abort = Set("flipped", _flipFor >= s.FlipForS ? abortLevel : null, aoa, s.FlipAoaDeg,
@@ -90,7 +130,14 @@ namespace KspBridge.Flight
             int flips = MaxFlips(s.OscMinRate);
             bool oscOn = _level.ContainsKey("oscillation") ? flips >= s.OscFlips / 2 : flips >= s.OscFlips;   // hysteresis
             Set("oscillation", oscOn ? "warn" : null, flips, s.OscFlips, null);
+            Set("attitude_drift", driftLevel, err, s.DriftErrorDeg, null);
             return abort;
+        }
+
+        private static void ResetDrift()
+        {
+            _drift = 0;
+            _driftPrev = null;
         }
 
         /// <summary>Step change (NextStep, a replaced current step): clears every alert with monitor_clear and the timers;
@@ -102,6 +149,7 @@ namespace KspBridge.Flight
                 Set(kind, null, double.NaN, double.NaN, null);
             }
             _flipFor = _lostFor = _wasteFor = 0;
+            ResetDrift();
         }
 
         /// <summary>Plan end (abort, completion, release): alerts and timers cleared without events (plan_aborted /
@@ -110,6 +158,7 @@ namespace KspBridge.Flight
         {
             _level.Clear();
             _flipFor = _lostFor = _wasteFor = 0;
+            ResetDrift();
             _running = false;
         }
 
@@ -248,10 +297,12 @@ namespace KspBridge.Flight
             {
                 "enabled", "abort", "flip_aoa_deg", "flip_min_q_kpa", "flip_for_s", "lost_error_deg", "lost_for_s",
                 "waste_error_deg", "waste_for_s", "osc_flips", "osc_min_rate", "temp_warn", "temp_abort",
+                "drift_error_deg", "drift_growth_deg",
             };
 
             public bool? Enabled, Abort;
             public double? FlipAoaDeg, FlipMinQ, FlipForS, LostErrorDeg, LostForS, WasteErrorDeg, WasteForS, OscFlips, OscMinRate, TempWarn, TempAbort;
+            public double? DriftErrorDeg, DriftGrowthDeg;
 
             /// <summary>Partial settings from a "monitor" object; null when the key is absent. 400 invalid_plan on unknown keys or bad values.</summary>
             public static Settings Parse(object raw, string path)
@@ -277,6 +328,8 @@ namespace KspBridge.Flight
                     OscMinRate = Num(o, "osc_min_rate", path, 0.001, 10),
                     TempWarn = Num(o, "temp_warn", path, 0.1, 1),
                     TempAbort = Num(o, "temp_abort", path, 0.1, 2),
+                    DriftErrorDeg = Num(o, "drift_error_deg", path, 1, 180),
+                    DriftGrowthDeg = Num(o, "drift_growth_deg", path, 1, 180),
                 };
                 if (s.TempWarn > s.TempAbort)   // both given in this object
                 {
@@ -297,6 +350,7 @@ namespace KspBridge.Flight
         {
             public bool Enabled, Abort;
             public double FlipAoaDeg, FlipMinQ, FlipForS, LostErrorDeg, LostForS, WasteErrorDeg, WasteForS, OscFlips, OscMinRate, TempWarn, TempAbort;
+            public double DriftErrorDeg, DriftGrowthDeg;
 
             public static Effective Merge(Settings step, Settings plan)
             {
@@ -315,6 +369,8 @@ namespace KspBridge.Flight
                     OscMinRate = step?.OscMinRate ?? plan?.OscMinRate ?? 0.05,
                     TempWarn = step?.TempWarn ?? plan?.TempWarn ?? 0.8,
                     TempAbort = step?.TempAbort ?? plan?.TempAbort ?? 0.95,
+                    DriftErrorDeg = step?.DriftErrorDeg ?? plan?.DriftErrorDeg ?? 30,
+                    DriftGrowthDeg = step?.DriftGrowthDeg ?? plan?.DriftGrowthDeg ?? 20,
                 };
                 e.TempWarn = Math.Min(e.TempWarn, e.TempAbort);
                 return e;
