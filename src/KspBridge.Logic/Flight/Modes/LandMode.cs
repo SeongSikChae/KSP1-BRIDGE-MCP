@@ -23,6 +23,13 @@ namespace KspBridge.Flight.Modes
         private readonly double _gearAlt;   // NaN = gear off
         private readonly LandingTracker _track;   // null = vertical landing in place (#17); #22 target and impact prediction
 
+        // #22 velocity loop state (Save/Load)
+        private bool _inLoop;
+        private Vector3d _aCmdPrev = Vector3d.zero;
+        private double _aCmdUt;
+        private double _dvShortSince = double.NaN;
+        private double _attLostSince = double.NaN;
+
         private LandMode(double margin, double finalAlt, double finalSpeed, double gearAlt, LandingTarget target)
         {
             _margin = margin;
@@ -68,6 +75,40 @@ namespace KspBridge.Flight.Modes
         /// <summary>Max tilt from vertical (deg) per m/s of horizontal speed (decision 10; no dead band, so a slow drift is
         /// still cancelled before touchdown).</summary>
         private const double TiltPerMs = 5;
+
+        // #22 decision 6: horizontal velocity loop toward a target
+        private const double Deg = Math.PI / 180;
+
+        /// <summary>Velocity loop time constant (s): U3 1st run hunted with a 3..5 s period.</summary>
+        private const double Tau = 4;
+
+        /// <summary>Tilt cap (deg) above / below the vertical-first height.</summary>
+        private const double GuidedTiltCap = 30;
+        private const double VerticalTiltCap = 15;
+
+        /// <summary>Vertical deceleration margin (deg) under acos(a_req / a_max): above the +10° tracking error allowed.</summary>
+        private const double VerticalMarginDeg = 12;
+
+        /// <summary>Below this cap (deg) there is no room for horizontal guidance: end it (no_margin).</summary>
+        private const double MinCapDeg = 1;
+
+        /// <summary>Commanded tilt / direction change limit (deg/s): measured average turn rate below 600 m.</summary>
+        private const double TiltRateDeg = 10;
+
+        /// <summary>Vertical-first height floor (m); the height is max(this, final_altitude × 5).</summary>
+        private const double VerticalFirstM = 100;
+
+        /// <summary>Fuel reserve (m/s) over the vertical landing need, and how long (s) a shortfall must last.</summary>
+        private const double DvReserve = 50;
+        private const double DvShortS = 2;
+
+        /// <summary>In the air the wanted horizontal speed keeps the velocity within this angle (deg) of vertical: tail-first
+        /// flight stays aerodynamically stable (U3 2nd run tumbled at vh 44 / vv 11 m/s).</summary>
+        private const double AoaLimitDeg = 15;
+
+        /// <summary>Axis-to-command angle (deg) and duration (s) that count as a lost attitude in the loop.</summary>
+        private const double AttitudeLostDeg = 30;
+        private const double AttitudeLostS = 1;
 
         /// <summary>Final-segment speed gain (1/s).</summary>
         private const double FinalGain = 1;
@@ -154,12 +195,22 @@ namespace KspBridge.Flight.Modes
                 {
                     double tilt = Vector3d.Angle(v.ReferenceTransform.up, up);
                     Log("landed: tilt=" + F(tilt, 1) + " since_touchdown=" + F(ut - _touchUt, 2));
-                    FlightEvents.Add("landed", Coordinator.StepIndex, new Dictionary<string, object>
+                    Dictionary<string, object> data = new Dictionary<string, object>
                     {
                         ["tilt_deg"] = R(tilt),
                         ["tipped"] = tilt > TippedDeg,
                         ["time_since_touchdown_s"] = R(ut - _touchUt),
-                    });
+                        ["latitude"] = R(v.latitude),                                // #22
+                        ["longitude"] = R(LandingTarget.Wrap180(v.longitude)),
+                    };
+                    double err = _track != null ? _track.ErrorFrom(v) : double.NaN;
+                    if (_track != null && _track.Active)
+                    {
+                        data["target_error_m"] = R(err);
+                        data["guidance_ended"] = _track.Ended;
+                    }
+                    Log("landed: target_error=" + F(err, 1) + " lat=" + F(v.latitude, 6) + " lon=" + F(v.longitude, 6));
+                    FlightEvents.Add("landed", Coordinator.StepIndex, data);
                     Done = true;
                 }
                 if (ut - _touchUt <= 10 && ut - _diagUt >= DiagS)   // post-touchdown telemetry (tip-over diagnosis)
@@ -185,19 +236,130 @@ namespace KspBridge.Flight.Modes
                 Log("gear on: h=" + F(h, 1));
             }
 
-            // attitude: up, tilted toward surface retrograde by at most max_tilt(vh)
-            double maxTilt = Clamp(vh * TiltPerMs, 0, 90);
-            AttitudeTarget att = AttitudeTarget.RotateTowards(up, -v.srf_velocity, maxTilt);
-
+            // maxAccel and aReq before the attitude (values and uses unchanged; #22 needs them for the guidance)
             double maxAccel = EngineModel.MaxAccel(v);
+            double aReq = vv > 0 && h > _finalAlt
+                ? (vv * vv - _finalSpeed * _finalSpeed) / (2 * (h - _finalAlt)) + g
+                : double.NaN;
+
+            // #22 decision 6: while burning toward a kept target, a horizontal velocity loop (τ) once the relative horizontal
+            // speed fits under the tilt cap; otherwise the #17 formula (surface retrograde, stopping at −srf_velocity).
+            Vector3d vhVec = Vector3d.Exclude(up, v.srf_velocity);
+            bool guide = _burning && _track != null && _track.Guiding && maxAccel > 0;
+            double aV = Math.Max(double.IsNaN(aReq) ? g : aReq, g);              // vertical accel the throttle will make
+            double hV = Math.Max(VerticalFirstM, _finalAlt * 5);
+            bool vertical = h <= hV;
+            Vector3d want = guide && !vertical ? Want(v, up, h, hV, vv, g) : Vector3d.zero;
+            double capDeg = maxAccel > 0
+                ? Math.Min(vertical ? VerticalTiltCap : GuidedTiltCap,
+                    Math.Max(0, Math.Acos(Clamp(aV / maxAccel, 0, 1)) / Deg - VerticalMarginDeg))   // vertical decel first
+                : 0;
+            if (guide && capDeg < MinCapDeg && !FlightEvents.InTrial)
+            {
+                _track.EndGuidance();
+                _track.Unreachable("no_margin", "braking", new Dictionary<string, object>
+                {
+                    ["cap_deg"] = R(capDeg),
+                    ["a_req"] = R(aV),
+                    ["a_max"] = R(maxAccel),
+                });
+                Log("guidance ended: no_margin cap=" + F(capDeg, 2) + " a_v=" + F(aV, 2) + " a_max=" + F(maxAccel, 2));
+                guide = false;
+            }
+            double entryLim = Math.Max(vv, 0) * Math.Tan(capDeg * Deg);
+            if (guide && !_inLoop && (want - vhVec).magnitude <= entryLim && vh <= entryLim && !FlightEvents.InTrial)
+            {
+                _inLoop = true;   // stays in the loop afterwards
+                // seed with the tilt the #17 formula actually commands this tick (it stops at −srf_velocity): no jump
+                double t17 = Math.Min(Vector3d.Angle(up, -v.srf_velocity), Clamp(vh * TiltPerMs, 0, 90));
+                _aCmdPrev = vh > 1e-3 ? -vhVec.normalized * (aV * Math.Tan(Math.Min(t17, capDeg) * Deg)) : Vector3d.zero;
+                Log("loop entry: h=" + F(h, 1) + " vv=" + F(vv, 2) + " vh=" + F(vh, 2) + " want=" + F(want.magnitude, 2) +
+                    " cap=" + F(capDeg, 1) + " t17=" + F(t17, 2));
+            }
+            AttitudeTarget att;
+            double maxTilt;
+            Vector3d aCmd = Vector3d.zero;
+            if (!guide || !_inLoop)
+            {
+                maxTilt = Clamp(vh * TiltPerMs, 0, 90);                          // #17 formula, unchanged
+                att = AttitudeTarget.RotateTowards(up, -v.srf_velocity, maxTilt);
+            }
+            else
+            {
+                double capA = aV * Math.Tan(capDeg * Deg);
+                aCmd = ClampMag((want - vhVec) / Tau, capA);
+                aCmd = RateLimitTilt(_aCmdPrev, aCmd, aV, TiltRateDeg * Math.Max(0, ut - _aCmdUt));   // ≤ 10°/s
+                aCmd = ClampMag(aCmd, capA);                                     // the cap stays hard after the rate limit
+                _aCmdPrev = aCmd;
+                att = AttitudeTarget.Vector(up * aV + aCmd);                     // tilt = atan(|aCmd| / aV) toward aCmd
+                maxTilt = Math.Atan2(aCmd.magnitude, aV) / Deg;
+            }
+            _aCmdUt = ut;   // every tick: no large step after a thrust gap
+
+            // #22 decision 6: attitude lost in the loop (axis more than 30° off the command for 1 s) ends the guidance
+            if (guide && _inLoop && !FlightEvents.InTrial)
+            {
+                double axisErr = Vector3d.Angle(v.ReferenceTransform.up, att.Direction(v));
+                _attLostSince = axisErr > AttitudeLostDeg ? (double.IsNaN(_attLostSince) ? ut : _attLostSince) : double.NaN;
+                if (!double.IsNaN(_attLostSince) && ut - _attLostSince >= AttitudeLostS)
+                {
+                    _track.EndGuidance();
+                    _track.Unreachable("attitude", "braking", new Dictionary<string, object> { ["axis_err_deg"] = R(axisErr) });
+                    Log("guidance ended: attitude axis_err=" + F(axisErr, 1) + " h=" + F(h, 1));
+                    _attLostSince = double.NaN;
+                    guide = false;
+                    maxTilt = Clamp(vh * TiltPerMs, 0, 90);                      // #17 formula from this tick on
+                    att = AttitudeTarget.RotateTowards(up, -v.srf_velocity, maxTilt);
+                }
+            }
+            else
+            {
+                _attLostSince = double.NaN;
+            }
+            if (_track != null && _track.Active && !FlightEvents.InTrial)
+            {
+                _track.SetGuidance(!_burning ? "free_fall" : _track.Ended ? "dropped" : !guide ? "off"
+                    : !_inLoop ? "pre_loop" : vertical ? "vertical" : "guided");
+                if (_burning)
+                {
+                    _track.Braking(v, v.CoMD + vhVec * Tau);   // where the loop would bring the horizontal speed to 0
+                }
+            }
+
+            // #22 decision 6: fuel reserve over the remaining descent's need, 2 s in a row ends the guidance
+            double dvLeft = t.Num["total_dv"];
+            double dvNeed = double.NaN;
+            if (!guide || double.IsNaN(dvLeft) || FlightEvents.InTrial)
+            {
+                _dvShortSince = double.NaN;   // not guiding this tick (thrust gap, no dv): restart the 2 s timer
+            }
+            else
+            {
+                // gravity loss over the remaining descent of the throttle formula's profile: constant decel to
+                // final_altitude, then final_speed (U3: the full-thrust estimate missed the slow final descent)
+                double tLeft = h > _finalAlt
+                    ? 2 * (h - _finalAlt) / Math.Max(vv + _finalSpeed, 1e-3) + _finalAlt / _finalSpeed
+                    : Math.Max(h, 0) / _finalSpeed;
+                dvNeed = v.srfSpeed + g * tLeft;
+                _dvShortSince = dvLeft < dvNeed + DvReserve ? (double.IsNaN(_dvShortSince) ? ut : _dvShortSince) : double.NaN;
+                if (!double.IsNaN(_dvShortSince) && ut - _dvShortSince >= DvShortS)
+                {
+                    _track.EndGuidance();
+                    _track.Unreachable("dv", "braking", new Dictionary<string, object>
+                    {
+                        ["dv_need"] = R(dvNeed),
+                        ["dv_left"] = R(dvLeft),
+                    });
+                    Log("guidance ended: dv need=" + F(dvNeed, 1) + " left=" + F(dvLeft, 1));
+                    _dvShortSince = double.NaN;
+                }
+            }
+
             if (maxAccel <= 0)
             {
                 return new ModeCommand(att, 1);   // no engine thrust (not tilt): the Coordinator waits or aborts no_thrust
             }
             double aMaxV = maxAccel * cos;
-            double aReq = vv > 0 && h > _finalAlt
-                ? (vv * vv - _finalSpeed * _finalSpeed) / (2 * (h - _finalAlt)) + g
-                : double.NaN;
 
             if (!_burning)
             {
@@ -256,7 +418,14 @@ namespace KspBridge.Flight.Modes
                 Log("burn: h=" + F(h, 1) + " radar=" + F(v.radarAltitude, 1) + " hft=" + F(v.heightFromTerrain, 1) +
                     " terrain=" + F(v.terrainAltitude, 1) + " vv=" + F(vv, 2) + " vh=" + F(vh, 2) + " thr=" + F(throttle, 3) +
                     " cos=" + F(cos, 3) + " align_err=" + F(burnAlignErr, 1) + " max_tilt=" + F(maxTilt, 1) +
-                    " a_req=" + F(aReq, 2) + " a_max_v=" + F(aMaxV, 2) + " thrust=" + F(t.Num["thrust"], 1) + " sit=" + v.situation);
+                    " a_req=" + F(aReq, 2) + " a_max_v=" + F(aMaxV, 2) + " thrust=" + F(t.Num["thrust"], 1) + " sit=" + v.situation +
+                    (_track != null && _track.Active
+                        ? " guidance=" + (_track.Ended ? "dropped" : !guide ? "off" : !_inLoop ? "pre_loop" : vertical ? "vertical" : "guided") +
+                          " want=" + F(want.magnitude, 2) + " dv_h=" + F((want - vhVec).magnitude, 2) +
+                          " a_cmd=" + F(aCmd.magnitude, 3) + " a_cmd_to_target=" + F(Vector3d.Dot(aCmd, TargetDir(v, up)), 3) +
+                          " a_v=" + F(aV, 2) + " cap=" + F(capDeg, 1) + " tilt=" + F(Vector3d.Angle(v.ReferenceTransform.up, up), 2) +
+                          " dv_need=" + F(dvNeed, 1) + " dv_left=" + F(dvLeft, 1)
+                        : ""));
             }
             return new ModeCommand(att, throttle) { Aligning = misaligned };
         }
@@ -385,21 +554,81 @@ namespace KspBridge.Flight.Modes
             return max;
         }
 
+        /// <summary>#22 decision 6: |want| = min(|d| / tGoV, √(2·a_hLim·|d|), |d| / (4τ)) toward the target; tGoV to the
+        /// vertical-first height, a_hLim = 0.5·g·tan 30°; |d|/(4τ) with the τ loop is critically damped.</summary>
+        private Vector3d Want(Vessel v, Vector3d up, double h, double hV, double vv, double g)
+        {
+            Vector3d d = Vector3d.Exclude(up, _track.TargetWorld(v) - v.CoMD);
+            double dist = d.magnitude;
+            if (dist < 1)
+            {
+                return Vector3d.zero;
+            }
+            double tGoV = Math.Max(h - hV, 1) / Math.Max(vv, _finalSpeed);
+            double aHLim = 0.5 * g * Math.Tan(GuidedTiltCap * Deg);
+            double speed = Math.Min(Math.Min(dist / tGoV, Math.Sqrt(2 * aHLim * dist)), dist / (4 * Tau));
+            if (v.mainBody.atmosphere && v.altitude < v.mainBody.atmosphereDepth)
+            {
+                speed = Math.Min(speed, Math.Max(vv, 0) * Math.Tan(AoaLimitDeg * Deg));   // keep the velocity within 15° of vertical
+            }
+            return d / dist * speed;
+        }
+
+        /// <summary>Horizontal unit vector toward the target (zero when right above it).</summary>
+        private Vector3d TargetDir(Vessel v, Vector3d up)
+        {
+            Vector3d d = Vector3d.Exclude(up, _track.TargetWorld(v) - v.CoMD);
+            return d.magnitude < 1e-3 ? Vector3d.zero : d.normalized;
+        }
+
+        private static Vector3d ClampMag(Vector3d a, double max) => a.magnitude > max ? a.normalized * max : a;
+
+        /// <summary>Tilt-space vector of a horizontal accel: direction × atan(|a| / aV) in degrees.</summary>
+        private static Vector3d TiltVec(Vector3d a, double aV) =>
+            a.magnitude < 1e-9 ? Vector3d.zero : a.normalized * (Math.Atan2(a.magnitude, aV) / Deg);
+
+        /// <summary>Moves the commanded horizontal accel so the commanded tilt and its direction change by at most maxDeg
+        /// (measured: 10°/s average turn rate below 600 m); through zero when the direction reverses.</summary>
+        private static Vector3d RateLimitTilt(Vector3d prev, Vector3d next, double aV, double maxDeg)
+        {
+            Vector3d p = TiltVec(prev, aV);
+            Vector3d n = TiltVec(next, aV);
+            Vector3d step = n - p;
+            Vector3d tv = step.magnitude <= maxDeg ? n : p + step.normalized * maxDeg;
+            double deg = Math.Min(tv.magnitude, 89);
+            return deg < 1e-6 ? Vector3d.zero : tv.normalized * (aV * Math.Tan(deg * Deg));
+        }
+
         private static void Log(string message) => UnityEngine.Debug.Log("[KspBridge] land " + message);
 
         private static string F(double x, int digits) => x.ToString("F" + digits, CultureInfo.InvariantCulture);
 
-        public Dictionary<string, object> Save() => new Dictionary<string, object>
+        public Dictionary<string, object> Save()
         {
-            ["burning"] = _burning,
-            ["aligning"] = _aligning,
-            ["gear_done"] = _gearDone,
-            ["infeasible"] = new List<object>(_infeasible),
-            ["touched"] = _touched,
-            ["touch_ut"] = _touchUt,
-            ["still_since"] = double.IsNaN(_stillSince) ? null : (object)_stillSince,
-            ["gear_settle_until"] = _gearSettleUntil > 0 ? (object)_gearSettleUntil : null,
-        };
+            Dictionary<string, object> state = new Dictionary<string, object>
+            {
+                ["burning"] = _burning,
+                ["aligning"] = _aligning,
+                ["gear_done"] = _gearDone,
+                ["infeasible"] = new List<object>(_infeasible),
+                ["touched"] = _touched,
+                ["touch_ut"] = _touchUt,
+                ["still_since"] = double.IsNaN(_stillSince) ? null : (object)_stillSince,
+                ["gear_settle_until"] = _gearSettleUntil > 0 ? (object)_gearSettleUntil : null,
+            };
+            _track?.Save(state);   // #22: fixed target and drag model
+            if (_track != null)
+            {
+                state["in_loop"] = _inLoop;
+                state["a_cmd_x"] = _aCmdPrev.x;
+                state["a_cmd_y"] = _aCmdPrev.y;
+                state["a_cmd_z"] = _aCmdPrev.z;
+                state["a_cmd_ut"] = _aCmdUt;
+                state["dv_short_since"] = double.IsNaN(_dvShortSince) ? null : (object)_dvShortSince;
+                state["att_lost_since"] = double.IsNaN(_attLostSince) ? null : (object)_attLostSince;
+            }
+            return state;
+        }
 
         /// <summary>Restores Save's keys. The bottom offset is re-measured on the first Height (_partCount = -1), and
         /// _measuredUt = 0 lets the 0.5 s re-measure continue while gear_settle_until has not passed.</summary>
@@ -425,6 +654,15 @@ namespace KspBridge.Flight.Modes
             }
             _partCount = -1;
             _measuredUt = 0;
+            _track?.Load(state);
+            if (_track != null)
+            {
+                _inLoop = Handover.B(state, "in_loop");
+                _aCmdPrev = new Vector3d(Handover.D(state, "a_cmd_x", 0), Handover.D(state, "a_cmd_y", 0), Handover.D(state, "a_cmd_z", 0));
+                _aCmdUt = Handover.D(state, "a_cmd_ut", 0);
+                _dvShortSince = Handover.D(state, "dv_short_since", double.NaN);
+                _attLostSince = Handover.D(state, "att_lost_since", double.NaN);
+            }
         }
 
         public void End(Vessel v)

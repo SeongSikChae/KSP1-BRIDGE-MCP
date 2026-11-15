@@ -30,6 +30,10 @@ namespace KspBridge.Flight.Landing
             Source = source;
         }
 
+        /// <summary>reload handover (#22 U3).</summary>
+        internal static DragModel Restore(double k, string source) =>
+            new DragModel(k, source == "measured" ? "measured" : "initial");
+
         /// <summary>Drag cube area with the vessel bottom (engine side, vessel axis) facing the flow, whatever the current
         /// attitude. The direction follows FlightIntegrator's SetDrag (the drag direction, opposite the velocity): falling
         /// bottom first the drag points to the vessel top.</summary>

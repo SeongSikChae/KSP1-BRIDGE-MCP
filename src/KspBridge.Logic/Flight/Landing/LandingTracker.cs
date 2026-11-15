@@ -16,7 +16,10 @@ namespace KspBridge.Flight.Landing
 
         private readonly LandingTarget _arg;
         private bool _fixed;
-        private bool _dropped;
+        private bool _unresolved;   // a vessel target that could not be resolved at fix time: no target at all
+        private bool _ended;        // guidance ended (dv / no_margin): the target is kept for reporting only
+        private string _guidance = "free_fall";
+        private readonly HashSet<string> _reported = new HashSet<string>();
         private double _lat = double.NaN;
         private double _lon = double.NaN;
         private double _alt = double.NaN;
@@ -25,16 +28,124 @@ namespace KspBridge.Flight.Landing
         private double _predUt = double.NegativeInfinity;
         private double _predMs = double.NaN;
         private double _frameCheck = double.NaN;
+        private bool _braking;
 
         public LandingTracker(LandingTarget arg)
         {
             _arg = arg;
         }
 
-        /// <summary>A target is fixed and kept (not dropped).</summary>
-        public bool Active => _fixed && !_dropped;
+        /// <summary>A target is fixed (resolved): get_flight.landing and landed.target_error_m are reported.</summary>
+        public bool Active => _fixed && !_unresolved;
+
+        /// <summary>Active and the guidance has not ended.</summary>
+        public bool Guiding => Active && !_ended;
+
+        public bool Ended => _ended;
+
+        /// <summary>Ends the horizontal guidance (#22 decision 6); the target stays for reporting.</summary>
+        public void EndGuidance() => _ended = true;
+
+        /// <summary>free_fall / pre_loop / guided / vertical / off / dropped (get_flight.landing.guidance).</summary>
+        public void SetGuidance(string state) => _guidance = state;
+
+        /// <summary>Every landing_target_unreachable goes through here: once per (reason, phase) per step, not in the trial.</summary>
+        public void Unreachable(string reason, string phase, Dictionary<string, object> extra)
+        {
+            string key = reason + "/" + phase;
+            if (FlightEvents.InTrial || _reported.Contains(key))
+            {
+                return;
+            }
+            _reported.Add(key);
+            Dictionary<string, object> data = extra ?? new Dictionary<string, object>();
+            data["reason"] = reason;
+            if (phase != null)
+            {
+                data["phase"] = phase;
+            }
+            FlightEvents.Add("landing_target_unreachable", Coordinator.StepIndex, data);
+        }
 
         public Impact Prediction => _pred;
+
+        /// <summary>World position of the fixed target on the terrain (call only while Active).</summary>
+        public Vector3d TargetWorld(Vessel v) => v.mainBody.GetWorldSurfacePosition(_lat, _lon, _alt);
+
+        /// <summary>Burning (#22 decision 8): the prediction becomes the even-braking stop point (world position), every tick;
+        /// the 1 s unpowered integration stops.</summary>
+        public void Braking(Vessel v, Vector3d stopWorld)
+        {
+            if (FlightEvents.InTrial || !Active)
+            {
+                return;
+            }
+            _braking = true;
+            CelestialBody body = v.mainBody;
+            _pred = new Impact
+            {
+                Lat = body.GetLatitude(stopWorld, false),
+                Lon = LandingTarget.Wrap180(body.GetLongitude(stopWorld, false)),
+                Ut = Planetarium.GetUniversalTime(),
+                Alt = _alt,
+            };
+        }
+
+        /// <summary>Great-circle distance (m) from the vessel to the kept target; NaN without one.</summary>
+        public double ErrorFrom(Vessel v) =>
+            Active ? ImpactPredictor.Distance(v.mainBody, v.latitude, LandingTarget.Wrap180(v.longitude), _lat, _lon) : double.NaN;
+
+        /// <summary>reload handover (#22 U3): the fixed target and the drag model; the target argument itself comes back from
+        /// the plan re-parse.</summary>
+        public void Save(Dictionary<string, object> state)
+        {
+            state["target_fixed"] = _fixed;
+            state["target_unresolved"] = _unresolved;
+            state["reported"] = new List<object>(_reported);
+            if (Active)
+            {
+                state["guidance_ended"] = _ended;
+                state["guidance"] = _guidance;
+                state["t_lat"] = _lat;
+                state["t_lon"] = _lon;
+                state["t_alt"] = _alt;
+                state["drag_k"] = _drag.K;
+                state["drag_source"] = _drag.Source;
+                state["braking"] = _braking;
+            }
+        }
+
+        public void Load(Dictionary<string, object> state)
+        {
+            _fixed = Handover.B(state, "target_fixed");
+            _unresolved = Handover.B(state, "target_unresolved");
+            _reported.Clear();
+            if (state.TryGetValue("reported", out object list) && list is List<object> keys)
+            {
+                foreach (object k in keys)
+                {
+                    if (k is string s1)
+                    {
+                        _reported.Add(s1);
+                    }
+                }
+            }
+            if (Active)
+            {
+                _ended = Handover.B(state, "guidance_ended");
+                _guidance = state.TryGetValue("guidance", out object gs) && gs is string g1 ? g1 : _guidance;
+                _lat = Handover.D(state, "t_lat", double.NaN);
+                _lon = Handover.D(state, "t_lon", double.NaN);
+                _alt = Handover.D(state, "t_alt", 0);
+                _braking = Handover.B(state, "braking");
+                string source = state.TryGetValue("drag_source", out object s) ? s as string : null;
+                _drag = DragModel.Restore(Handover.D(state, "drag_k", 0), source);
+                if (double.IsNaN(_lat) || double.IsNaN(_lon))
+                {
+                    _fixed = false;   // incomplete handover: fix the target again on the next tick
+                }
+            }
+        }
 
         /// <summary>Every land tick. Nothing is decided in the submit trial (events would carry the previous step index).</summary>
         public void Tick(Vessel v, double ut)
@@ -52,7 +163,7 @@ namespace KspBridge.Flight.Landing
                 return;
             }
             _drag.Measure(v, TimeWarp.fixedDeltaTime);
-            if (ut - _predUt >= PredictIntervalS)
+            if (!_braking && ut - _predUt >= PredictIntervalS)
             {
                 _predUt = ut;
                 Stopwatch sw = Stopwatch.StartNew();
@@ -83,7 +194,8 @@ namespace KspBridge.Flight.Landing
                 ["predicted_latitude"] = _pred == null ? null : N(_pred.Lat),
                 ["predicted_longitude"] = _pred == null ? null : N(_pred.Lon),
                 ["error_m"] = N(err),
-                ["prediction"] = "ballistic",
+                ["prediction"] = _braking ? "braking" : "ballistic",
+                ["guidance"] = _guidance,
                 ["drag_k"] = N(_drag.K),
                 ["drag_source"] = _drag.Source,
                 ["frame_check_mps"] = N(_frameCheck),
@@ -101,12 +213,11 @@ namespace KspBridge.Flight.Landing
                     && (tv.situation == Vessel.Situations.LANDED || tv.situation == Vessel.Situations.SPLASHED);
                 if (!ok)
                 {
-                    _dropped = true;
+                    _unresolved = true;
                     string why = tv == null ? "missing" : tv.mainBody != v.mainBody ? "other_body" : "situation " + tv.situation;
                     Log("target vessel " + F(_arg.VesselId, 0) + " not usable: " + why);
-                    FlightEvents.Add("landing_target_unreachable", Coordinator.StepIndex, new Dictionary<string, object>
+                    Unreachable("target_vessel", null, new Dictionary<string, object>
                     {
-                        ["reason"] = "target_vessel",
                         ["vessel"] = _arg.VesselId,
                         ["detail"] = why,
                     });
