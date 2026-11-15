@@ -25,12 +25,14 @@ namespace KspBridge.Flight
         public double MaxSeparateQ;        // kPa: a parallel separation waits while the dynamic pressure is above this (#16)
         public double MaxSeparateQWaitS;   // s: then it separates anyway (separation_forced)
         public double MaxFlameoutPauseS;   // s of wanted thrust a flamed-out engine with propellant may take to relight (#13)
+        public double ClampHoldS;          // s added to the spool-up time while launch clamps hold the vessel (#28)
 
         public static readonly StagingOptions Default = new StagingOptions
         {
             TailoffRatio = 0.05, MaxTailoffS = 5, SettleDistance = 2, MaxSettleS = 3,
             MaxSeparateQ = 25, MaxSeparateQWaitS = 30,   // TestB: boosters hit the core at 35 kPa and above, none at 30 (0027 unit 2)
             MaxFlameoutPauseS = 3,                       // KSP relights on the next tick that asks for propellant (0023)
+            ClampHoldS = 5,
         };
 
         public static StagingOptions Parse(object raw, string path)
@@ -40,7 +42,7 @@ namespace KspBridge.Flight
                 return Default;
             }
             Dictionary<string, object> o = raw as Dictionary<string, object> ?? throw Plan.Invalid(path, "must be an object");
-            Plan.UnknownKeys(o, new[] { "tailoff_ratio", "max_tailoff_s", "settle_distance", "max_settle_s", "max_separate_q", "max_separate_q_wait_s", "max_flameout_pause_s" }, path);
+            Plan.UnknownKeys(o, new[] { "tailoff_ratio", "max_tailoff_s", "settle_distance", "max_settle_s", "max_separate_q", "max_separate_q_wait_s", "max_flameout_pause_s", "clamp_hold_s" }, path);
             return new StagingOptions
             {
                 TailoffRatio = Plan.OptionalNumber(o, "tailoff_ratio", path, 0, 1, Default.TailoffRatio),
@@ -50,6 +52,7 @@ namespace KspBridge.Flight
                 MaxSeparateQ = Plan.OptionalNumber(o, "max_separate_q", path, 0, 1000, Default.MaxSeparateQ),
                 MaxSeparateQWaitS = Plan.OptionalNumber(o, "max_separate_q_wait_s", path, 0, 600, Default.MaxSeparateQWaitS),
                 MaxFlameoutPauseS = Plan.OptionalNumber(o, "max_flameout_pause_s", path, 0, 600, Default.MaxFlameoutPauseS),
+                ClampHoldS = Plan.OptionalNumber(o, "clamp_hold_s", path, 0, 600, Default.ClampHoldS),
             };
         }
     }
@@ -74,6 +77,7 @@ namespace KspBridge.Flight
         private static double _lastUt = double.NegativeInfinity;
         private static StageRequest _request;              // sequence activation (separate / ignite)
         private static StageRequest _onStart;
+        private static ClampHold _hold;                     // takes over _onStart when its stage holds launch clamps (#28)
         private static bool _onStartQueued;
         private static HashSet<uint> _before;              // vessels before the separation (settle candidates are the new ones)
         private static Latch _latch;
@@ -83,6 +87,10 @@ namespace KspBridge.Flight
         {
             get
             {
+                if (_hold != null && _hold.Holding)
+                {
+                    return "clamp_hold";   // #28: engines lit, the clamps not let go yet (no sequence runs meanwhile)
+                }
                 switch (_state)
                 {
                     case StagingState.Tailoff: return "tailoff";
@@ -111,13 +119,25 @@ namespace KspBridge.Flight
             _lastUt = ut;
             if (_onStart != null)          // on_start first: the sequence waits until it ends (no overlapping requests)
             {
-                switch (_onStart.Tick(v, ut, send))
+                if (_hold == null && !_onStart.Sent)
+                {
+                    _hold = ClampHold.Detect(v);   // unsent ticks only: the stage cannot change before the request is sent (#28)
+                }
+                StageRequest.Result r = _hold != null
+                    ? _hold.Tick(v, ut, send, plan.StagingOptions, reason => Staged(v, reason))
+                    : _onStart.Tick(v, ut, send);
+                switch (r)
                 {
                     case StageRequest.Result.Done:
-                        Staged(v, "on_start");
+                        if (_hold == null)
+                        {
+                            Staged(v, "on_start");   // the hold records its own staged events
+                        }
+                        _hold = null;
                         _onStart = TakeQueued();
                         break;
                     case StageRequest.Result.Failed:
+                        _hold = null;
                         Event("stage_failed", v);
                         _onStart = TakeQueued();   // the step goes on
                         break;
@@ -420,13 +440,14 @@ namespace KspBridge.Flight
         /// the new one queues behind it. An unsent request is simply replaced.</summary>
         public static void RequestOnStart()
         {
-            if (_onStart != null && _onStart.Sent)
+            if (_onStart != null && (_onStart.Sent || (_hold != null && _hold.HasStarted)))
             {
-                _onStartQueued = true;
+                _onStartQueued = true;   // a clamp hold that lit engines is a sent request too (#28 review R1-1-B-3)
             }
             else
             {
                 _onStart = new StageRequest();
+                _hold = null;            // nothing lit yet: the replacing request detects again
             }
         }
 
@@ -862,6 +883,7 @@ namespace KspBridge.Flight
             {
                 Staged(v, "on_start");
             }
+            _hold?.RecordSent(v, reason => Staged(v, reason));
         }
 
         /// <summary>Release (complete, abort, failure after attach): clears the sequence, requests and latch; keeps caches and _lastUt.</summary>
@@ -871,6 +893,7 @@ namespace KspBridge.Flight
             _latch = null;
             _request = null;
             _onStart = null;
+            _hold = null;   // engines it lit stay lit: only the failure path shuts them down (design 0064 decision 6)
             _onStartQueued = false;
             ResetSequence(_lastUt);
         }
@@ -929,6 +952,7 @@ namespace KspBridge.Flight
                 ["last_ut"] = _lastUt,
                 ["request"] = _request?.Save(),
                 ["on_start"] = _onStart?.Save(),
+                ["clamp_hold"] = _hold?.Save(),
                 ["on_start_queued"] = _onStartQueued,
                 ["before"] = before,
                 ["latch_stage"] = _latch != null ? (object)(double)_latch.Stage : null,
@@ -953,6 +977,7 @@ namespace KspBridge.Flight
             _lastUt = Handover.D(d, "last_ut", double.NegativeInfinity);
             _request = StageRequest.Load(d.TryGetValue("request", out object r) ? r as Dictionary<string, object> : null);
             _onStart = StageRequest.Load(d.TryGetValue("on_start", out object os) ? os as Dictionary<string, object> : null);
+            _hold = ClampHold.Load(d.TryGetValue("clamp_hold", out object ch) ? ch as Dictionary<string, object> : null);
             _onStartQueued = Handover.B(d, "on_start_queued");
             _before = null;
             if (d.TryGetValue("before", out object b) && b is List<object> before)
@@ -993,6 +1018,8 @@ namespace KspBridge.Flight
             {
                 Staged(v, "on_start");
             }
+            ClampHold.Load(staging.TryGetValue("clamp_hold", out object ch) ? ch as Dictionary<string, object> : null)
+                ?.RecordSent(v, reason => Staged(v, reason));
         }
     }
 }
