@@ -33,6 +33,7 @@ namespace KspBridge.Flight
         private double _ratio;
         private double _heldS;
         private StageRequest _request;
+        private bool _failed;
         private readonly HashSet<uint> _lit = new HashSet<uint>();   // part persistentIds of the engines lit for the hold
 
         /// <summary>Stage activation already began (engines lit, or the split engine stage requested): a new on_start queues behind
@@ -189,6 +190,7 @@ namespace KspBridge.Flight
 
         private void Fail(Vessel v, double ratio, double held, string reason)
         {
+            _failed = true;   // the abort that follows calls Reset: EndedWhileHolding must not shut down and report again
             ModuleEngines[] es = EngineModel.Engines(v);
             for (int i = 0; i < es.Length; i++)
             {
@@ -248,6 +250,26 @@ namespace KspBridge.Flight
         }
 
         // ---- reset / handover ----
+
+        /// <summary>The plan ended (complete, abort, user stop) while the engines are lit and the clamps still hold: shut the lit
+        /// engines down so nothing burns on the pad with no one left to release the clamps (review R4-2-2). A release stage that
+        /// already dropped is not a hold any more.</summary>
+        public void EndedWhileHolding(Vessel v)
+        {
+            if (v == null || !Holding || _failed || (_request != null && _request.Sent && v.currentStage < _request.StageBefore))
+            {
+                return;
+            }
+            ModuleEngines[] es = EngineModel.Engines(v);
+            for (int i = 0; i < es.Length; i++)
+            {
+                if (_lit.Contains(es[i].part.persistentId) && es[i].EngineIgnited && es[i].allowShutdown)
+                {
+                    es[i].Shutdown();
+                }
+            }
+            Event("clamp_hold_failed", v, Ratio(v), Planetarium.GetUniversalTime() - _igniteUt, "plan_ended");
+        }
 
         /// <summary>A stage request already sent whose stage drop happened before its confirm tick still leaves its staged event.</summary>
         public void RecordSent(Vessel v, Action<string> staged)

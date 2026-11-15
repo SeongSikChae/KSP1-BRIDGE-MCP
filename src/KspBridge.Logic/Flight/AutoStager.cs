@@ -887,13 +887,21 @@ namespace KspBridge.Flight
         }
 
         /// <summary>Release (complete, abort, failure after attach): clears the sequence, requests and latch; keeps caches and _lastUt.</summary>
-        public static void Reset(Vessel v)
+        public static void Reset(Vessel v) => Reset(v, true);
+
+        /// <param name="planEnded">True when the plan really ended: a clamp hold still holding shuts its engines down (#28 review
+        /// R4-2-2). False for Clear (reload handover: the plan goes on in the next logic with the handed-over hold).</param>
+        private static void Reset(Vessel v, bool planEnded)
         {
             RecordSent(v);
+            if (planEnded)
+            {
+                _hold?.EndedWhileHolding(v);
+            }
             _latch = null;
             _request = null;
             _onStart = null;
-            _hold = null;   // engines it lit stay lit: only the failure path shuts them down (design 0064 decision 6)
+            _hold = null;
             _onStartQueued = false;
             ResetSequence(_lastUt);
         }
@@ -901,7 +909,7 @@ namespace KspBridge.Flight
         /// <summary>Coordinator.Stop: Reset plus caches and _lastUt (an unloading logic holds no part references).</summary>
         public static void Clear(Vessel v)
         {
-            Reset(v);
+            Reset(v, false);
             _lastUt = double.NegativeInfinity;
             ClearSets();
             EngineModel.ClearCaches();

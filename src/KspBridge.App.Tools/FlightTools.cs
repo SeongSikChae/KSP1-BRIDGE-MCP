@@ -234,9 +234,16 @@ namespace KspBridge.App
             "the dynamic pressure is at most max_separate_q, at most max_separate_q_wait_s after the wait began; serial stages cut the throttle, " +
             "separate and wait settle_distance before igniting); it never fires a stage when nothing with an engine is left (out_of_stages), and is refused " +
             "(invalid_plan control_part_jettisoned) when a later separation would drop the control part. A flamed-out engine with propellant left " +
+            "With launch clamps in that stage, its liquid engines light first and the clamps let go only once thrust reaches 90% of what " +
+            "the engines can give at this pressure and throttle (staging clamp_hold; that stage's SRBs light with the clamp release). " +
+            "With all clamps one stage after the engines, this one on_start fires both: the engine stage (SRBs in it light on the pad), " +
+            "then the clamp stage once thrust is up, so do not add a second on_start for the clamps. Clamps spread over several stages: " +
+            "no hold, one stage as before. Not reached within spool-up + clamp_hold_s, an engine goes out, or the release stage cannot " +
+            "fire: the engines shut down, the clamps stay and the plan aborts with clamp_hold_failed; a plan that ends during the hold " +
+            "also shuts them down. " +
             "(air-starved jets included) is a pause, not a burnout: with no working engine, staging \"paused\" keeps the throttle while KSP relights it, " +
             "and after max_flameout_pause_s of wanted thrust it ends with flameout_timeout, then no_thrust. staging_options: tailoff_ratio 0.05, max_tailoff_s 5, " +
-            "settle_distance 2 m, max_settle_s 3, max_separate_q 25 kPa, max_separate_q_wait_s 30, max_flameout_pause_s 3. To restart after a no_thrust abort (out_of_stages, ignite_blocked, stage_failed), on_start:[\"stage\"] is required. " +
+            "settle_distance 2 m, max_settle_s 3, max_separate_q 25 kPa, max_separate_q_wait_s 30, max_flameout_pause_s 3, clamp_hold_s 5. To restart after a no_thrust abort (out_of_stages, ignite_blocked, stage_failed), on_start:[\"stage\"] is required. " +
             "Invalid plans fail with invalid_plan \"<path>: <reason>\"; no engine and nothing staging fails with no_thrust. " +
             "Returns {plan_id, state, steps, event_seq, epoch}; follow progress with get_flight_events.")]
         public Task<string> SubmitFlightPlan([Description("Flight plan JSON object")] JsonElement plan, CancellationToken ct)
@@ -319,7 +326,10 @@ namespace KspBridge.App
             "Event: {seq, ut, met, type, step, data}; types plan_started, plan_replaced, steps_replaced, step_started, step_completed, stage_burnout, staged {stage, reason, q_kpa (separate only)}, " +
             "staging_completed {stage, tailoff_s, settle_s, held_s (dynamic-pressure wait), ignited}, separation_held {stage, q_kpa}, " +
             "separation_forced {stage, q_kpa, reason timeout|serial (the core ran dry while waiting: separates as a serial stage)}, flameout_pause {stage}, flameout_resumed {stage, pause_s}, flameout_timeout {stage, pause_s}, " +
-            "out_of_stages, ignite_blocked, stage_failed, warp_started {rate, until_ut, resumed?}, warp_stopped {rate, until_ut, ended_by plan|unexpected, remaining_s} (plan warps only; " +
+            "out_of_stages, ignite_blocked, stage_failed, clamp_hold_started {stage (clamp stage), layout same|split, engines, solid}, " +
+            "clamp_released {stage, thrust_ratio, hold_s}, clamp_hold_failed {stage, thrust_ratio, hold_s, reason timeout|engine_out|release_failed|plan_ended} " +
+            "(launch clamps hold the vessel until thrust reaches 90%; a failure is followed by plan_aborted reason clamp_hold_failed, " +
+            "plan_ended comes after the plan ended another way during the hold), warp_started {rate, until_ut, resumed?}, warp_stopped {rate, until_ut, ended_by plan|unexpected, remaining_s} (plan warps only; " +
             "in an execute_node, circularize or approach wait an unexpected end allows one re-request (resumed), a second one in the step is taken as a user cancel; " +
             "in coast the first one is), " +
             "warp_unavailable {reason player_warp|not_supported|mode_switch_refused|align_wait (wait step not aligned for 30 s; with attitude_error and angular_rate of that tick)}, " +
