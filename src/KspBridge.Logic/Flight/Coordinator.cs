@@ -914,6 +914,16 @@ namespace KspBridge.Flight
             }
             try
             {
+                // #22: the running land step's target and impact prediction (null without one)
+                result["landing"] = Running && _mode is LandMode land ? land.Landing(v) : null;
+            }
+            catch (Exception e)   // isolated like controls
+            {
+                result["landing"] = null;
+                result["landing_error"] = e.GetType().Name + ": " + e.Message;
+            }
+            try
+            {
                 result["maneuver_nodes"] = Maneuver.ManeuverNodes.List(v);
             }
             catch (Exception e)   // isolated like controls

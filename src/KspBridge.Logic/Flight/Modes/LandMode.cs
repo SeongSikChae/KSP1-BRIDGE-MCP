@@ -21,7 +21,7 @@ namespace KspBridge.Flight.Modes
         private readonly double _finalAlt;
         private readonly double _finalSpeed;
         private readonly double _gearAlt;   // NaN = gear off
-        private readonly LandingTarget _target;   // null = vertical landing in place (#17); used from #22 U2 on
+        private readonly LandingTracker _track;   // null = vertical landing in place (#17); #22 target and impact prediction
 
         private LandMode(double margin, double finalAlt, double finalSpeed, double gearAlt, LandingTarget target)
         {
@@ -29,8 +29,11 @@ namespace KspBridge.Flight.Modes
             _finalAlt = finalAlt;
             _finalSpeed = finalSpeed;
             _gearAlt = gearAlt;
-            _target = target;
+            _track = target == null ? null : new LandingTracker(target);
         }
+
+        /// <summary>get_flight.landing: null without a target (or after the target was dropped).</summary>
+        public Dictionary<string, object> Landing(Vessel v) => _track?.Describe(v);
 
         /// <summary>Validates the arguments at submit time and returns the step's mode factory.</summary>
         public static Func<IFlightMode> Parse(Dictionary<string, object> o, string path)
@@ -125,6 +128,10 @@ namespace KspBridge.Flight.Modes
             // after the first touchdown: throttle 0, hold vertical, complete once landed and still for StillS
             bool landed = v.situation == Vessel.Situations.LANDED || v.situation == Vessel.Situations.SPLASHED;
             double ut = Planetarium.GetUniversalTime();
+            if (!_touched)
+            {
+                _track?.Tick(v, ut);   // #22 U2: fixes the target and predicts only; attitude and throttle unchanged
+            }
             // Not in the submit trial: its events are committed after plan_started with the previous plan's step index
             // (the Coordinator sets the step after the trial); the first real Tick records the touchdown.
             if (landed && !_touched && !FlightEvents.InTrial)
