@@ -188,7 +188,10 @@ namespace KspBridge.App
             "for flip_for_s 2; land and retrograde descents are not judged), control_lost (under thrust, attitude_error > lost_error_deg 30 for lost_for_s 5 without coming 5 deg closer to the target; " +
             "a turn that keeps closing in restarts the timer), " +
             "overheat (temp_ratio >= temp_abort 0.95; temp_warn 0.8 only alerts), and only alerts on thrust_waste (under thrust, attitude_error > waste_error_deg 10 " +
-            "for waste_for_s 5) and oscillation (osc_flips 6 sign changes of one axis rate >= osc_min_rate 0.05 rad/s within 10 s; cleared below half of that); " +
+            "for waste_for_s 5), oscillation (osc_flips 6 sign changes of one axis rate >= osc_min_rate 0.05 rad/s within 10 s; cleared below half of that) " +
+            "and attitude_drift (no thrust, or land still turning after a forced start, with a commanded attitude: attitude_error > drift_error_deg 30 while the nose " +
+            "has itself moved drift_growth_deg 20 away from the target, target moves not counted, since thrust stopped, the step began or the last clear; " +
+            "kept while staging, on rails or with no attitude_error; cleared once back under drift_error_deg); " +
             "the attitude-error timers pause, not reset, while staging, on rails or while land is still turning after a forced start; enabled false turns the checks " +
             "off (plan.monitor still fills), abort false makes the abort items alerts; an abort is plan_aborted reason monitor with message \"<item>: <values>\". " +
             "rcs (any step): true/false sets the RCS group when the step starts (RCS adds its torque to attitude control; e.g. true for vacuum turns); " +
@@ -331,7 +334,7 @@ namespace KspBridge.App
             "these three only for calls that change something, step -1 without a plan: action_group {group, action, before, on, changed, actions, error " +
             "(action_failed only)} (set_action_group), part_field {part_id, part, module, index, field, old, value, counterparts, own, error (field_failed only)} " +
             "(set_vessel_part_field), resource_flow {part_id, part, resource, before, flow_enabled} (set_resource_flow), " +
-            "monitor_alert {kind flipped|control_lost|overheat|thrust_waste|oscillation, level warn|abort, value, limit} and monitor_clear {kind} " +
+            "monitor_alert {kind flipped|control_lost|overheat|thrust_waste|oscillation|attitude_drift, level warn|abort, value, limit} and monitor_clear {kind} " +
             "(flight monitor, see submit_flight_plan monitor; only when an item's level changes; a step change clears the alerts before step_completed), " +
             "plan_completed, plan_aborted {reason, condition, message}; " +
             "part events on any loaded vessel with or without a plan (debris included, active = the active vessel; step is -1 unless a plan is running; kept apart from plan events, so a vessel breaking apart never pushes plan events out): " +
