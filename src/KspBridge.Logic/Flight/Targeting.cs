@@ -1,4 +1,5 @@
 using KspBridge.Flight.Control;
+using KspBridge.Flight.Landing;
 using KspBridge.Flight.Maneuver;
 using System;
 using System.Collections.Generic;
@@ -38,6 +39,8 @@ namespace KspBridge.Flight
                     ["loaded"] = x.loaded,
                     ["distance"] = OrbitMath.Num(dist),
                     ["docking_ports"] = Ports(x),
+                    ["latitude"] = OrbitMath.Num(x.latitude),                          // #22: landing target coordinates
+                    ["longitude"] = OrbitMath.Num(LandingTarget.Wrap180(x.longitude)),
                 });
             }
             // stable: without an active vessel (space center, tracking station) every distance is unknown and the game's order stays
@@ -148,7 +151,7 @@ namespace KspBridge.Flight
             return Describe(v);
         }
 
-        private static Vessel FindVessel(double id)
+        internal static Vessel FindVessel(double id)
         {
             foreach (Vessel x in FlightGlobals.Vessels)
             {

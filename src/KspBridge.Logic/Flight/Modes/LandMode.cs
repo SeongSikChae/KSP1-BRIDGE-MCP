@@ -1,4 +1,5 @@
 using KspBridge.Flight.Control;
+using KspBridge.Flight.Landing;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -13,19 +14,22 @@ namespace KspBridge.Flight.Modes
     /// </summary>
     public sealed class LandMode : IFlightMode
     {
-        public static readonly string[] Args = { "margin", "final_altitude", "final_speed", "gear_altitude" };
+        public static readonly string[] Args =
+            { "margin", "final_altitude", "final_speed", "gear_altitude", "latitude", "longitude", "vessel" };
 
         private readonly double _margin;
         private readonly double _finalAlt;
         private readonly double _finalSpeed;
         private readonly double _gearAlt;   // NaN = gear off
+        private readonly LandingTarget _target;   // null = vertical landing in place (#17); used from #22 U2 on
 
-        private LandMode(double margin, double finalAlt, double finalSpeed, double gearAlt)
+        private LandMode(double margin, double finalAlt, double finalSpeed, double gearAlt, LandingTarget target)
         {
             _margin = margin;
             _finalAlt = finalAlt;
             _finalSpeed = finalSpeed;
             _gearAlt = gearAlt;
+            _target = target;
         }
 
         /// <summary>Validates the arguments at submit time and returns the step's mode factory.</summary>
@@ -47,7 +51,9 @@ namespace KspBridge.Flight.Modes
             {
                 gearAlt = Plan.OptionalNumber(o, "gear_altitude", path, 0, 10000, 500);
             }
-            return () => new LandMode(margin, finalAlt, finalSpeed, gearAlt);
+            // form only (#22 decision 1, 9): the vessel's existence and state are checked when the step starts
+            LandingTarget target = LandingTarget.Parse(o.ContainsKey, k => o[k], path, (p, r) => Plan.Invalid(p, r));
+            return () => new LandMode(margin, finalAlt, finalSpeed, gearAlt, target);
         }
 
         /// <summary>Re-measure interval (s) while the legs extend after the Gear group turns on.</summary>
