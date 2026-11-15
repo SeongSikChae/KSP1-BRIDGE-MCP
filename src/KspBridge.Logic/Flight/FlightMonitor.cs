@@ -81,11 +81,17 @@ namespace KspBridge.Flight
             Accumulate(ref _wasteFor, thrusting && err > s.WasteErrorDeg, pauseErr, dt);
 
             // attitude_drift: no thrust (or a forced land start still turning, thrust cut by cos) with a commanded attitude.
-            // Paused (kept as is, previous nose dropped) on rails, while staging and when the error is not known.
-            bool driftArmed = (!thrusting || cmd.Aligning) && cmd.Attitude.HasValue;
+            // Paused (kept as is, previous nose dropped) on rails, while staging and when the error is not known. No commanded
+            // attitude is checked first: its attitude_error is NaN too, but it ends the episode rather than pausing it.
+            bool driftArmed = !thrusting || cmd.Aligning;
             bool driftPause = v.packed || t.Str["staging"] != "none" || double.IsNaN(err);
             string driftLevel = _level.TryGetValue("attitude_drift", out string dl) ? dl : null;   // unchanged while paused
-            if (driftPause)
+            if (!cmd.Attitude.HasValue)
+            {
+                ResetDrift();
+                driftLevel = null;
+            }
+            else if (driftPause)
             {
                 _driftPrev = null;
             }
