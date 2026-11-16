@@ -695,8 +695,11 @@ namespace KspBridge.Flight.Modes
                     {
                         _fallPredUt = ut;
                         CelestialBody body = v.mainBody;
+                        // decision 12-2 2nd stage: KSP's integration, physics warp ending WarpLeadS before the previous brake start
+                        // (not saved: after a reload the first prediction uses +Infinity)
+                        double warpEnd = _fallPred != null ? _fallPred.BrakeUt - WarpLeadS : double.NaN;
                         _fallPred = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _fallDrag,
-                            brakeDecel: aNet, finalAlt: _finalAlt);
+                            brakeDecel: aNet, finalAlt: _finalAlt, step: PhysStep.Applied(warpEnd));
                     }
                 }
                 p = _fallPred;

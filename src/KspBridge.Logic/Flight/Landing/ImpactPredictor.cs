@@ -38,6 +38,11 @@ namespace KspBridge.Flight.Landing
         public bool Fixed;
         public double FixedH;
 
+        /// <summary>The applied policy (decision 12-2 2nd stage) without the diag band: ×2 in the air until warpEndUt, then ×1.
+        /// warpEndUt: brake start − LandMode.WarpLeadS from the previous prediction, NaN or +Infinity when not known.</summary>
+        public static PhysStep Applied(double warpEndUt) =>
+            new PhysStep { On = true, WarpEndUt = double.IsNaN(warpEndUt) ? double.PositiveInfinity : warpEndUt };
+
         /// <summary>The step at a predicted point: 0 above the atmosphere (rails, analytic orbit), else ×2 or ×1.</summary>
         public double H(CelestialBody body, double alt, double ut)
         {

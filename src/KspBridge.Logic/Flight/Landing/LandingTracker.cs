@@ -204,24 +204,26 @@ namespace KspBridge.Flight.Landing
                 _predUt = ut;
                 Stopwatch sw = Stopwatch.StartNew();
                 CelestialBody body = v.mainBody;
-                _pred = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag,
+                // DIAG (#22 decision 12-2, U6 removes): the plain RK4 prediction, logged only (impact=) next to the applied one
+                Impact plain = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag,
                     brakeDecel: _brakeDecel, finalAlt: _brakeFinalAlt);
                 double plainMs = sw.Elapsed.TotalMilliseconds;
                 _frameCheck = ImpactPredictor.FrameCheck(v);
-                // DIAG (#22 decision 12-2 1st stage, U6 removes): the same prediction with KSP's integration, logged only
+                // decision 12-2 2nd stage: the prediction used for guidance follows KSP's integration (impact_mod= in the log)
                 PhysStep phys = Policy();
                 Stopwatch swMod = Stopwatch.StartNew();
                 Impact mod = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag,
                     brakeDecel: _brakeDecel, finalAlt: _brakeFinalAlt, step: phys);
                 double modMs = swMod.Elapsed.TotalMilliseconds;
+                _pred = mod;
                 Log("predict: ms=" + F(plainMs, 2) + " frame_check=" + F(_frameCheck, 3) + " k=" + F(_drag.KNow(v), 4) + " scale=" + F(_drag.Scale, 3) +
                     " k_sample=" + F(_drag.LastSample, 4) + " src=" + _drag.Source +
-                    (_pred == null ? " impact=null" : " impact=" + F(_pred.Lat, 5) + "," + F(_pred.Lon, 5) + " t=" + F(_pred.Ut - ut, 1) +
-                        " err=" + F(ImpactPredictor.Distance(body, _pred.Lat, _pred.Lon, _lat, _lon), 1)) +
+                    (plain == null ? " impact=null" : " impact=" + F(plain.Lat, 5) + "," + F(plain.Lon, 5) + " t=" + F(plain.Ut - ut, 1) +
+                        " err=" + F(ImpactPredictor.Distance(body, plain.Lat, plain.Lon, _lat, _lon), 1)) +
                     (mod == null ? " impact_mod=null" : " impact_mod=" + F(mod.Lat, 5) + "," + F(mod.Lon, 5) +
                         " err_mod=" + F(ImpactPredictor.Distance(body, mod.Lat, mod.Lon, _lat, _lon), 1) +
-                        (_pred == null ? "" : " d_impact_m=" + F(ImpactPredictor.Distance(body, _pred.Lat, _pred.Lon, mod.Lat, mod.Lon), 1) +
-                            " d_brake_s=" + F(mod.BrakeUt - _pred.BrakeUt, 2))) +
+                        (plain == null ? "" : " d_impact_m=" + F(ImpactPredictor.Distance(body, plain.Lat, plain.Lon, mod.Lat, mod.Lon), 1) +
+                            " d_brake_s=" + F(mod.BrakeUt - plain.BrakeUt, 2))) +
                     " ms_mod=" + F(modMs, 2) + " warp_end_in=" + F(phys.WarpEndUt - ut, 1));
                 _lastBrakeUt = _pred != null ? _pred.BrakeUt : double.NaN;
                 Diagnose(v, ut);

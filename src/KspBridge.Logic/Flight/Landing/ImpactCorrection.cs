@@ -28,9 +28,11 @@ namespace KspBridge.Flight.Landing
             }
             down = down.normalized;
             Vector3d cross = Vector3d.Cross(up, down);
-            Impact i0 = ImpactPredictor.Predict(body, r, vel, ut, mass, drag);
-            Impact iD = ImpactPredictor.Predict(body, r, vel + down, ut, mass, drag);
-            Impact iC = ImpactPredictor.Predict(body, r, vel + cross, ut, mass, drag);
+            // decision 12-2 2nd stage: KSP's integration; the brake start is not known yet, so ×2 in the whole atmosphere
+            PhysStep step = PhysStep.Applied(double.PositiveInfinity);
+            Impact i0 = ImpactPredictor.Predict(body, r, vel, ut, mass, drag, step: step);
+            Impact iD = ImpactPredictor.Predict(body, r, vel + down, ut, mass, drag, step: step);
+            Impact iC = ImpactPredictor.Predict(body, r, vel + cross, ut, mass, drag, step: step);
             if (i0 == null || iD == null || iC == null)
             {
                 return false;

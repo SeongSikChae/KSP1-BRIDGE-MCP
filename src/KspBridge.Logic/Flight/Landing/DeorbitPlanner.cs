@@ -146,7 +146,9 @@ namespace KspBridge.Flight.Landing
             {
                 throw new ApiException(409, "no_solution", "the burn is not retrograde");
             }
-            Impact imp = ImpactPredictor.Predict(body, r, vel + n.DvWorld, ut, mass, drag, sw, BudgetMs);
+            // decision 12-2 2nd stage: KSP's integration; the brake start is not known yet, so ×2 in the whole atmosphere
+            Impact imp = ImpactPredictor.Predict(body, r, vel + n.DvWorld, ut, mass, drag, sw, BudgetMs,
+                step: PhysStep.Applied(double.PositiveInfinity));
             if (sw.Elapsed.TotalMilliseconds > BudgetMs)
             {
                 throw new ApiException(409, "no_solution", "deorbit search exceeded " + BudgetMs.ToString("F0") + " ms");
