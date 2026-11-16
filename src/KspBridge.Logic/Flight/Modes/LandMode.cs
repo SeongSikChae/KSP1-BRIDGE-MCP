@@ -157,6 +157,25 @@ namespace KspBridge.Flight.Modes
         /// <summary>Descent speed (m/s) a burn needs to start: a vessel resting on the ground never starts.</summary>
         private const double MinStartVv = 0.5;
 
+        /// <summary>#22 decision 10: alignment lead (s) added to the braking time for the burn window.</summary>
+        private const double BrakeLeadS = 10;
+
+        /// <summary>Free-fall impact prediction interval (s) when no target tracker predicts.</summary>
+        private const double FallPredictS = 1;
+
+        /// <summary>#22 decision 11: warp ends this long before the predicted brake start (T = brake start − 30 s).</summary>
+        internal const double WarpLeadS = 30;   // also the predictor's physics step policy (#22 decision 12-2)
+
+        /// <summary>Physics warp ×2 only while the axis is within this of the target (deg) ...</summary>
+        private const double WarpAttDeg = 5;
+
+        /// <summary>... and the angular rate is below this (rad/s).</summary>
+        private const double WarpRate = 0.05;
+
+        /// <summary>DIAG (#22 U5c decision 12, U6 removes): no physics warp in this altitude band (m) of a target landing, to
+        /// compare the forward check at ×1 with the ×2 bands just above and below.</summary>
+        private const double DiagX1Low = 50000, DiagX1High = 60000;
+
         /// <summary>Interval (s) of the burn and post-touchdown telemetry log lines (Player.log, landing diagnosis).</summary>
         private const double DiagS = 1;
 
@@ -178,6 +197,10 @@ namespace KspBridge.Flight.Modes
         private readonly List<string> _infeasible = new List<string>();   // landing_infeasible reasons already reported
         private double _diagUt;
         private bool _burning;
+
+        /// <summary>#22 decision 13: before the braking burn and not in a correction burn (both restored by the handover).</summary>
+        public bool InFreeFall => !_correcting && !_burning;
+
         private bool _aligning;   // forced start with the axis still turning: until it first comes within AlignDeg
         private bool _gearDone;
         private double _gearSettleUntil;   // 0 = not settling
@@ -187,6 +210,20 @@ namespace KspBridge.Flight.Modes
         private int _partCount = -1;
         private bool _gearState;
         private double _measuredUt;
+
+        // #22 decision 10: free-fall impact prediction without a target (not handed over: predicted again after a reload)
+        private DragModel _fallDrag;
+        private double _fallPredUt = double.NegativeInfinity;
+        private Impact _fallPred;
+        private double _brakeUt = double.NaN;      // predicted brake start (this tick), NaN = none
+        private double _brakeIn = double.NaN;      // get_flight: seconds to the brake start (NaN = none)
+        private bool _brakeWindow;
+
+        /// <summary>get_flight.plan for a land without a target (#22 decision 10): seconds to the predicted brake start, NaN = none.</summary>
+        public double BrakeIn => _brakeIn;
+
+        /// <summary>get_flight.plan: the burn window is open (or the burn has started).</summary>
+        public bool BrakeWindowOpen => _brakeWindow || _burning;
 
         public bool Done { get; private set; }
 
@@ -209,6 +246,8 @@ namespace KspBridge.Flight.Modes
             double ut = Planetarium.GetUniversalTime();
             if (!_touched)
             {
+                // #22 decision 10: the brake start search of the tracker's next prediction (the first tick included)
+                _track?.SetBrake(_margin * EngineModel.MaxAccel(v) - g, _finalAlt);
                 _track?.Tick(v, ut);   // #22 U2: fixes the target and predicts only; attitude and throttle unchanged
             }
             // Not in the submit trial: its events are committed after plan_started with the previous plan's step index
@@ -411,6 +450,26 @@ namespace KspBridge.Flight.Modes
 
             if (!_burning)
             {
+                // #22 decision 10: free fall (aerobraking) until the burn window opens; the #17 judgement below decides inside it
+                bool window = BrakeWindow(v, ut, g, maxAccel, h, vv);
+                if (!FlightEvents.InTrial)
+                {
+                    _track?.SetBrakeState(_brakeUt - ut, window);
+                    _brakeIn = _brakeUt - ut;
+                    _brakeWindow = window;
+                }
+                if (!window)
+                {
+                    // #22 decision 11: warp until T = brake start − 30 s; physics ×2 only with a steady attitude
+                    double errDeg = Vector3d.Angle(v.ReferenceTransform.up, att.Direction(v));
+                    return new ModeCommand(att, 0)
+                    {
+                        WarpToUt = double.IsNaN(_brakeUt) ? (double?)null : _brakeUt - WarpLeadS,
+                        PhysicsWarpOk = errDeg <= WarpAttDeg && v.angularVelocity.magnitude <= WarpRate
+                            // DIAG (#22 U5c decision 12, U6 removes): ×1 comparison band, target landings only
+                            && !(_track != null && _track.Active && v.altitude > DiagX1Low && v.altitude < DiagX1High),
+                    };
+                }
                 Judge(v, t, h, vv, aReq, maxAccel, "best", g, false);   // before the burn: accel only, against the best attitude
                 // normal start: axis near the actual target direction (not the tilt limit), judged with the target's cos so
                 // an axis tilted past the target does not start high; forced starts: near the ground, or no margin even
@@ -423,7 +482,7 @@ namespace KspBridge.Flight.Modes
                     : aReq >= _margin * maxAccel ? "no_margin"
                     : alignErr <= AlignDeg && aReq >= _margin * aMaxVTarget ? "aligned"
                     : null;
-                if (why == null)
+                if (why == null || FlightEvents.InTrial)   // #22 decision 10: the trial never starts the burn (its mode runs on)
                 {
                     return new ModeCommand(att, 0);
                 }
@@ -604,6 +663,69 @@ namespace KspBridge.Flight.Modes
 
         /// <summary>#22 decision 6: |want| = min(|d| / tGoV, √(2·a_hLim·|d|), |d| / (4τ)) toward the target; tGoV to the
         /// vertical-first height, a_hLim = 0.5·g·tan 30°; |d|/(4τ) with the τ loop is critically damped.</summary>
+        /// <summary>#22 decision 10 (U5b): the burn window before the burn. Open when the vertical stop condition holds now
+        /// (vv² / (2·aNet) ≥ h − final_altitude, model-free, the #17 condition), when the predicted brake start (stopping distance
+        /// of the air speed reaching the height over the local terrain along the unpowered prediction) is within BrakeLeadS, or
+        /// when an impact is predicted with no brake start before it. No impact predicted (still in orbit): closed.
+        /// margin × max accel ≤ g: open (the #17 judgement reports it). The kept target's prediction when there is one, else this
+        /// mode's own every second (the first tick at once). Sets _brakeUt for the free-fall warp.</summary>
+        private bool BrakeWindow(Vessel v, double ut, double g, double maxAccel, double h, double vv)
+        {
+            double aNet = _margin * maxAccel - g;
+            _brakeUt = double.NaN;
+            if (aNet <= 0)
+            {
+                return true;
+            }
+            Impact p;
+            if (_track != null && _track.Active)
+            {
+                p = _track.Prediction;
+            }
+            else
+            {
+                if (!FlightEvents.InTrial)
+                {
+                    if (_fallDrag == null)
+                    {
+                        _fallDrag = DragModel.Initial(v);
+                    }
+                    _fallDrag.Measure(v, TimeWarp.fixedDeltaTime);
+                    if (ut - _fallPredUt >= FallPredictS)
+                    {
+                        _fallPredUt = ut;
+                        CelestialBody body = v.mainBody;
+                        _fallPred = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _fallDrag,
+                            brakeDecel: aNet, finalAlt: _finalAlt);
+                    }
+                }
+                p = _fallPred;
+            }
+            bool vertical = vv > 0 && vv * vv / (2 * aNet) >= h - _finalAlt;
+            bool open;
+            if (p == null)
+            {
+                open = vertical;
+            }
+            else if (double.IsNaN(p.BrakeUt))
+            {
+                open = true;   // impact but no brake start before it: conservative
+            }
+            else
+            {
+                _brakeUt = p.BrakeUt;
+                open = vertical || p.BrakeUt - ut <= BrakeLeadS;
+            }
+            if (ut - _diagUt >= DiagS)
+            {
+                _diagUt = ut;
+                Log("free fall: h=" + F(h, 0) + " srf=" + F(v.srfSpeed, 1) + " vv=" + F(vv, 1) + " brake_in=" + F(_brakeUt - ut, 1) +
+                    " impact_in=" + F(p == null ? double.NaN : p.Ut - ut, 1) + " vertical=" + vertical + " window=" + open +
+                    (_fallDrag != null ? " k=" + F(_fallDrag.KNow(v), 4) + " scale=" + F(_fallDrag.Scale, 3) : ""));
+            }
+            return open;
+        }
+
         /// <summary>#22 decision 5: decides once on the first real tick (the tracker has just fixed the target and predicted),
         /// then runs the correction burn until a stop condition. null: no correction command this tick, the normal flow goes on
         /// from the same tick (no burn start judgement while correcting).</summary>
@@ -838,7 +960,7 @@ namespace KspBridge.Flight.Modes
             }
             _partCount = -1;
             _measuredUt = 0;
-            _track?.Load(state);
+            _track?.Load(v, state);
             if (_track != null)
             {
                 _inLoop = Handover.B(state, "in_loop");

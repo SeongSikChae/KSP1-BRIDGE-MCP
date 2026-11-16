@@ -36,9 +36,11 @@ namespace KspBridge.Flight
         private static bool _resumable;    // the step waits through CircularizeMode.WarpGate (execute_node, circularize, approach); coast is not
         private static readonly HashSet<string> _unavailable = new HashSet<string>(); // reasons reported in this step (once per step and reason)
         private static double _untilUt = double.NaN;
+        private static bool _physics;      // #22 decision 11: our physics warp ×2 is in effect
+        private const int PhysicsRateIndex = 1;   // ×2
 
         /// <summary>True while a warp we requested is in effect.</summary>
-        public static bool Requested => _requested;
+        public static bool Requested => _requested || _physics;
 
         /// <summary>User-cancel latch (reload handover, unit 11).</summary>
         public static bool Cancelled => _cancelled;
@@ -48,7 +50,7 @@ namespace KspBridge.Flight
 
         /// <summary>Warp in effect: rails rate raised, or a warp-to pending or running (its rate may still be easing in or out
         /// with the index at 0). get_flight plan.warp.</summary>
-        public static bool Active => On || Pending;
+        public static bool Active => On || Pending || _physics;
 
         /// <summary>WarpTo waiting for the next TimeWarp.Update, or autoWarp running (rate not raised yet counts too).</summary>
         internal static bool Pending
@@ -65,8 +67,16 @@ namespace KspBridge.Flight
         /// end, or any such end in another step (coast), latches as a user cancel.</summary>
         public static void Sync()
         {
-            bool active = Active;
-            if (_requested && _wasActive && !active)
+            bool active = On || Pending;   // rails only; our physics warp is checked below
+            Vessel av = FlightGlobals.ActiveVessel;
+            bool belowTop = av != null && av.mainBody.atmosphere && av.altitude <= RailsFloor(av.mainBody);
+            if (_requested && _wasActive && !active && belowTop)
+            {
+                _requested = false;   // #22 decision 11: KSP's altitude limit ended our rails at the atmosphere top, no latch
+                Debug.Log("[KspBridge] warp ended at the atmosphere top (no latch)");
+                Stopped("atmosphere", "rails");
+            }
+            else if (_requested && _wasActive && !active)
             {
                 _requested = false;
                 if (_resumeUsed || !_resumable)
@@ -80,18 +90,49 @@ namespace KspBridge.Flight
                     _resumePending = true;
                     Debug.Log("[KspBridge] warp ended without our Stop (user cancel or WarpTo end): one re-request allowed in this step");
                 }
-                Stopped("unexpected");
+                Stopped("unexpected", "rails");
             }
             _wasActive = _requested && active;
+            if (_physics && (TimeWarp.WarpMode != TimeWarp.Modes.LOW || TimeWarp.CurrentRateIndex != PhysicsRateIndex))
+            {
+                _physics = false;   // the rate was changed by the player: theirs from now on, latched for this step
+                _cancelled = true;
+                Debug.Log("[KspBridge] physics warp changed by the player: released and latched for this step");
+                Stopped("unexpected", "physics");
+            }
         }
 
-        public static void Request(Vessel v, double targetUt)
+        public static void Request(Vessel v, double targetUt) => Request(v, targetUt, false);
+
+        /// <summary>physicsOk (#22 decision 11, land free fall): in the atmosphere our physics warp ×2 toward targetUt instead of
+        /// rails. Our rails ending because the vessel went below the atmosphere top is no user cancel (ended_by atmosphere).</summary>
+        public static void Request(Vessel v, double targetUt, bool physicsOk)
         {
             if (_cancelled)
             {
                 return;
             }
-            bool allowed = v.altitude > (v.mainBody.atmosphere ? v.mainBody.atmosphereDepth : 0)
+            bool inAtmosphere = v.mainBody.atmosphere && v.altitude <= v.mainBody.atmosphereDepth;
+            if (_requested && v.mainBody.atmosphere && v.altitude <= RailsFloor(v.mainBody) && !inAtmosphere)
+            {
+                StopRails("atmosphere");   // the lowest rails rate's altitude limit reached just above the atmosphere top
+                return;
+            }
+            if (inAtmosphere)
+            {
+                if (_requested)
+                {
+                    StopRails("atmosphere");   // the atmosphere top crossed: our end, no latch
+                }
+                RequestPhysics(v, targetUt, physicsOk);
+                return;
+            }
+            if (_physics)
+            {
+                StopPhysics("plan");
+            }
+            // #22 decision 11 (U5b): the same floor as the stop above, so no band where it starts and stops every tick
+            bool allowed = v.altitude > (v.mainBody.atmosphere ? RailsFloor(v.mainBody) : 0)
                 && FlightInputHandler.state.mainThrottle == 0
                 && EngineModel.ThrustSum(v) <= 0
                 && !AutoStager.BlocksWarp;   // staging runs tick by tick: never on rails (a flameout pause alone does not block, #13)
@@ -143,12 +184,24 @@ namespace KspBridge.Flight
             _wasActive = true;
             _untilUt = targetUt;
             Debug.Log("[KspBridge] warp requested until UT " + targetUt.ToString("F2") + (_resumePending ? " (re-request)" : ""));
-            Event("warp_started", null, _resumePending ? new Dictionary<string, object> { ["resumed"] = true } : null);
+            Event("warp_started", null, _resumePending
+                ? new Dictionary<string, object> { ["resumed"] = true, ["mode"] = "rails" }
+                : new Dictionary<string, object> { ["mode"] = "rails" });
             _resumePending = false;
         }
 
-        /// <summary>Releases our warp, or at a step change and abort any rails warp and pending WarpTo; leaves physics warp alone.</summary>
+        /// <summary>Releases our warp, or at a step change and abort any rails warp and pending WarpTo; leaves the player's physics
+        /// warp alone (ours, #22 decision 11, is dropped).</summary>
         public static void Stop()
+        {
+            StopRails("plan");
+            if (_physics)
+            {
+                StopPhysics("plan");
+            }
+        }
+
+        private static void StopRails(string endedBy)
         {
             bool ours = _requested;
             _requested = false;
@@ -171,8 +224,68 @@ namespace KspBridge.Flight
             Debug.Log("[KspBridge] warp stopped by the plan (" + (ours ? "ours" : "not requested by us") + ")");
             if (ours)
             {
-                Stopped("plan");   // no latch: our own release
+                Stopped(endedBy, "rails");   // no latch: our own release (plan) or the atmosphere top
             }
+        }
+
+
+        /// <summary>#22 decision 11: our physics warp ×2 in the atmosphere (land free fall). Kept while physicsOk (steady
+        /// attitude), throttle 0, no thrust or staging and targetUt not reached; dropped back to ×1 otherwise. The player's
+        /// warp is never taken over.</summary>
+        private static void RequestPhysics(Vessel v, double targetUt, bool physicsOk)
+        {
+            bool ok = physicsOk
+                && FlightInputHandler.state.mainThrottle == 0
+                && EngineModel.ThrustSum(v) <= 0
+                && !AutoStager.BlocksWarp
+                && targetUt - Planetarium.GetUniversalTime() > 0;
+            if (!ok)
+            {
+                if (_physics)
+                {
+                    StopPhysics("plan");
+                }
+                return;
+            }
+            if (_physics)
+            {
+                return;
+            }
+            if (Pending || On || (TimeWarp.WarpMode == TimeWarp.Modes.LOW && TimeWarp.CurrentRateIndex > 0))
+            {
+                Unavailable("player_warp");
+                return;
+            }
+            if (TimeWarp.WarpMode == TimeWarp.Modes.HIGH && !SetMode(TimeWarp.fetch, TimeWarp.Modes.LOW))
+            {
+                Unavailable(SetModeMethod == null ? "not_supported" : "mode_switch_refused");
+                return;
+            }
+            TimeWarp.SetRate(PhysicsRateIndex, true);
+            _physics = true;
+            _untilUt = targetUt;
+            Debug.Log("[KspBridge] physics warp x" + TimeWarp.CurrentRate.ToString("F0") + " requested until UT " + targetUt.ToString("F2"));
+            Event("warp_started", null, new Dictionary<string, object> { ["mode"] = "physics" });
+        }
+
+        private static void StopPhysics(string endedBy)
+        {
+            _physics = false;
+            if (TimeWarp.WarpMode == TimeWarp.Modes.LOW && TimeWarp.CurrentRateIndex == PhysicsRateIndex)
+            {
+                TimeWarp.SetRate(0, true);
+            }
+            Debug.Log("[KspBridge] physics warp stopped (" + endedBy + ")");
+            Stopped(endedBy, "physics");
+        }
+
+
+        /// <summary>The lowest altitude where KSP still allows the first rails rate: the atmosphere top or that rate's altitude
+        /// limit, whichever is higher (U5b: KSP ended our rails a little above 70 km).</summary>
+        private static double RailsFloor(CelestialBody body)
+        {
+            double limit = TimeWarp.fetch != null ? TimeWarp.fetch.GetAltitudeLimit(1, body) : 0;
+            return System.Math.Max(body.atmosphereDepth, limit) + 100;
         }
 
         /// <summary>Clears the user-cancel latch (step change, new plan).</summary>
@@ -215,12 +328,13 @@ namespace KspBridge.Flight
         internal static bool CanSetMode => SetModeMethod != null;
 
         /// <summary>warp_stopped with who ended it (plan | unexpected) and the time left to until_ut then.</summary>
-        private static void Stopped(string endedBy)
+        private static void Stopped(string endedBy, string mode)
         {
             double remaining = _untilUt - Planetarium.GetUniversalTime();
             Event("warp_stopped", null, new Dictionary<string, object>
             {
                 ["ended_by"] = endedBy,
+                ["mode"] = mode,
                 ["remaining_s"] = double.IsNaN(remaining) ? null : (object)System.Math.Round(remaining, 1),
             });
             _untilUt = double.NaN;

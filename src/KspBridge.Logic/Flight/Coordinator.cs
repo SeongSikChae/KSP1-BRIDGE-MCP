@@ -61,7 +61,9 @@ namespace KspBridge.Flight
                     Abort("condition", hit, null);
                     return;
                 }
-                string monitorAbort = FlightMonitor.Tick(_t, v, ut, Command,
+                // #22 decision 13: judged from the current step's mode (the command is last tick's: a new step or a reload lacks it)
+                bool heatWarnOnly = _mode is LandMode land && land.InFreeFall;
+                string monitorAbort = FlightMonitor.Tick(_t, v, ut, Command, heatWarnOnly,
                     FlightMonitor.Effective.Merge(_plan.Steps[_step].Monitor, _plan.Monitor));
                 if (monitorAbort != null)
                 {
@@ -78,7 +80,7 @@ namespace KspBridge.Flight
 
                 if (Command.WarpToUt is double w)                                          // (f)
                 {
-                    Warp.Request(v, w);
+                    Warp.Request(v, w, Command.PhysicsWarpOk);   // #22 decision 11: physics ×2 in the atmosphere
                 }
                 else if (Warp.Requested)
                 {
@@ -869,6 +871,12 @@ namespace KspBridge.Flight
                     ["event_seq"] = FlightEvents.LastSeq,
                     ["epoch"] = FlightEvents.Epoch,
                 };
+                if (Running && _mode is LandMode lm && lm.Landing(FlightGlobals.ActiveVessel) == null)
+                {
+                    // #22 decision 10: a land without a kept target shows the brake start here (get_flight.landing is null)
+                    plan["brake_ut_in"] = double.IsNaN(lm.BrakeIn) ? null : N(lm.BrakeIn);
+                    plan["brake_window"] = lm.BrakeWindowOpen;
+                }
             }
             Dictionary<string, object> controls = null;
             string controlsError = null;

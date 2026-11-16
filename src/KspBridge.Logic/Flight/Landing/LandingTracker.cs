@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using KspBridge.Flight.Modes;
 
 namespace KspBridge.Flight.Landing
 {
@@ -29,6 +30,26 @@ namespace KspBridge.Flight.Landing
         private double _predMs = double.NaN;
         private double _frameCheck = double.NaN;
         private bool _braking;
+
+        // #22 decision 10: brake start point inputs (from LandMode) and the window state shown in get_flight.landing
+        private double _brakeDecel = double.NaN;
+        private double _brakeFinalAlt;
+        private double _brakeIn = double.NaN;
+        private bool _brakeWindow;
+
+        /// <summary>Net deceleration (margin × max accel − g) and final altitude for the brake start search of the next predictions.</summary>
+        public void SetBrake(double decel, double finalAlt)
+        {
+            _brakeDecel = decel;
+            _brakeFinalAlt = finalAlt;
+        }
+
+        /// <summary>Seconds to the predicted brake start (NaN: none) and whether the burn window is open.</summary>
+        public void SetBrakeState(double brakeIn, bool window)
+        {
+            _brakeIn = brakeIn;
+            _brakeWindow = window;
+        }
 
         public LandingTracker(LandingTarget arg)
         {
@@ -124,13 +145,13 @@ namespace KspBridge.Flight.Landing
                 state["t_lat"] = _lat;
                 state["t_lon"] = _lon;
                 state["t_alt"] = _alt;
-                state["drag_k"] = _drag.K;
+                state["drag_scale"] = _drag.Scale;   // U5b: the mach table is rebuilt from the parts
                 state["drag_source"] = _drag.Source;
                 state["braking"] = _braking;
             }
         }
 
-        public void Load(Dictionary<string, object> state)
+        public void Load(Vessel v, Dictionary<string, object> state)
         {
             _fixed = Handover.B(state, "target_fixed");
             _unresolved = Handover.B(state, "target_unresolved");
@@ -154,7 +175,7 @@ namespace KspBridge.Flight.Landing
                 _alt = Handover.D(state, "t_alt", 0);
                 _braking = Handover.B(state, "braking");
                 string source = state.TryGetValue("drag_source", out object s) ? s as string : null;
-                _drag = DragModel.Restore(Handover.D(state, "drag_k", 0), source);
+                _drag = DragModel.Restore(v, Handover.D(state, "drag_scale", 1), source);   // an older drag_k is ignored
                 if (double.IsNaN(_lat) || double.IsNaN(_lon))
                 {
                     _fixed = false;   // incomplete handover: fix the target again on the next tick
@@ -183,15 +204,142 @@ namespace KspBridge.Flight.Landing
                 _predUt = ut;
                 Stopwatch sw = Stopwatch.StartNew();
                 CelestialBody body = v.mainBody;
-                _pred = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag);
-                _predMs = sw.Elapsed.TotalMilliseconds;
+                _pred = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag,
+                    brakeDecel: _brakeDecel, finalAlt: _brakeFinalAlt);
+                double plainMs = sw.Elapsed.TotalMilliseconds;
                 _frameCheck = ImpactPredictor.FrameCheck(v);
-                Log("predict: ms=" + F(_predMs, 2) + " frame_check=" + F(_frameCheck, 3) + " k=" + F(_drag.K, 4) +
+                // DIAG (#22 decision 12-2 1st stage, U6 removes): the same prediction with KSP's integration, logged only
+                PhysStep phys = Policy();
+                Stopwatch swMod = Stopwatch.StartNew();
+                Impact mod = ImpactPredictor.Predict(body, v.CoMD - body.position, v.obt_velocity, ut, v.totalMass * 1000, _drag,
+                    brakeDecel: _brakeDecel, finalAlt: _brakeFinalAlt, step: phys);
+                double modMs = swMod.Elapsed.TotalMilliseconds;
+                Log("predict: ms=" + F(plainMs, 2) + " frame_check=" + F(_frameCheck, 3) + " k=" + F(_drag.KNow(v), 4) + " scale=" + F(_drag.Scale, 3) +
                     " k_sample=" + F(_drag.LastSample, 4) + " src=" + _drag.Source +
                     (_pred == null ? " impact=null" : " impact=" + F(_pred.Lat, 5) + "," + F(_pred.Lon, 5) + " t=" + F(_pred.Ut - ut, 1) +
-                        " err=" + F(ImpactPredictor.Distance(body, _pred.Lat, _pred.Lon, _lat, _lon), 1)));
+                        " err=" + F(ImpactPredictor.Distance(body, _pred.Lat, _pred.Lon, _lat, _lon), 1)) +
+                    (mod == null ? " impact_mod=null" : " impact_mod=" + F(mod.Lat, 5) + "," + F(mod.Lon, 5) +
+                        " err_mod=" + F(ImpactPredictor.Distance(body, mod.Lat, mod.Lon, _lat, _lon), 1) +
+                        (_pred == null ? "" : " d_impact_m=" + F(ImpactPredictor.Distance(body, _pred.Lat, _pred.Lon, mod.Lat, mod.Lon), 1) +
+                            " d_brake_s=" + F(mod.BrakeUt - _pred.BrakeUt, 2))) +
+                    " ms_mod=" + F(modMs, 2) + " warp_end_in=" + F(phys.WarpEndUt - ut, 1));
+                _lastBrakeUt = _pred != null ? _pred.BrakeUt : double.NaN;
+                Diagnose(v, ut);
+                // get_flight predict_ms: the whole prediction tick, so the 1st-stage diagnostics' cost (the second prediction and
+                // the doubled 30 s propagation, review R1-2 #1) shows in the response; the plain prediction alone is the log's ms
+                _predMs = sw.Elapsed.TotalMilliseconds;
             }
         }
+
+        // DIAG (#22 U5 reentry investigation): actual non-gravity acceleration over the last prediction interval against
+        // the predictor's drag model, and the model air density against the vessel's.
+        private Vector3d _diagV;
+        private double _diagUt = double.NaN;
+
+        private void Diagnose(Vessel v, double ut)
+        {
+            CelestialBody body = v.mainBody;
+            Vector3d r = v.CoMD - body.position;
+            Vector3d vel = v.obt_velocity;
+            if (!double.IsNaN(_diagUt) && ut - _diagUt > 0.5 && v.ctrlState.mainThrottle == 0)
+            {
+                double dt = ut - _diagUt;
+                double rm = r.magnitude;
+                Vector3d grav = -body.gravParameter / (rm * rm * rm) * r;
+                Vector3d aAct = (vel - _diagV) / dt - grav;
+                Vector3d air = v.srf_velocity;
+                Vector3d u = air.normalized;
+                double alt = rm - body.Radius;
+                double rhoModel = body.atmosphere && alt < body.atmosphereDepth
+                    ? body.GetDensity(body.GetPressure(alt), ImpactPredictor.AtmoTemperature(body, r, alt)) : 0;   // as the predictor
+                double mass = v.totalMass * 1000;
+                double aModel = mass > 0 ? _drag.KNow(v) * rhoModel * air.sqrMagnitude / mass : 0;
+                double dragSum = 0, liftSum = 0;
+                foreach (Part p in v.parts)
+                {
+                    if (p != null)
+                    {
+                        dragSum += p.dragScalar;
+                        liftSum += p.bodyLiftScalar;
+                    }
+                }
+                double along = -Vector3d.Dot(aAct, u);                        // deceleration along the air velocity
+                double perp = Vector3d.Exclude(u, aAct).magnitude;
+                Log("diag: alt=" + F(alt, 0) + " srf=" + F(air.magnitude, 1) + " mach=" + F(v.mach, 2) + " q=" + F(v.dynamicPressurekPa, 3) +
+                    " rho_model=" + F(rhoModel, 6) + " rho_vessel=" + F(v.atmDensity, 6) +
+                    " a_act_along=" + F(along, 3) + " a_act_perp=" + F(perp, 3) + " a_model=" + F(aModel, 3) +
+                    " a_dragsum=" + F(mass > 0 ? dragSum * 1000 / mass : 0, 3) + " a_bodylift=" + F(mass > 0 ? liftSum * 1000 / mass : 0, 3) +
+                    " k=" + F(_drag.KNow(v), 4) + " dt=" + F(dt, 2) + " krak=" + F(Krakensbane.GetFrameVelocity().magnitude, 1) +
+                    " inv_rot=" + body.inverseRotation);
+            }
+            _diagV = vel;
+            _diagUt = ut;
+
+            // 30 s forward check, one at a time: the predictor's state against the vessel's at the tick it fires, the prediction
+            // interpolated to that tick's time (U5c: the late tick under physics warp no longer counts as an error)
+            if (!double.IsNaN(_chkUt) && ut >= _chkUt)
+            {
+                double late = ut - _chkUt;
+                string band = v.altitude >= 70000 ? "above" : v.altitude >= 60000 ? "70-60" : v.altitude >= 50000 ? "60-50"
+                    : v.altitude >= 40000 ? "50-40" : "below";
+                if (late <= (ChkN - 1) * ChkStep)
+                {
+                    int i = Math.Min((int)(late / ChkStep), ChkN - 2);
+                    double f = (late - i * ChkStep) / ChkStep;
+                    double pLat = _chkLat[i] + (_chkLat[i + 1] - _chkLat[i]) * f;
+                    double pLon = _chkLon[i] + LandingTarget.Wrap180(_chkLon[i + 1] - _chkLon[i]) * f;
+                    double pAlt = _chkAlt[i] + (_chkAlt[i + 1] - _chkAlt[i]) * f;
+                    double dLat = (v.latitude - pLat) * Math.PI / 180 * body.Radius;
+                    double dLon = LandingTarget.Wrap180(v.longitude - pLon) * Math.PI / 180 * body.Radius * Math.Cos(v.latitude * Math.PI / 180);
+                    // DIAG (decision 12-2 1st stage): the KSP-integration propagation from the same start
+                    double mLat = _chkLatM[i] + (_chkLatM[i + 1] - _chkLatM[i]) * f;
+                    double mLon = _chkLonM[i] + LandingTarget.Wrap180(_chkLonM[i + 1] - _chkLonM[i]) * f;
+                    double mAlt = _chkAltM[i] + (_chkAltM[i + 1] - _chkAltM[i]) * f;
+                    double dLatM = (v.latitude - mLat) * Math.PI / 180 * body.Radius;
+                    double dLonM = LandingTarget.Wrap180(v.longitude - mLon) * Math.PI / 180 * body.Radius * Math.Cos(v.latitude * Math.PI / 180);
+                    Log("diag check: late=" + F(late, 2) + " d_north=" + F(dLat, 1) + " d_east=" + F(dLon, 1) +
+                        " d_alt=" + F(v.altitude - pAlt, 1) + " d_north_mod=" + F(dLatM, 1) + " d_east_mod=" + F(dLonM, 1) +
+                        " d_alt_mod=" + F(v.altitude - mAlt, 1) + " lon=" + F(v.longitude, 4) + " pred_lon=" + F(pLon, 4) +
+                        " throttle=" + F(v.ctrlState.mainThrottle, 2) + " h_chk=" + F(_chkH, 3) + " warp_start=" + F(_chkWarp, 1) +
+                        " warp=" + F(TimeWarp.CurrentRate, 1) + " band=" + band);
+                }
+                else
+                {
+                    Log("diag check: late=" + F(late, 2) + " (over " + F((ChkN - 1) * ChkStep, 1) + " s: no comparison) warp=" +
+                        F(TimeWarp.CurrentRate, 1) + " band=" + band);
+                }
+                _chkUt = double.NaN;
+            }
+            if (double.IsNaN(_chkUt) && v.ctrlState.mainThrottle == 0)
+            {
+                ImpactPredictor.Propagate(body, r, vel, ut, v.totalMass * 1000, _drag, ChkS, ChkStep, default, _chkLat, _chkLon, _chkAlt);
+                // the step the vessel has now (0 on rails); the policy's h would be wrong where an attitude check or a player
+                // cancel holds ×1 (review R1-1 #1), and windows whose warp changes are not judged anyway
+                _chkH = v.packed ? 0 : TimeWarp.fixedDeltaTime;
+                ImpactPredictor.Propagate(body, r, vel, ut, v.totalMass * 1000, _drag, ChkS, ChkStep,
+                    new PhysStep { On = true, Fixed = true, FixedH = _chkH }, _chkLatM, _chkLonM, _chkAltM);
+                _chkWarp = TimeWarp.CurrentRate;
+                _chkUt = ut + ChkS;
+            }
+        }
+
+        /// <summary>#22 decision 12-2: the physics step policy for this target land's predictions. T from the previous
+        /// prediction's brake start (not saved over a reload: the first prediction after it uses +Infinity).</summary>
+        private PhysStep Policy() => new PhysStep
+        {
+            On = true,
+            WarpEndUt = double.IsNaN(_lastBrakeUt) ? double.PositiveInfinity : _lastBrakeUt - LandMode.WarpLeadS,
+            DiagBand = true,
+        };
+
+        private double _lastBrakeUt = double.NaN;
+
+        private const double ChkS = 30, ChkStep = 0.5;
+        private const int ChkN = 5;   // samples at 30, 30.5, ..., 32 s
+        private double _chkUt = double.NaN;
+        private double _chkWarp, _chkH;
+        private readonly double[] _chkLat = new double[ChkN], _chkLon = new double[ChkN], _chkAlt = new double[ChkN];
+        private readonly double[] _chkLatM = new double[ChkN], _chkLonM = new double[ChkN], _chkAltM = new double[ChkN];
 
         /// <summary>get_flight.landing; null without a kept target.</summary>
         public Dictionary<string, object> Describe(Vessel v)
@@ -211,7 +359,10 @@ namespace KspBridge.Flight.Landing
                 ["error_m"] = N(err),
                 ["prediction"] = _braking ? "braking" : "ballistic",
                 ["guidance"] = _guidance,
-                ["drag_k"] = N(_drag.K),
+                ["drag_k"] = N(_drag.KNow(v)),
+                ["drag_scale"] = N(_drag.Scale),
+                ["brake_ut_in"] = N(_brakeIn),
+                ["brake_window"] = _brakeWindow,
                 ["drag_source"] = _drag.Source,
                 ["frame_check_mps"] = N(_frameCheck),
                 ["predict_ms"] = N(_predMs),

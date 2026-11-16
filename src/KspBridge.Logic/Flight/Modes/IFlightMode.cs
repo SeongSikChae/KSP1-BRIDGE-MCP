@@ -41,6 +41,10 @@ namespace KspBridge.Flight.Modes
         /// <summary>Warp target UT requested by the mode; null = no warp.</summary>
         public double? WarpToUt;
 
+        /// <summary>#22 decision 11: in the atmosphere the Coordinator may run our physics warp ×2 toward WarpToUt (land free
+        /// fall with a steady attitude). Rails above the atmosphere do not need it.</summary>
+        public bool PhysicsWarpOk;
+
         /// <summary>RCS translation in the rcs_translate tool frame (x right, y top/dorsal, z nose), each [-1, 1]; null = none.</summary>
         public UnityEngine.Vector3? Translate;
 
@@ -54,6 +58,7 @@ namespace KspBridge.Flight.Modes
             Throttle = throttle;
             ModeThrottle = throttle;
             WarpToUt = null;
+            PhysicsWarpOk = false;
             Translate = null;
             Aligning = false;
         }

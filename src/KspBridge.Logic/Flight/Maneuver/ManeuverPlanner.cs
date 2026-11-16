@@ -1,4 +1,5 @@
 using KspBridge.Flight.Control;
+using KspBridge.Flight.Landing;
 using System;
 using System.Collections.Generic;
 
@@ -152,8 +153,26 @@ namespace KspBridge.Flight.Maneuver
                     nodes = One(OrbitMath.ChangeApsis(o, ut, apoR, raiseApo: true));   // apoapsis below the periapsis: 400
                     break;
                 }
+                case "deorbit":   // #22 design decision 7
+                {
+                    LandingTarget target = LandingTarget.Parse(b.Has, b.GetRaw, "", (p, r) => ApiException.BadRequest((p.Length > 0 ? p.TrimStart('.') + " " : "") + r))
+                        ?? throw ApiException.BadRequest("deorbit needs latitude+longitude or vessel");
+                    CelestialBody body = o.referenceBody;
+                    double peAlt = DeorbitPlanner.PeriapsisAlt(body, b);
+                    DeorbitPlanner.Solution sol = DeorbitPlanner.Solve(v, o, start, body.Radius + peAlt, target);
+                    nodes = One(sol.Node);
+                    extra = new Dictionary<string, object>
+                    {
+                        ["predicted_latitude"] = OrbitMath.Num(sol.Impact.Lat),
+                        ["predicted_longitude"] = OrbitMath.Num(sol.Impact.Lon),
+                        ["downrange_error_m"] = OrbitMath.Num(sol.DownrangeM),
+                        ["crossrange_error_m"] = OrbitMath.Num(sol.CrossrangeM),
+                        ["compute_ms"] = OrbitMath.Num(sol.ComputeMs),
+                    };
+                    break;
+                }
                 default:
-                    throw ApiException.BadRequest("unknown kind " + kind + " (change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture, rendezvous_phase, correct_approach)");
+                    throw ApiException.BadRequest("unknown kind " + kind + " (change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture, rendezvous_phase, correct_approach, deorbit)");
             }
             foreach (OrbitMath.NodeSpec n in nodes)
             {

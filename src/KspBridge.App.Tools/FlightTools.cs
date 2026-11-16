@@ -141,6 +141,7 @@ namespace KspBridge.App
             "rendezvous_phase (needs a vessel or docking-port target on the same body; both orbits near-circular e ≤ 0.05 and within 1° of each other, else orbits_not_coplanar_circular; " +
             "altitudes at least 1 km apart, else no_transfer_window; one transfer node timed so the closest approach is distance, default 200 m), " +
             "correct_approach (same target; a small prograde/normal/radial correction at ut, or auto = now + 60 s, so the closest approach is distance; no_solution when nothing improves it). " +
+            "deorbit (#22: needs latitude+longitude or vessel (a landed vessel on the same body, else no_target); one retrograde node lowering the periapsis to periapsis, default 0.15 x the atmosphere top (Kerbin about 10.5 km), 0 without an atmosphere; must be below the atmosphere top / highest terrain; the burn time over the next orbit (from now + 60 s) puts the predicted impact (unpowered, KSP drag cube model by mach) on the target downrange; the crossrange is left to the land correction burn, over 5 km is no_solution; no_solution also for an open orbit, a periapsis already at or below, the 2 s search budget; adds predicted_latitude, predicted_longitude, downrange_error_m, crossrange_error_m, compute_ms). " +
             "rendezvous_phase / correct_approach add predicted.closest_distance, closest_ut, relative_speed_at_closest (on KSP's orbit after the node). " +
             "Orbit-position nodes closer than 30 s move one orbit later. " +
             "Altitudes are above sea level, above the atmosphere and inside the SOI. Existing nodes are replaced unless append: true (plans from the orbit after the last node). " +
@@ -148,16 +149,19 @@ namespace KspBridge.App
             "no_solution (undefined time, a non-finite result, an eccentric start orbit for transfer_body, the search time budget), no_target (transfer_body without a body target of the same parent), " +
             "no_encounter (no SOI entry found), nodes_unavailable. Returns {maneuver_nodes, created, total_dv, burn_time, dv_short, predicted (KSP's orbit after the last node)}.")]
         public Task<string> PlanManeuver(
-            [Description("change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture, rendezvous_phase or correct_approach")] string kind,
+            [Description("change_apoapsis, change_periapsis, circularize, change_inclination, hohmann, transfer_body, capture, rendezvous_phase or correct_approach or deorbit")] string kind,
             [Description("Target altitude m above sea level (change_apoapsis, change_periapsis, hohmann; capture apoapsis)")] double? altitude = null,
             [Description("Target inclination deg (change_inclination)")] double? inclination = null,
             [Description("Node position: apoapsis, periapsis, ascending_node, descending_node, ut or auto (allowed values depend on kind)")] string? at = null,
             [Description("Node time (game UT seconds) with at ut")] double? ut = null,
             [Description("true = keep the existing nodes and plan after the last one")] bool? append = null,
-            [Description("Wanted periapsis altitude m inside the target body's SOI (transfer_body)")] double? periapsis = null,
+            [Description("Wanted periapsis altitude m inside the target body's SOI (transfer_body); periapsis altitude after the burn (deorbit)")] double? periapsis = null,
             [Description("Wanted closest approach m to the target vessel (rendezvous_phase, correct_approach; default 200)")] double? distance = null,
+            [Description("Target latitude deg -90..90 (deorbit, with longitude)")] double? latitude = null,
+            [Description("Target longitude deg -180..180 (deorbit, with latitude)")] double? longitude = null,
+            [Description("Target landed vessel id (deorbit, instead of latitude/longitude)")] double? vessel = null,
             CancellationToken ct = default)
-            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append, periapsis, distance }, ct);
+            => client.SendAsync(HttpMethod.Post, "api/flight/plan_maneuver", new { kind, altitude, inclination, at, ut, append, periapsis, distance, latitude, longitude, vessel }, ct);
 
         [McpServerTool(Name = "update_maneuver_node", Destructive = true)]
         [Description("Change a maneuver node of the active vessel: index from get_flight.maneuver_nodes (0 = earliest); only the given fields change " +
@@ -187,7 +191,7 @@ namespace KspBridge.App
             "flipped (in atmosphere, dynamic_pressure >= flip_min_q_kpa 5, the commanded attitude within flip_aoa_deg of the surface velocity but aoa > flip_aoa_deg 30 " +
             "for flip_for_s 2; land and retrograde descents are not judged), control_lost (under thrust, attitude_error > lost_error_deg 30 for lost_for_s 5 without coming 5 deg closer to the target; " +
             "a turn that keeps closing in restarts the timer), " +
-            "overheat (temp_ratio >= temp_abort 0.95; temp_warn 0.8 only alerts), and only alerts on thrust_waste (under thrust, attitude_error > waste_error_deg 10 " +
+            "overheat (temp_ratio >= temp_abort 0.95; temp_warn 0.8 only alerts; in a land step's free fall before its burns it only alerts unless the step or plan sets temp_abort), and only alerts on thrust_waste (under thrust, attitude_error > waste_error_deg 10 " +
             "for waste_for_s 5), oscillation (osc_flips 6 sign changes of one axis rate >= osc_min_rate 0.05 rad/s within 10 s; cleared below half of that) " +
             "and attitude_drift (no thrust, or land still turning after a forced start, with a commanded attitude: attitude_error > drift_error_deg 30 while the nose " +
             "has itself moved drift_growth_deg 20 away from the target, target moves not counted, since thrust stopped, the step began or the last clear; " +
@@ -214,7 +218,8 @@ namespace KspBridge.App
             "events landing_infeasible (accel judged before and during the burn, dv only during it; once each; a burning tick where it holds gets throttle 1 " +
             "unless the axis is still turning after a forced start or points below the horizon), touchdown, landed {tilt_deg, tipped}; throttle 0 after touchdown " +
             "and completes by itself once landed and still (speed < 0.5 m/s, angular speed < 0.05 rad/s) for 2 s, so add timeout_s if it may keep sliding; " +
-            "submitted on an already landed vessel it reports touchdown and landed at once (refused with no_thrust if no engine is running; on the pad, PRELAUNCH is not landed, so the step does not end by itself); no warp: put a coast step before it); " +
+            "submitted on an already landed vessel it reports touchdown and landed at once (refused with no_thrust if no engine is running; on the pad, PRELAUNCH is not landed, so the step does not end by itself); no warp: put a coast step before it; " +
+            "the reentry impact prediction assumes an axially symmetric vessel flying surface retrograde (angle of attack near 0): off-axis parts such as a side-mounted RTG add lift it does not model); " +
             "execute_node (the first maneuver node, e.g. from plan_maneuver; tolerance 0.2 m/s, late_limit_s 10: waits, warping once aligned, until the burn start (half the burn before the node, " +
             "staged burn time), burns along the node's remaining Δv only while attitude_error <= 5 deg (1 deg once the direction is locked near the end), " +
             "completes when the remaining Δv is within tolerance or starts growing and removes the node; events node_burn_start, insufficient_dv, node_burn_done); " +
@@ -230,10 +235,6 @@ namespace KspBridge.App
             "Conditions: {var, op, value, for_s?} | {all:[...]} | {any:[...]} | [...] (all); var is a get_flight field name (flight incl. angular_rate, aoa, temp_ratio; orbit, propulsion, step_time, met, attitude_error), " +
             "string vars (situation, staging) allow only == and !=; a var that is null (not known) is false. " +
             "on_start:[\"stage\"] activates the next stage when the step starts (needed for the first ignition on the pad). " +
-            "auto_stage:true runs burnout → tailoff → separate → settle → ignite by itself (parallel boosters keep the core burning and are dropped only once " +
-            "the dynamic pressure is at most max_separate_q, at most max_separate_q_wait_s after the wait began; serial stages cut the throttle, " +
-            "separate and wait settle_distance before igniting); it never fires a stage when nothing with an engine is left (out_of_stages), and is refused " +
-            "(invalid_plan control_part_jettisoned) when a later separation would drop the control part. A flamed-out engine with propellant left " +
             "With launch clamps in that stage, its liquid engines light first and the clamps let go only once thrust reaches 90% of what " +
             "the engines can give at this pressure and throttle (staging clamp_hold; that stage's SRBs light with the clamp release). " +
             "With all clamps one stage after the engines, this one on_start fires both: the engine stage (SRBs in it light on the pad), " +
@@ -241,6 +242,10 @@ namespace KspBridge.App
             "no hold, one stage as before. Not reached within spool-up + clamp_hold_s, an engine goes out, or the release stage cannot " +
             "fire: the engines shut down, the clamps stay and the plan aborts with clamp_hold_failed; a plan that ends during the hold " +
             "also shuts them down. " +
+            "auto_stage:true runs burnout → tailoff → separate → settle → ignite by itself (parallel boosters keep the core burning and are dropped only once " +
+            "the dynamic pressure is at most max_separate_q, at most max_separate_q_wait_s after the wait began; serial stages cut the throttle, " +
+            "separate and wait settle_distance before igniting); it never fires a stage when nothing with an engine is left (out_of_stages), and is refused " +
+            "(invalid_plan control_part_jettisoned) when a later separation would drop the control part. A flamed-out engine with propellant left " +
             "(air-starved jets included) is a pause, not a burnout: with no working engine, staging \"paused\" keeps the throttle while KSP relights it, " +
             "and after max_flameout_pause_s of wanted thrust it ends with flameout_timeout, then no_thrust. staging_options: tailoff_ratio 0.05, max_tailoff_s 5, " +
             "settle_distance 2 m, max_settle_s 3, max_separate_q 25 kPa, max_separate_q_wait_s 30, max_flameout_pause_s 3, clamp_hold_s 5. To restart after a no_thrust abort (out_of_stages, ignite_blocked, stage_failed), on_start:[\"stage\"] is required. " +

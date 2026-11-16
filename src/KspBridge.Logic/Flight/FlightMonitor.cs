@@ -35,8 +35,9 @@ namespace KspBridge.Flight
         private static bool _running;   // false after EndPlan: the summary shows no current alerts
 
         /// <summary>Every real plan tick after the abort check (not in the trial). cmd: the command in force (last tick's).
-        /// Returns the abort message, or null.</summary>
-        public static string Tick(Telemetry t, Vessel v, double ut, ModeCommand cmd, Effective s)
+        /// heatWarnOnly (#22 decision 13): the current step is land in free fall; overheat then only warns unless the step or
+        /// plan gave temp_abort. Returns the abort message, or null.</summary>
+        public static string Tick(Telemetry t, Vessel v, double ut, ModeCommand cmd, bool heatWarnOnly, Effective s)
         {
             _running = true;
             _oscMinRate = s.OscMinRate;   // before the Enabled check: the summary counts with it either way
@@ -130,7 +131,8 @@ namespace KspBridge.Flight
                 "aoa " + F(aoa) + " deg at q " + F(q) + " kPa for " + F(_flipFor) + " s") ?? abort;
             abort = Set("control_lost", _lostFor >= s.LostForS ? abortLevel : null, err, s.LostErrorDeg,
                 "attitude_error " + F(err) + " deg under thrust for " + F(_lostFor) + " s") ?? abort;
-            abort = Set("overheat", temp >= s.TempAbort ? abortLevel : temp >= s.TempWarn ? "warn" : null, temp,
+            string heatAbort = heatWarnOnly && !s.TempAbortGiven ? "warn" : abortLevel;
+            abort = Set("overheat", temp >= s.TempAbort ? heatAbort : temp >= s.TempWarn ? "warn" : null, temp,
                 temp >= s.TempAbort ? s.TempAbort : s.TempWarn, "temp_ratio " + F(temp, 3)) ?? abort;
             Set("thrust_waste", _wasteFor >= s.WasteForS ? "warn" : null, err, s.WasteErrorDeg, null);
             int flips = MaxFlips(s.OscMinRate);
@@ -355,6 +357,7 @@ namespace KspBridge.Flight
         public sealed class Effective
         {
             public bool Enabled, Abort;
+            public bool TempAbortGiven;   // temp_abort set on the step or the plan (not the default)
             public double FlipAoaDeg, FlipMinQ, FlipForS, LostErrorDeg, LostForS, WasteErrorDeg, WasteForS, OscFlips, OscMinRate, TempWarn, TempAbort;
             public double DriftErrorDeg, DriftGrowthDeg;
 
@@ -375,6 +378,7 @@ namespace KspBridge.Flight
                     OscMinRate = step?.OscMinRate ?? plan?.OscMinRate ?? 0.05,
                     TempWarn = step?.TempWarn ?? plan?.TempWarn ?? 0.8,
                     TempAbort = step?.TempAbort ?? plan?.TempAbort ?? 0.95,
+                    TempAbortGiven = step?.TempAbort != null || plan?.TempAbort != null,
                     DriftErrorDeg = step?.DriftErrorDeg ?? plan?.DriftErrorDeg ?? 30,
                     DriftGrowthDeg = step?.DriftGrowthDeg ?? plan?.DriftGrowthDeg ?? 20,
                 };

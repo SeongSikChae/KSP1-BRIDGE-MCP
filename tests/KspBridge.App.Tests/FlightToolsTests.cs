@@ -166,11 +166,13 @@ namespace KspBridge.App.Tests
             await tools.RemoveManeuverNode(all: true, ct: ct);
             await tools.PlanManeuver("hohmann", altitude: 120000, ct: ct);
             await tools.PlanManeuver("change_inclination", inclination: 5, at: "auto", append: true, ct: ct);
+            await tools.PlanManeuver("deorbit", periapsis: 30000, latitude: -0.0967, longitude: -74.5575, ct: ct);
 
             var r = handler.Requests;
-            Assert.HasCount(7, r);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"hohmann","altitude":120000,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":null}"""), r[5]);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"change_inclination","altitude":null,"inclination":5,"at":"auto","ut":null,"append":true,"periapsis":null,"distance":null}"""), r[6]);
+            Assert.HasCount(8, r);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"deorbit","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":30000,"distance":null,"latitude":-0.0967,"longitude":-74.5575,"vessel":null}"""), r[7]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"hohmann","altitude":120000,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":null,"latitude":null,"longitude":null,"vessel":null}"""), r[5]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"change_inclination","altitude":null,"inclination":5,"at":"auto","ut":null,"append":true,"periapsis":null,"distance":null,"latitude":null,"longitude":null,"vessel":null}"""), r[6]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":"apoapsis","ut":null,"prograde":100,"normal":0,"radial":0}"""), r[0]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/add", (string?)"""{"at":null,"ut":1234.5,"prograde":0,"normal":-20,"radial":3}"""), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/nodes/update", (string?)"""{"index":0,"ut":null,"prograde":null,"normal":50,"radial":null}"""), r[2]);
@@ -196,13 +198,13 @@ namespace KspBridge.App.Tests
             var r = handler.Requests;
             Assert.HasCount(8, r);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/switch", (string?)"""{"vessel_id":12345}"""), r[7]);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"rendezvous_phase","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":150}"""), r[6]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"rendezvous_phase","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":null,"distance":150,"latitude":null,"longitude":null,"vessel":null}"""), r[6]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessels?include_debris=false", (string?)null), r[0]);
             Assert.AreEqual((HttpMethod.Get, "/api/vessels?include_debris=true", (string?)null), r[1]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/target", (string?)"""{"body":"Mun","vessel_id":null,"port":null,"clear":null}"""), r[2]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/target", (string?)"""{"body":null,"vessel_id":12345,"port":678,"clear":null}"""), r[3]);
             Assert.AreEqual((HttpMethod.Post, "/api/flight/target", (string?)"""{"body":null,"vessel_id":null,"port":null,"clear":true}"""), r[4]);
-            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"transfer_body","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":30000,"distance":null}"""), r[5]);
+            Assert.AreEqual((HttpMethod.Post, "/api/flight/plan_maneuver", (string?)"""{"kind":"transfer_body","altitude":null,"inclination":null,"at":null,"ut":null,"append":null,"periapsis":30000,"distance":null,"latitude":null,"longitude":null,"vessel":null}"""), r[5]);
         }
 
         [TestMethod]
@@ -240,6 +242,17 @@ namespace KspBridge.App.Tests
         {
             (FlightTools tools, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.BadGateway) { Content = new StringContent("oops") });
             Assert.AreEqual("error: invalid_response: HTTP 502: oops", await tools.GetStatus(CancellationToken.None));
+        }
+
+        [TestMethod]
+        public void SubmitFlightPlan_LandDescriptionStatesAxialSymmetry()
+        {
+            // #22 decision 12-2 B: the land prediction has no lift model, so the description states its vessel assumption
+            string text = typeof(FlightTools).GetMethod(nameof(FlightTools.SubmitFlightPlan))!
+                .GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), false)
+                .Cast<System.ComponentModel.DescriptionAttribute>().Single().Description;
+            StringAssert.Contains(text, "the reentry impact prediction assumes an axially symmetric vessel flying surface retrograde");
+            StringAssert.Contains(text, "off-axis parts such as a side-mounted RTG add lift it does not model");
         }
     }
 }
