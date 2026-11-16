@@ -3,3 +3,4 @@ bin/
 obj/
 
 KspBridge.user.props
+.claude/settings.local.json
