@@ -98,8 +98,7 @@ namespace KspBridge.Flight.Modes
             }
             // Once reached, the drag after the last top-up may leave the apoapsis just under the target: the keep band completes it
             // (measured: 75,971 of 76,000 m left the atmosphere, then a horizontal 5% top-up near apoapsis never reached 100%).
-            // Never below the atmosphere: a target just above it (up to depth / 0.99) would otherwise complete with the apoapsis in the air.
-            double doneAp = _reached && v.mainBody.atmosphere ? Math.Max(KeepBand * _targetAp, v.mainBody.atmosphereDepth) : _targetAp;
+            double doneAp = _reached && v.mainBody.atmosphere ? KeepBand * _targetAp : _targetAp;
             if (!inAtmo && predictedAp >= doneAp)
             {
                 throttle = 0;
