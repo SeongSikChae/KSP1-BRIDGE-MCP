@@ -172,6 +172,10 @@ namespace KspBridge.Flight.Modes
         /// <summary>... and the angular rate is below this (rad/s).</summary>
         private const double WarpRate = 0.05;
 
+        /// <summary>0070: once on, ×2 is kept while the axis is within this (deg) and the rate below the next (rad/s). Provisional
+        /// (twice the start bounds) until measured at ×2; one bound for start and stop made it flap at the crossing.</summary>
+        private const double WarpKeepAttDeg = 10, WarpKeepRate = 0.1;
+
         /// <summary>DIAG (#22 U5c decision 12, U6 removes): no physics warp in this altitude band (m) of a target landing, to
         /// compare the forward check at ×1 with the ×2 bands just above and below.</summary>
         private const double DiagX1Low = 50000, DiagX1High = 60000;
@@ -462,12 +466,19 @@ namespace KspBridge.Flight.Modes
                 {
                     // #22 decision 11: warp until T = brake start − 30 s; physics ×2 only with a steady attitude
                     double errDeg = Vector3d.Angle(v.ReferenceTransform.up, att.Direction(v));
+                    double rate = v.angularVelocity.magnitude;
+                    // DIAG (#22 U5c decision 12, U6 removes): ×1 comparison band, target landings only
+                    bool diagX1 = _track != null && _track.Active && v.altitude > DiagX1Low && v.altitude < DiagX1High;
                     return new ModeCommand(att, 0)
                     {
                         WarpToUt = double.IsNaN(_brakeUt) ? (double?)null : _brakeUt - WarpLeadS,
-                        PhysicsWarpOk = errDeg <= WarpAttDeg && v.angularVelocity.magnitude <= WarpRate
-                            // DIAG (#22 U5c decision 12, U6 removes): ×1 comparison band, target landings only
-                            && !(_track != null && _track.Active && v.altitude > DiagX1Low && v.altitude < DiagX1High),
+                        PhysicsWarpOk = errDeg <= WarpAttDeg && rate <= WarpRate && !diagX1,
+                        PhysicsWarpKeepOk = errDeg <= WarpKeepAttDeg && rate <= WarpKeepRate && !diagX1,   // 0070
+                        // DIAG (warp flapping, task a3b09a7f): the values behind PhysicsWarpOk / PhysicsWarpKeepOk
+                        PhysicsWarpWhy = "att " + F(errDeg, 2) + "/" + F(WarpAttDeg, 0) + " (keep " + F(WarpKeepAttDeg, 0) + ") deg, rate "
+                            + F(rate, 4) + "/" + F(WarpRate, 2) + " (keep " + F(WarpKeepRate, 2) + ") rad/s" + (diagX1 ? ", diag_x1 band" : ""),
+                        PhysicsWarpAttDeg = errDeg,
+                        PhysicsWarpRate = rate,
                     };
                 }
                 Judge(v, t, h, vv, aReq, maxAccel, "best", g, false);   // before the burn: accel only, against the best attitude

@@ -80,11 +80,13 @@ namespace KspBridge.Flight
 
                 if (Command.WarpToUt is double w)                                          // (f)
                 {
-                    Warp.Request(v, w, Command.PhysicsWarpOk);   // #22 decision 11: physics ×2 in the atmosphere
+                    Warp.Request(v, w, Command.PhysicsWarpOk, Command.PhysicsWarpWhy, Command.PhysicsWarpKeepOk,
+                        Command.PhysicsWarpAttDeg, Command.PhysicsWarpRate);   // #22 decision 11: physics ×2 in the atmosphere (0070 keep)
                 }
                 else if (Warp.Requested)
                 {
-                    Warp.Stop();
+                    // DIAG (warp flapping, task a3b09a7f): this tick's mode gave no warp target
+                    Warp.Stop("no warp target this tick (" + (Command.PhysicsWarpWhy ?? "mode values not given") + ")");
                 }
                 Warp.Sync();
 

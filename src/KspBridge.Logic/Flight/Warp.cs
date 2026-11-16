@@ -106,7 +106,8 @@ namespace KspBridge.Flight
 
         /// <summary>physicsOk (#22 decision 11, land free fall): in the atmosphere our physics warp ×2 toward targetUt instead of
         /// rails. Our rails ending because the vessel went below the atmosphere top is no user cancel (ended_by atmosphere).</summary>
-        public static void Request(Vessel v, double targetUt, bool physicsOk)
+        public static void Request(Vessel v, double targetUt, bool physicsOk, string physicsWhy = null, bool physicsKeepOk = false,
+            double physicsAttDeg = double.NaN, double physicsRate = double.NaN)
         {
             if (_cancelled)
             {
@@ -124,12 +125,16 @@ namespace KspBridge.Flight
                 {
                     StopRails("atmosphere");   // the atmosphere top crossed: our end, no latch
                 }
-                RequestPhysics(v, targetUt, physicsOk);
+                RequestPhysics(v, targetUt, physicsOk, physicsWhy, physicsKeepOk, physicsAttDeg, physicsRate);
                 return;
             }
             if (_physics)
             {
-                StopPhysics("plan");
+                // DIAG (warp flapping, task a3b09a7f): left the atmosphere, with the altitude it was judged from
+                StopPhysics("plan", "path: above the atmosphere, altitude "
+                    + v.altitude.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " / top "
+                    + v.mainBody.atmosphereDepth.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + "; "
+                    + PhysicsDiag(physicsWhy, FlightInputHandler.state.mainThrottle, EngineModel.ThrustSum(v), targetUt - Planetarium.GetUniversalTime()));
             }
             // #22 decision 11 (U5b): the same floor as the stop above, so no band where it starts and stops every tick
             bool allowed = v.altitude > (v.mainBody.atmosphere ? RailsFloor(v.mainBody) : 0)
@@ -192,12 +197,17 @@ namespace KspBridge.Flight
 
         /// <summary>Releases our warp, or at a step change and abort any rails warp and pending WarpTo; leaves the player's physics
         /// warp alone (ours, #22 decision 11, is dropped).</summary>
-        public static void Stop()
+        public static void Stop(string why = null)
         {
             StopRails("plan");
             if (_physics)
             {
-                StopPhysics("plan");
+                // DIAG (warp flapping, task a3b09a7f): the per-tick caller (Coordinator, no warp target this tick) names itself and
+                // passes the mode's values; the one-shot callers (step change, abort, plan end, reload) pass nothing. Only static
+                // reads here, so the release itself cannot fail on the diagnostic.
+                StopPhysics("plan", "path: Stop, " + (why ?? "step change, abort, plan end or reload") + ", throttle "
+                    + FlightInputHandler.state.mainThrottle.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + ", ut "
+                    + Planetarium.GetUniversalTime().ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
             }
         }
 
@@ -232,18 +242,36 @@ namespace KspBridge.Flight
         /// <summary>#22 decision 11: our physics warp ×2 in the atmosphere (land free fall). Kept while physicsOk (steady
         /// attitude), throttle 0, no thrust or staging and targetUt not reached; dropped back to ×1 otherwise. The player's
         /// warp is never taken over.</summary>
-        private static void RequestPhysics(Vessel v, double targetUt, bool physicsOk)
+        private static void RequestPhysics(Vessel v, double targetUt, bool physicsOk, string physicsWhy, bool physicsKeepOk,
+            double physicsAttDeg, double physicsRate)
         {
-            bool ok = physicsOk
-                && FlightInputHandler.state.mainThrottle == 0
-                && EngineModel.ThrustSum(v) <= 0
-                && !AutoStager.BlocksWarp
-                && targetUt - Planetarium.GetUniversalTime() > 0;
+            float throttle = FlightInputHandler.state.mainThrottle;
+            double thrust = EngineModel.ThrustSum(v);
+            bool staging = AutoStager.BlocksWarp;
+            double left = targetUt - Planetarium.GetUniversalTime();
+            // 0070: ours on -> the mode's keep bound (which includes the start bound); off -> the start bound
+            bool attitudeOk = _physics ? (physicsKeepOk || physicsOk) : physicsOk;
+            bool ok = attitudeOk && throttle == 0 && thrust <= 0 && !staging && left > 0;
+            if (ok && _physics)
+            {
+                // DIAG (0070): the largest values kept at ×2 (the stopping tick is left out: its values are in the stop line)
+                if (!double.IsNaN(physicsAttDeg))
+                {
+                    _peakAtt = System.Math.Max(_peakAtt, physicsAttDeg);
+                }
+                if (!double.IsNaN(physicsRate))
+                {
+                    _peakRate = System.Math.Max(_peakRate, physicsRate);
+                }
+            }
             if (!ok)
             {
                 if (_physics)
                 {
-                    StopPhysics("plan");
+                    // DIAG (warp flapping, task a3b09a7f): which condition failed, with the values it was judged from
+                    string failed = (attitudeOk ? "" : " attitude") + (throttle == 0 ? "" : " throttle") + (thrust <= 0 ? "" : " thrust")
+                        + (staging ? " staging" : "") + (left > 0 ? "" : " target_reached");
+                    StopPhysics("plan", "path: conditions, failed:" + failed + "; " + PhysicsDiag(physicsWhy, throttle, thrust, left));
                 }
                 return;
             }
@@ -264,21 +292,46 @@ namespace KspBridge.Flight
             TimeWarp.SetRate(PhysicsRateIndex, true);
             _physics = true;
             _untilUt = targetUt;
-            Debug.Log("[KspBridge] physics warp x" + TimeWarp.CurrentRate.ToString("F0") + " requested until UT " + targetUt.ToString("F2"));
+            _peakAtt = -1;   // DIAG (0070): no ×2 tick yet
+            _peakRate = -1;
+            _peakSinceUt = Planetarium.GetUniversalTime();
+            Debug.Log("[KspBridge] physics warp x" + TimeWarp.CurrentRate.ToString("F0") + " requested until UT " + targetUt.ToString("F2")
+                + " (" + PhysicsDiag(physicsWhy, throttle, thrust, left) + ")");   // DIAG (task a3b09a7f)
             Event("warp_started", null, new Dictionary<string, object> { ["mode"] = "physics" });
         }
 
-        private static void StopPhysics(string endedBy)
+        private static void StopPhysics(string endedBy, string diag = null)
         {
             _physics = false;
             if (TimeWarp.WarpMode == TimeWarp.Modes.LOW && TimeWarp.CurrentRateIndex == PhysicsRateIndex)
             {
                 TimeWarp.SetRate(0, true);
             }
-            Debug.Log("[KspBridge] physics warp stopped (" + endedBy + ")");
+            Debug.Log("[KspBridge] physics warp stopped (" + endedBy + (diag != null ? "; " + diag : "") + "; " + PeakDiag() + ")");
             Stopped(endedBy, "physics");
         }
 
+        // DIAG (0070): the largest attitude error / angular rate kept during our current ×2 run (-1 = none yet), from its start UT
+        private static double _peakAtt = -1, _peakRate = -1, _peakSinceUt = double.NaN;
+
+        private static string PeakDiag()
+        {
+            System.Globalization.CultureInfo c = System.Globalization.CultureInfo.InvariantCulture;
+            string over = double.IsNaN(_peakSinceUt) ? "?" : (Planetarium.GetUniversalTime() - _peakSinceUt).ToString("F2", c);
+            return "x2 peak " + (_peakAtt < 0 ? "att none" : "att " + _peakAtt.ToString("F2", c) + " deg") + ", "
+                + (_peakRate < 0 ? "rate none" : "rate " + _peakRate.ToString("F4", c) + " rad/s") + " over " + over + " s";
+        }
+
+
+        /// <summary>DIAG (warp flapping, task a3b09a7f): the mode's attitude values, the other conditions and this tick's length
+        /// and rate, for the physics warp start/stop log lines.</summary>
+        private static string PhysicsDiag(string physicsWhy, float throttle, double thrust, double left) =>
+            (physicsWhy ?? "no mode values") + ", throttle " + throttle.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+            + ", thrust " + thrust.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)
+            + ", left " + left.ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " s, dt "
+            + Time.fixedDeltaTime.ToString("F3", System.Globalization.CultureInfo.InvariantCulture) + ", rate x"
+            + TimeWarp.CurrentRate.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + ", ut "
+            + Planetarium.GetUniversalTime().ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>The lowest altitude where KSP still allows the first rails rate: the atmosphere top or that rate's altitude
         /// limit, whichever is higher (U5b: KSP ended our rails a little above 70 km).</summary>

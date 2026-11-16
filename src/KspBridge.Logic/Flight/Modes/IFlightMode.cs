@@ -45,6 +45,18 @@ namespace KspBridge.Flight.Modes
         /// fall with a steady attitude). Rails above the atmosphere do not need it.</summary>
         public bool PhysicsWarpOk;
 
+        /// <summary>0070: once our physics warp runs, it is kept while this holds (a wider attitude bound than PhysicsWarpOk, so a
+        /// value drifting slowly across the start bound does not start and stop it every tick). Warp also keeps it while
+        /// PhysicsWarpOk holds, so a mode that leaves this false behaves as before.</summary>
+        public bool PhysicsWarpKeepOk;
+
+        /// <summary>Diagnostic only: the values PhysicsWarpOk was judged from (logged when our physics warp starts or stops).</summary>
+        public string PhysicsWarpWhy;
+
+        /// <summary>Diagnostic only (0070): the attitude error (deg) and angular rate (rad/s) judged this tick; NaN when not given.
+        /// Warp logs their maximum over each of our ×2 runs.</summary>
+        public double PhysicsWarpAttDeg, PhysicsWarpRate;
+
         /// <summary>RCS translation in the rcs_translate tool frame (x right, y top/dorsal, z nose), each [-1, 1]; null = none.</summary>
         public UnityEngine.Vector3? Translate;
 
@@ -59,6 +71,10 @@ namespace KspBridge.Flight.Modes
             ModeThrottle = throttle;
             WarpToUt = null;
             PhysicsWarpOk = false;
+            PhysicsWarpKeepOk = false;
+            PhysicsWarpWhy = null;
+            PhysicsWarpAttDeg = double.NaN;
+            PhysicsWarpRate = double.NaN;
             Translate = null;
             Aligning = false;
         }
