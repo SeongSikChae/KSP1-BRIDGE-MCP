@@ -198,7 +198,7 @@ namespace KspBridge.App
             "a step without rcs after the plan changed RCS puts it back to the state before the plan; the plan end restores it too. " +
             "Modes: attitude (pitch+heading [+roll] or reference prograde|retrograde|surface_prograde|normal|antinormal|radial_in|radial_out, throttle 0..1; until required); " +
             "gravity_turn (target_apoapsis m required and above the atmosphere, heading 90, turn_start_altitude 1000, turn_end_altitude 45000, final_pitch 0, shape 0.6, " +
-            "max_throttle 1, max_aoa 5 deg, aoa_free_q 1 kPa; completes above the atmosphere once the apoapsis is reached at throttle 0; " +
+            "max_throttle 1, max_aoa 5 deg, aoa_free_q 1 kPa; completes above the atmosphere at throttle 0 once the predicted apoapsis is at the target (on a body with air 99% of it after the target was once reached, drag may trim it, never below the atmosphere); " +
             "the pitch follows altitude only, so it can lie near flat while the apoapsis is still inside the atmosphere, and a vessel already fast there overheats " +
             "(measured: a probe core with no nose cone destroyed at 42 km, 2,356 m/s with the defaults; measured fix: a nose cone together with turn_end_altitude 60000 and shape 0.5, " +
             "the values alone only raise the pitch at 40 km from about 6 to 17 deg and were not measured)); " +

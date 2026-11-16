@@ -7,7 +7,8 @@ namespace KspBridge.Flight.Modes
     /// gravity_turn: pitch program pitch = 90 − (90 − final_pitch)·f^shape over turn_start..turn_end altitude, limited to max_aoa off
     /// surface prograde (wider at low dynamic pressure). The throttle fades out as the predicted apoapsis (current apoapsis + the rise
     /// from engine tailoff and SRB burn that throttle 0 cannot stop) nears the target. Inside the atmosphere a reached target is kept by
-    /// following surface prograde and topping up below 99%. Done above the atmosphere with the target reached and throttle 0.
+    /// following surface prograde and topping up below 99%. Done above the atmosphere at throttle 0 with the target reached (on a body
+    /// with air, 99% of it once the target was reached: the same keep band).
     /// </summary>
     public sealed class GravityTurnMode : IFlightMode
     {
@@ -93,9 +94,17 @@ namespace KspBridge.Flight.Modes
             {
                 // Inside the atmosphere: keep going along surface prograde (AoA limit kept) and top up below 99%.
                 target = LimitAoa(v, AttitudeTarget.SurfacePrograde(), q);
-                throttle = predictedAp < 0.99 * _targetAp ? throttle : 0;
+                throttle = predictedAp < KeepBand * _targetAp ? throttle : 0;
             }
-            Done = predictedAp >= _targetAp && throttle <= 0 && !inAtmo;   // a body without air: inAtmo is always false
+            // Once reached, the drag after the last top-up may leave the apoapsis just under the target: the keep band completes it
+            // (measured: 75,971 of 76,000 m left the atmosphere, then a horizontal 5% top-up near apoapsis never reached 100%).
+            // Never below the atmosphere: a target just above it (up to depth / 0.99) would otherwise complete with the apoapsis in the air.
+            double doneAp = _reached && v.mainBody.atmosphere ? Math.Max(KeepBand * _targetAp, v.mainBody.atmosphereDepth) : _targetAp;
+            if (!inAtmo && predictedAp >= doneAp)
+            {
+                throttle = 0;
+            }
+            Done = !inAtmo && predictedAp >= doneAp && throttle <= 0;   // a body without air: inAtmo is always false
             return new ModeCommand(target, throttle);
         }
 
@@ -109,6 +118,9 @@ namespace KspBridge.Flight.Modes
             double limit = _maxAoa * Math.Max(1, _aoaFreeQ * 10 / q);
             return AttitudeTarget.RotateTowards(v.srf_velocity, want.Direction(v), limit);
         }
+
+        /// <summary>Reached-target band on a body with air: inside the atmosphere top up below it, above the atmosphere complete at or above it.</summary>
+        private const double KeepBand = 0.99;
 
         /// <summary>Lowest throttle while the predicted apoapsis is still below the target.</summary>
         private const double MinApproachThrottle = 0.05;
