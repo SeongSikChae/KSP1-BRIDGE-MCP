@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using UnityEngine;
 
 namespace KspBridge.Editor
 {
@@ -38,6 +39,8 @@ namespace KspBridge.Editor
             {
                 throw new ApiException(409, "not_in_editor", "open the VAB or SPH first (scene: " + HighLogic.LoadedScene + ")");
             }
+            Flight.FlightReset.RequireSceneReady();
+            RequireNoEditorLaunch();
             EditorFacility facility = EditorDriver.editorFacility;
             if (EditorLogic.fetch != null && EditorLogic.fetch.ship != null && FlightGlobals.fetch != null)
             {
@@ -195,8 +198,12 @@ namespace KspBridge.Editor
         /// clearSite: first recovers the vessels landed at the site (the game's LaunchSiteClear substring match, no dialog); they
         /// stay recovered even if a pre-flight check dialog then stops or cancels the launch. Without it nothing changes.
         /// </summary>
+        /// <summary>PreFlightCheck's warning dialog name (its handler object is "TestWarning dialog handler").</summary>
+        internal const string PreflightDialog = "TestWarning";
+
         public static object Launch(string site, bool clearSite)
         {
+            Flight.FlightReset.RequireSceneReady();
             ShipConstruct ship = EditorScene.Require();
             if (ship.parts.Count == 0)
             {
@@ -238,6 +245,26 @@ namespace KspBridge.Editor
                 recovered = Flight.FlightReset.RecoverAtSite(site, false);
             }
             EditorLogic.fetch.launchVessel(site);
+            // A failed pre-flight test opens its dialog synchronously inside launchVessel (PreFlightCheck.runNextTest, decompile
+            // checked), after the game's own manifest and checks. A tool cannot answer it, and a scene change would destroy it
+            // without OnDismiss and orphan the launch lock: report it and close it the way the game does on Esc.
+            GameObject handler = GameObject.Find(PreflightDialog + " dialog handler");
+            if (handler != null)
+            {
+                PopupDialog popup = handler.GetComponent<PopupDialog>();   // SpawnPopupDialog names its own object "<name> dialog handler"
+                // MultiOptionDialog(name, msg, windowTitle): title = the test's warning title, message = its description
+                string why = popup.dialogToDisplay != null
+                    ? popup.dialogToDisplay.title + ": " + popup.dialogToDisplay.message : "a pre-flight check failed";
+                // OnDismiss (= PreFlightCheck.Abort -> EditorLogic.abortLaunch, which unlocks a frame later), then Dismiss, as the
+                // dialog's own Esc handling. Dismiss alone only destroys it and never aborts (decompile checked).
+                popup.OnDismiss?.Invoke();
+                popup.Dismiss();
+                // clear_site already recovered the site's vessels and that cannot be undone: say so, the error has no other field
+                string done = recovered != null && recovered.Count > 0
+                    ? "clear_site already recovered: " + string.Join(", ", recovered.Select(v => v["vessel"] + " (id " + v["id"] + ")"))
+                    : "A vessel on the site: clear_site true recovers it";
+                throw new ApiException(409, "preflight_failed", why + " (the game's pre-flight check; nothing launched. " + done + ")");
+            }
             Dictionary<string, object> r = new Dictionary<string, object> { ["accepted"] = true, ["site"] = site };
             if (recovered != null)
             {
@@ -278,6 +305,23 @@ namespace KspBridge.Editor
             if (HighLogic.LoadedScene != GameScenes.SPACECENTER && HighLogic.LoadedScene != GameScenes.EDITOR)
             {
                 throw ApiException.SceneNotAllowed("open_editor");
+            }
+            // A scene load still running (e.g. right after leave_flight): starting the editor then overlapped two scene
+            // initialisations and duplicated the app launcher buttons (measured). The other scene tools already refuse this.
+            Flight.FlightReset.RequireSceneReady();
+            RequireNoEditorLaunch();
+        }
+
+        /// <summary>
+        /// A launch lock in the editor belongs to its launch flow: the pre-flight dialog, a recovery dialog, or the game's
+        /// one-frame hold before the flight load. Reloading the editor over it destroyed the dialog without OnDismiss and
+        /// orphaned the lock (measured). Outside the editor no flow can hold it, and EditorScene.Tick releases it there.
+        /// </summary>
+        private static void RequireNoEditorLaunch()
+        {
+            if (HighLogic.LoadedScene == GameScenes.EDITOR && InputLockManager.lockStack.ContainsKey(EditorScene.LaunchLock))
+            {
+                throw new ApiException(409, "launch_locked", "a launch is in progress in the editor; poll get_status input_locks");
             }
         }
     }

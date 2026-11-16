@@ -1,5 +1,6 @@
 using KSP.UI.Screens;
 using System.Collections.Generic;
+using System.Reflection;
 
 namespace KspBridge.Flight
 {
@@ -26,6 +27,20 @@ namespace KspBridge.Flight
         private double _lastSendUt = double.NaN;
         private int _tries;
         private double _firstSendUt = double.NaN;   // debug_stage_delay only: not handed over (a new logic has no delay)
+        private bool _heldLogged;
+
+        // StageManager.ResumeFlight sets canSeparate at once but builds the stage list in a SortIcons coroutine 2+ frames later;
+        // ActivateStage clamps to stages.Count − 1, so an empty list activates stage −1 and drops currentStage to −1 with no
+        // engine lit (decompile checked, measured: stage 3 -> -1 right after launch). Send only once the sort is done and the
+        // list exists.
+        private static readonly FieldInfo SortRoutine =
+            typeof(StageManager).GetField("sortRoutine", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private static bool StagesReady()
+        {
+            StageManager sm = StageManager.Instance;
+            return sm != null && sm.Stages.Count > 0 && (SortRoutine == null || SortRoutine.GetValue(sm) == null);
+        }
 
         /// <summary>True once ActivateNextStage was sent for this request.</summary>
         public bool Sent => _tries > 0;
@@ -64,6 +79,17 @@ namespace KspBridge.Flight
             bool due = _tries == 0 || ut - _lastSendUt > ConfirmS;   // re-request only after the confirm time; never twice a tick
             if (due && StageManager.CanSeparate)                      // during the cooldown: wait, do not send
             {
+                if (!StagesReady())
+                {
+                    if (!_heldLogged)   // once per request: proof the race window was hit and held (not saved: diagnostics only)
+                    {
+                        _heldLogged = true;
+                        StageManager sm = StageManager.Instance;
+                        UnityEngine.Debug.Log("[KspBridge] stage request held: stage list not ready (stages " + (sm == null ? -1 : sm.Stages.Count)
+                            + ", sort pending " + (sm != null && SortRoutine != null && SortRoutine.GetValue(sm) != null) + ") ut " + ut);
+                    }
+                    return Result.Waiting;
+                }
                 StageManager.ActivateNextStage();
                 _lastSendUt = ut;
                 if (double.IsNaN(_firstSendUt))

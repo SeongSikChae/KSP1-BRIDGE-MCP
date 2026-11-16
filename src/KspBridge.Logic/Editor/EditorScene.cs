@@ -16,6 +16,71 @@ namespace KspBridge.Editor
         private static bool _starting;
         private static EditorLogic _previousEditor;
 
+        /// <summary>The input lock EditorLogic.launchVessel holds over its launch flow (Lock(..., "EditorLogic_launchSequence")).</summary>
+        public const string LaunchLock = "EditorLogic_launchSequence";
+
+        private static readonly FieldInfo MissionDialogs =
+            typeof(EditorLogic).GetField("missionDialogs", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private static int _lockFreeSince = -1;   // Time.frameCount when the launch lock was first seen with nothing holding it
+
+        /// <summary>
+        /// Every physics tick (BridgeLogic.FixedUpdate); never throws. Releases an orphaned launch lock. Only the editor's launch
+        /// flow sets and releases it, and it holds it legitimately only while the pre-flight dialog (TestWarning) or a recovery
+        /// dialog (missionDialogs, goForLaunch waits for them) is up, plus one frame (goForLaunch DelayedCallback(1) / DelayedAbort
+        /// yield null) (decompile checked). A dialog destroyed with its scene never calls OnDismiss, so its lock stays forever
+        /// (measured: launch_craft refused launch_locked until the game was left by hand).
+        /// </summary>
+        public static void Tick()
+        {
+            try
+            {
+                if (!Flight.FlightReset.SceneReady || !InputLockManager.lockStack.ContainsKey(LaunchLock))
+                {
+                    _lockFreeSince = -1;
+                    return;
+                }
+                if (HighLogic.LoadedScene != GameScenes.EDITOR)
+                {
+                    Orphan("outside the editor, which alone can release it");
+                    return;
+                }
+                if (MissionDialogs == null)
+                {
+                    _lockFreeSince = -1;   // recovery dialogs cannot be seen: never guess inside the editor
+                    return;
+                }
+                if (GameObject.Find(CraftFiles.PreflightDialog + " dialog handler") != null || MissionDialogsOpen())
+                {
+                    _lockFreeSince = -1;
+                    return;
+                }
+                if (_lockFreeSince < 0)
+                {
+                    _lockFreeSince = Time.frameCount;
+                    return;
+                }
+                if (Time.frameCount - _lockFreeSince >= 2)   // the game's own hold without a dialog is one frame
+                {
+                    Orphan("no pre-flight or recovery dialog for 2+ frames");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KspBridge] launch lock check failed: " + e);
+            }
+        }
+
+        private static bool MissionDialogsOpen() =>
+            EditorLogic.fetch != null && MissionDialogs.GetValue(EditorLogic.fetch) is System.Collections.ICollection c && c.Count > 0;
+
+        private static void Orphan(string why)
+        {
+            InputLockManager.RemoveControlLock(LaunchLock);
+            _lockFreeSince = -1;
+            Debug.LogWarning("[KspBridge] orphaned " + LaunchLock + " lock removed (" + why + ")");
+        }
+
         /// <summary>Call right after asking the game to (re)start the editor.</summary>
         public static void BeginStart()
         {
@@ -23,19 +88,34 @@ namespace KspBridge.Editor
             _previousEditor = EditorLogic.fetch;
         }
 
+        // EditorLogic.Start: ... fsm.StartFSM -> yield return null -> InitAnalytics (timeInMode) -> availableCargoParts, its last
+        // statement (decompile checked). FSMStarted is true one frame before that tail, and launchVessel then throws in
+        // FinalizeAnalytics on the null timeInMode (measured: open_editor then launch_craft at once). The tail's last field marks
+        // the coroutine done.
+        private static readonly FieldInfo CargoParts =
+            typeof(EditorLogic).GetField("availableCargoParts", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        private static int _tailLoggedFor;   // instance id of the EditorLogic whose held start tail was logged (not a reference)
+
         /// <summary>True when the editor scene has finished loading and holds a craft that tools may read or edit.</summary>
         public static bool Ready
         {
             get
             {
                 EditorLogic editor = EditorLogic.fetch;
-                bool ready = HighLogic.LoadedScene == GameScenes.EDITOR
+                bool started = HighLogic.LoadedScene == GameScenes.EDITOR
                     && editor != null
                     && editor.FSMStarted
                     && editor.ship != null
                     && EditorDriver.fetch != null
                     && !EditorDriver.fetch.restartingEditor
                     && !(_starting && ReferenceEquals(editor, _previousEditor));
+                bool ready = started && (CargoParts == null || CargoParts.GetValue(editor) != null);
+                if (started && !ready && editor.GetInstanceID() != _tailLoggedFor)
+                {
+                    _tailLoggedFor = editor.GetInstanceID();   // once per EditorLogic: proof this condition held a call
+                    Debug.Log("[KspBridge] editor ready held: EditorLogic.Start tail pending");
+                }
                 if (ready && _starting)
                 {
                     _starting = false;

@@ -90,6 +90,8 @@ namespace KspBridge
             FlightReset.Tick();   // never throws
             VesselSwitch.Tick();  // never throws
             Flight.ResourceTransfer.Tick();   // never throws
+            EditorScene.Tick();   // never throws; releases an orphaned editor launch lock
+            AppLauncherRepair.Tick();   // never throws; removes launcher buttons/callbacks left by destroyed or re-added UIApps
         }
 
         public IList<string> Stop()
