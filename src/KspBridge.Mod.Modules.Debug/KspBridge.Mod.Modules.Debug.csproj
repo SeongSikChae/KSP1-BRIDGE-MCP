@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reloadable feature module (Mod side). net472 for KSP 1.12.5 / Unity 2019.4 Mono. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <KspManaged>$(KspDir)\KSP_x64_Data\Managed</KspManaged>
+    <Version Condition="'$(ModBuildStamp)' != ''">0.1.$(ModBuildStamp)</Version>
+    <!-- Unity Mono returns an already loaded assembly with the same simple name (version ignored), so each deploy also gets a unique name. -->
+    <AssemblyName Condition="'$(ModBuildStamp)' != ''">$(MSBuildProjectName).g$(ModBuildStamp.Replace(".", "_"))</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(KspManaged)\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(KspManaged)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KspBridge.Mod.Core\KspBridge.Mod.Core.csproj" Private="false" />
+    <ProjectReference Include="..\KspBridge.Mod.Loader\KspBridge.Mod.Loader.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

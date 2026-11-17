@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KspBridge.Server\KspBridge.Server.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Server.Contracts\KspBridge.Server.Contracts.csproj" />
+  </ItemGroup>
+
+
+</Project>

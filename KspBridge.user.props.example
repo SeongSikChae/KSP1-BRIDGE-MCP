@@ -1,0 +1,9 @@
+<Project>
+  <!-- Copy to KspBridge.user.props (not committed) and set local paths. -->
+  <PropertyGroup>
+    <!-- KSP 1.12.5 install folder (contains KSP_x64.exe and KSP_x64_Data\Managed). -->
+    <KspDir>C:\Games\Kerbal Space Program</KspDir>
+    <!-- Folder where scripts/deploy.ps1 places KspBridge.Server. -->
+    <ServerDir>C:\Apps\KspBridge</ServerDir>
+  </PropertyGroup>
+</Project>

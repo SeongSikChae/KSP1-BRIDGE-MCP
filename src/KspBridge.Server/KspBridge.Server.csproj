@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <PackageReference Include="CommandLineParser" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KspBridge.Server.Core\KspBridge.Server.Core.csproj" />
+    <ProjectReference Include="..\KspBridge.Server.Contracts\KspBridge.Server.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KspBridge.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\Protocol.cs" Link="Shared\Protocol.cs" />
+  </ItemGroup>
+
+</Project>

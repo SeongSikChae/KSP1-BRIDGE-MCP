@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <InternalsVisibleTo Include="KspBridge.Server.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Biz.Bizadm.Serilog.Enrichers.Caller" />
+    <PackageReference Include="Biz.Bizadm.Serilog.Sinks.File.Extensions" />
+    <PackageReference Include="Biz.Bizadm.System.Configuration.Extensions" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+  </ItemGroup>
+
+</Project>
