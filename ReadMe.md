@@ -96,6 +96,10 @@ claude mcp add --transport http kspbridge http://127.0.0.1:8651/mcp
 | `list_step_types` | core | 로드된 단계 종류와 매개변수 |
 | `submit_wait` | wait | `wait` 한 단계 계획 |
 | `debug_launch`, `debug_revert`, `debug_space_center` | debug | 검증용 발사·되돌리기·우주센터 이동 |
+| `editor_enter`, `editor_leave` | editor | VAB/SPH 에디터 진입·시설 전환·우주센터로 이탈 |
+| `editor_list_parts` | editor | 쓸 수 있는 부품 목록(분류·검색·페이지) |
+| `editor_get_ship` | editor | 조립 중인 기체(부품 트리, 부착, 스테이지, 대칭, 질량) |
+| `editor_save`, `editor_load`, `editor_new`, `editor_list_crafts` | editor | craft 저장·불러오기·새로 시작·목록 |
 
 ## 기능 모듈 추가
 
