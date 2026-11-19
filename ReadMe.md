@@ -37,7 +37,7 @@ MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (�
 
 1. `KspBridge.user.props.example`을 `KspBridge.user.props`로 복사하고 경로를 적습니다.
    - `KspDir`: KSP 설치 폴더
-   - `ServerDir`: 서버를 배포할 폴더
+   - `ServerDir`: 서버를 배포할 폴더(비우면 서버 호스트 배포를 건너뜁니다)
 2. 빌드합니다.
 
    ```powershell
@@ -59,6 +59,8 @@ MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (�
 - `<ServerDir>/modules/`: 서버 모듈 세대와 `manifest.json`입니다.
 
 KSP와 서버가 실행 중이면 `manifest.json` 변경을 보고 새 세대를 저절로 읽습니다. 고정 호스트 파일이 바뀌었을 때만 KSP나 서버를 다시 시작하라는 안내가 출력됩니다.
+
+실행 중인 서버는 자기 모듈 폴더를 `%LOCALAPPDATA%\KspBridge\servers\<pid>.json`에 등록하고 종료할 때 지웁니다. `deploy.ps1`은 `<ServerDir>/modules/`와 함께 등록된 서버의 모듈 폴더에도 서버 모듈을 배포합니다. 그래서 VS 게시 결과처럼 `ServerDir`가 아닌 폴더에서 띄운 서버도 경로를 적지 않고 모듈이 갱신됩니다. 서버가 실행 중일 때 배포해야 합니다.
 
 ## 서버 실행과 MCP 등록
 

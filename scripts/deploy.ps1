@@ -4,7 +4,9 @@
     빌드하고 KSP GameData/KspBridge와 서버 폴더(ServerDir)에 배포한다.
 
 .DESCRIPTION
-    - 경로는 KspBridge.user.props의 KspDir, ServerDir에서 읽는다.
+    - 경로는 KspBridge.user.props의 KspDir, ServerDir에서 읽는다. ServerDir는 비워도 된다(서버 호스트 배포를 건너뛴다).
+    - 서버 모듈은 ServerDir/modules와, 실행 중인 서버가 %LOCALAPPDATA%\KspBridge\servers에 등록한 모듈 폴더에 모두 배포한다.
+      그래서 VS 게시 등으로 다른 폴더에서 띄운 서버도 경로 설정 없이 모듈이 갱신된다. 죽은 서버의 등록 파일은 지운다.
     - Mod 로직 어셈블리는 배포마다 새 버전(ModBuildStamp)으로 빌드한다. Mono는 바이트로 읽은 어셈블리를 이름으로 묶기 때문이다.
     - 고정 호스트(Mod Loader DLL, 서버 exe와 호스트 DLL)는 내용이 바뀐 파일만 복사한다. 실행 중이라 잠겨 있으면 재시작 안내를 출력하고 계속한다.
     - 모듈 DLL을 다 복사한 뒤 manifest.json을 마지막에 쓴다. 실행 중인 KSP와 서버는 이 파일 변경을 보고 새 세대를 읽는다.
@@ -83,6 +85,32 @@ function Publish-Modules([string]$modulesDir, [string[]]$moduleFiles, [string]$b
         ForEach-Object { Remove-Item $_.FullName -Force; Write-Host "  이전 세대 삭제: $($_.Name)" }
 }
 
+# 실행 중인 서버가 등록한 모듈 폴더(KspBridge.Server의 ServerRegistration). pid와 프로세스 시작 시각이 맞는 등록만 쓰고, 나머지는 지운다.
+function Get-RunningServerModulesDirs {
+    $registry = Join-Path $env:LOCALAPPDATA 'KspBridge/servers'
+    if (-not (Test-Path $registry)) { return @() }
+    $dirs = @()
+    foreach ($file in Get-ChildItem $registry -Filter '*.json' -File) {
+        $alive = $false
+        try {
+            $entry = Get-Content $file.FullName -Raw | ConvertFrom-Json
+            $registered = if ($entry.startTime -is [datetime]) { $entry.startTime.ToUniversalTime() } else { [datetimeoffset]::Parse($entry.startTime).UtcDateTime }
+            $process = Get-Process -Id $entry.pid -ErrorAction SilentlyContinue
+            $alive = $process -and [Math]::Abs(($process.StartTime.ToUniversalTime() - $registered).TotalSeconds) -lt 1
+        }
+        catch { $alive = $false }
+        if ($alive) {
+            Write-Host "  실행 중 서버 발견: pid $($entry.pid), port $($entry.port), $($entry.modulesDir)"
+            $dirs += $entry.modulesDir
+        }
+        else {
+            Remove-Item $file.FullName -Force -ErrorAction SilentlyContinue
+            Write-Host "  끝난 서버 등록 삭제: $($file.Name)"
+        }
+    }
+    return $dirs
+}
+
 # Mod 로직 어셈블리 파일. 배포 빌드는 이름에 세대 표식(.g<stamp>)이 붙는다(Unity Mono가 같은 단순 이름의 이전 세대를 돌려주므로).
 function Get-ModAssembly([string]$projectName) {
     $file = Join-Path (Get-OutputDir $projectName 'net472') "$projectName.g$($stamp.Replace('.', '_')).dll"
@@ -94,7 +122,6 @@ $loaderProject = Join-Path $root 'src/KspBridge.Mod.Loader/KspBridge.Mod.Loader.
 $kspDir = Get-MsBuildProperty $loaderProject 'KspDir'
 $serverDir = Get-MsBuildProperty (Join-Path $root 'src/KspBridge.Server/KspBridge.Server.csproj') 'ServerDir'
 if (-not $kspDir -or -not (Test-Path (Join-Path $kspDir 'KSP_x64.exe'))) { throw "KspDir가 KSP 설치 폴더가 아니다: '$kspDir' (KspBridge.user.props 확인)" }
-if (-not $serverDir) { throw 'ServerDir가 비어 있다 (KspBridge.user.props 확인)' }
 
 # 배포마다 다른 Mod 로직 버전: 0.1.<2026-01-01부터 일수>.<하루 중 2초 단위>
 $now = (Get-Date).ToUniversalTime()
@@ -120,36 +147,54 @@ $modModules += Get-ChildItem (Join-Path $root 'src') -Directory -Filter 'KspBrid
 Publish-Modules (Join-Path $gameData 'PluginData/modules') $modModules $stamp
 
 # ---- MCP 서버 ----
-Write-Host "서버 배포: $serverDir"
-$serverOut = Get-OutputDir 'KspBridge.Server' 'net10.0'
-$serverChanged = 0
-foreach ($file in Get-ChildItem $serverOut -File -Recurse) {
-    $relative = [System.IO.Path]::GetRelativePath($serverOut, $file.FullName)
-    if ($relative -like 'appsettings.Development.json') { continue }
-    $serverChanged += Copy-HostFile $file.FullName (Join-Path $serverDir $relative) '서버'
-}
-Write-Host "  서버 호스트: $(if ($serverChanged) { "$serverChanged 개 파일 갱신" } else { '변경 없음' })"
-Add-RestartNote $serverChanged 'KspBridge.Server' '서버'
-$config = Join-Path $serverDir 'kspbridge.yaml'
-if (-not (Test-Path $config)) {
-    @"
+$serverModulesDirs = @()
+if ($serverDir) {
+    Write-Host "서버 배포: $serverDir"
+    $serverOut = Get-OutputDir 'KspBridge.Server' 'net10.0'
+    $serverChanged = 0
+    foreach ($file in Get-ChildItem $serverOut -File -Recurse) {
+        $relative = [System.IO.Path]::GetRelativePath($serverOut, $file.FullName)
+        if ($relative -like 'appsettings.Development.json') { continue }
+        $serverChanged += Copy-HostFile $file.FullName (Join-Path $serverDir $relative) '서버'
+    }
+    Write-Host "  서버 호스트: $(if ($serverChanged) { "$serverChanged 개 파일 갱신" } else { '변경 없음' })"
+    Add-RestartNote $serverChanged 'KspBridge.Server' '서버'
+    $config = Join-Path $serverDir 'kspbridge.yaml'
+    if (-not (Test-Path $config)) {
+        @"
 ContentRootPath: $($serverDir -replace '\\', '/')
 Port: 65531
 ModUrl: http://127.0.0.1:65530
 RequestTimeoutMs: 3000
 ModulesDir: modules
 "@ | Set-Content -Path $config -Encoding utf8NoBOM
-    Write-Host "  설정 생성: $config"
+        Write-Host "  설정 생성: $config"
+    }
+    $serverModulesDirs += Join-Path $serverDir 'modules'
+}
+else {
+    Write-Host '서버 호스트 배포 건너뜀 (ServerDir 비어 있음)'
+}
+
+Write-Host '서버 모듈 배포 대상'
+$serverModulesDirs += Get-RunningServerModulesDirs
+$serverModulesDirs = @($serverModulesDirs | ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\', '/') } |
+    Sort-Object -Unique)
+if ($serverModulesDirs.Count -eq 0) {
+    Write-Host '  대상 없음 (ServerDir가 비어 있고 실행 중인 서버도 없다)' -ForegroundColor Yellow
 }
 
 $serverModules = Get-ChildItem (Join-Path $root 'src') -Directory -Filter 'KspBridge.Server.Modules.*' |
     Sort-Object @{ Expression = { $_.Name -ne 'KspBridge.Server.Modules.Core' } }, Name |
     ForEach-Object { Join-Path (Get-OutputDir $_.Name 'net10.0') "$($_.Name).dll" }
-Publish-Modules (Join-Path $serverDir 'modules') $serverModules $stamp
+foreach ($modulesDir in $serverModulesDirs) {
+    Publish-Modules $modulesDir $serverModules $stamp
+}
 
 Write-Host ''
 if ($restartNotes.Count -gt 0) {
     Write-Host '재시작 안내:' -ForegroundColor Yellow
     $restartNotes | Sort-Object -Unique | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
 }
-Write-Host "배포 완료 (build $stamp). 서버 실행: `"$serverDir\KspBridge.Server.exe`" --config `"$config`" --log `"$serverDir\logs`""
+Write-Host "배포 완료 (build $stamp)."
+if ($serverDir) { Write-Host "서버 실행: `"$serverDir\KspBridge.Server.exe`" --config `"$config`" --log `"$serverDir\logs`"" }

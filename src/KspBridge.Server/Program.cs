@@ -61,6 +61,9 @@ namespace KspBridge.Server
                 try
                 {
                     await app.StartAsync();
+                    // 테스트 서버(CreateWebApplication)는 등록하지 않는다. 실제 실행만 deploy.ps1의 배포 대상이 된다.
+                    using ServerRegistration? registration = ServerRegistration.Register(
+                        appConfiguration.Port!.Value, app.Services.GetRequiredService<ModuleHost>().ModulesDir, logger);
                     await app.WaitForShutdownAsync();
                     return ExitCode.Success;
                 }
