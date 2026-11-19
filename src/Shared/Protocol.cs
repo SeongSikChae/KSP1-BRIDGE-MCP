@@ -11,8 +11,8 @@ namespace KspBridge.Shared
         /// <summary>Request header carrying <see cref="Version"/>.</summary>
         public const string VersionHeader = "X-KspBridge-Protocol";
 
-        public const int DefaultModPort = 8650;
-        public const int DefaultServerPort = 8651;
+        public const int DefaultModPort = 65530;
+        public const int DefaultServerPort = 65531;
 
         public const string LoaderStatusPath = "/loader/status";
         public const string LoaderReloadPath = "/loader/reload";

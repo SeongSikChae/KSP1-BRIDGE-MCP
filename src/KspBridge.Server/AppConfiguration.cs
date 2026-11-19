@@ -12,7 +12,7 @@ namespace KspBridge.Server
         [Property(PropertyType.USHORT, required: true)]
         public ushort? Port { get; set; }
 
-        /// <summary>KSP Mod HTTP 주소(예: http://127.0.0.1:8650).</summary>
+        /// <summary>KSP Mod HTTP 주소(예: http://127.0.0.1:65530).</summary>
         [Property(PropertyType.STRING, required: true)]
         public string ModUrl { get; set; } = null!;
 

@@ -134,8 +134,8 @@ $config = Join-Path $serverDir 'kspbridge.yaml'
 if (-not (Test-Path $config)) {
     @"
 ContentRootPath: $($serverDir -replace '\\', '/')
-Port: 8651
-ModUrl: http://127.0.0.1:8650
+Port: 65531
+ModUrl: http://127.0.0.1:65530
 RequestTimeoutMs: 3000
 ModulesDir: modules
 "@ | Set-Content -Path $config -Encoding utf8NoBOM

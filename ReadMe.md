@@ -13,9 +13,9 @@ Planner – Coordinator – Controller 세 계층으로 나뉩니다.
 | Controller | KSP 안 (`KspBridge.Mod.Core`) | 계획 실행 중 활성 기체의 `OnFlyByWire`에서 단계가 기체를 제어 |
 
 ```
-MCP 클라이언트 ── http://127.0.0.1:8651/mcp ── KspBridge.Server (상주, 수동 실행)
+MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (상주, 수동 실행)
                                                  └ 모듈 세대: KspBridge.Server.Modules.*  (도구)
-                                    http://127.0.0.1:8650
+                                    http://127.0.0.1:65530
                                                 KspBridge.Mod.Loader (KSP 플러그인, 고정)
                                                  └ 모듈 세대: KspBridge.Mod.Core, KspBridge.Mod.Modules.*  (단계 종류)
 ```
@@ -54,7 +54,7 @@ MCP 클라이언트 ── http://127.0.0.1:8651/mcp ── KspBridge.Server (�
 
 - `GameData/KspBridge/Plugins/KspBridge.Mod.Loader.dll`: KSP가 시작할 때 읽는 고정 호스트입니다.
 - `GameData/KspBridge/PluginData/modules/`: Mod 모듈 세대와 `manifest.json`입니다.
-- `GameData/KspBridge/settings.cfg`: Mod HTTP 포트입니다(기본 8650).
+- `GameData/KspBridge/settings.cfg`: Mod HTTP 포트입니다(기본 65530).
 - `<ServerDir>/`: 서버 실행 파일과 `kspbridge.yaml`입니다(처음 배포할 때 만들어집니다).
 - `<ServerDir>/modules/`: 서버 모듈 세대와 `manifest.json`입니다.
 
@@ -71,7 +71,7 @@ KSP와 서버가 실행 중이면 `manifest.json` 변경을 보고 새 세대를
 Claude Code에는 한 번만 등록합니다.
 
 ```powershell
-claude mcp add --transport http kspbridge http://127.0.0.1:8651/mcp
+claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 ```
 
 서버 프로세스를 다시 실행하면 기존 MCP 세션이 끊길 수 있습니다. 그때는 클라이언트에서 다시 연결합니다(Claude Code: `/mcp`).
