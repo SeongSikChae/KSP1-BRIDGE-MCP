@@ -35,16 +35,39 @@ namespace KspBridge.Mod.Modules.Editor
         /// </summary>
         private static IEnumerable<AvailablePart> Available()
         {
-            Game.Modes mode = HighLogic.CurrentGame.Mode;
-            bool research = (mode == Game.Modes.CAREER || mode == Game.Modes.SCIENCE_SANDBOX) && ResearchAndDevelopment.Instance != null;
+            bool research = ResearchApplies();
             foreach (AvailablePart part in PartLoader.LoadedPartsList)
             {
-                if (part == null || part.partPrefab == null || part.category == PartCategories.none || part.TechHidden)
-                    continue;
-                if (research && !ResearchAndDevelopment.PartTechAvailable(part))
-                    continue;
-                yield return part;
+                if (IsBuildable(part, research))
+                    yield return part;
             }
+        }
+
+        /// <summary>
+        /// The buildable part named <paramref name="name"/> (same rule as the part list), or bad_request when there is none,
+        /// so assembly requests cannot add parts the editor would not offer.
+        /// </summary>
+        public static AvailablePart RequireBuildable(string name)
+        {
+            AvailablePart part = PartLoader.getPartInfoByName(name);
+            if (part == null)
+                throw BridgeException.BadRequest("part '" + name + "' is not installed; see editor_list_parts");
+            if (!IsBuildable(part, ResearchApplies()))
+                throw BridgeException.BadRequest("part '" + name + "' cannot be built in this game (hidden or not researched); see editor_list_parts");
+            return part;
+        }
+
+        private static bool ResearchApplies()
+        {
+            Game.Modes mode = HighLogic.CurrentGame.Mode;
+            return (mode == Game.Modes.CAREER || mode == Game.Modes.SCIENCE_SANDBOX) && ResearchAndDevelopment.Instance != null;
+        }
+
+        private static bool IsBuildable(AvailablePart part, bool research)
+        {
+            if (part == null || part.partPrefab == null || part.category == PartCategories.none || part.TechHidden)
+                return false;
+            return !research || ResearchAndDevelopment.PartTechAvailable(part);
         }
 
         private static Dictionary<string, object> Describe(AvailablePart info)

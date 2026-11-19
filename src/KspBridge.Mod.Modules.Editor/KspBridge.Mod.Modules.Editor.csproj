@@ -25,6 +25,11 @@
       <HintPath>$(KspManaged)\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Collider.Raycast for surface attach points. -->
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(KspManaged)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <!-- EditorLogic.shipNameField (TMP_InputField) derives from UnityEngine.UI.Selectable. -->
     <Reference Include="UnityEngine.UI">
       <HintPath>$(KspManaged)\UnityEngine.UI.dll</HintPath>

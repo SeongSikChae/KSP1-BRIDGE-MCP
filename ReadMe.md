@@ -102,6 +102,18 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `editor_list_parts` | editor | 쓸 수 있는 부품 목록(분류·검색·페이지) |
 | `editor_get_ship` | editor | 조립 중인 기체(부품 트리, 부착, 스테이지, 대칭, 질량) |
 | `editor_save`, `editor_load`, `editor_new`, `editor_list_crafts` | editor | craft 저장·불러오기·새로 시작·목록 |
+| `editor_place_root`, `editor_set_root` | editor | 빈 에디터에 루트 부품 놓기, 다른 부품을 루트로 |
+| `editor_attach_node`, `editor_attach_surface` | editor | 노드 부착, 표면 부착(방사 대칭 1~8, 대칭 묶음에 붙이면 묶음 전체에) |
+| `editor_remove`, `editor_replace`, `editor_move` | editor | 제거(대칭 짝·아래 부품 포함), 다른 부품으로 교체, 이동·회전 |
+| `editor_get_part_settings`, `editor_set_part_settings` | editor | 에디터에서 바꿀 수 있는 자원 양·모듈 설정(추력 제한, 짐벌, 분리 힘 등) |
+| `editor_get_stages`, `editor_set_stage`, `editor_swap_stages` | editor | 스테이지 조회, 부품 옮기기, 두 스테이지 바꾸기 |
+
+조립 편집 도구는 기체를 craft로 다시 만들어 에디터에 다시 불러오는 방식이다. 편집할 때마다 아래 두 파일을 쓴다.
+
+- `GameData/KspBridge/PluginData/editor/edit.craft`: 편집한 기체를 불러오기 위한 임시 craft(KSP는 `PluginData`를 읽지 않는다).
+- `Ships/@thumbs/editor/edit.png`: 게임이 임시 craft의 썸네일을 편집마다 그리지 않도록 두는 작은 자리 표시 이미지. 이 파일 하나가 게임 폴더에 남는다.
+
+편집하면 에디터의 카메라·선택이 초기화되고, 게임의 되돌리기(undo) 기록은 남지 않는다. 마우스에 들려 있던 부품은 버려지며 결과의 `dropped_held_part`로 알린다.
 
 ## 기능 모듈 추가
 
