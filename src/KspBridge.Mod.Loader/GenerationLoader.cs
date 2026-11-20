@@ -60,7 +60,7 @@ namespace KspBridge.Mod.Loader
                 if (loadedFullNames.Contains(assembly.FullName) && !sameAsCurrent)
                 {
                     throw new InvalidOperationException("Assembly " + assembly.FullName + " belongs to an earlier generation. " +
-                                                        "Deploy with scripts/deploy.ps1, which gives every deploy a unique assembly name.");
+                                                        "Publish a Mod project (dotnet publish src/KspBridge.Mod.Core), which gives every publish a unique assembly name.");
                 }
                 // sameAsCurrent: a reload without a new deploy restarts the logic on the current generation's assemblies.
                 next[name] = assembly;

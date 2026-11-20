@@ -1,9 +1,12 @@
 <Project>
   <!-- Copy to KspBridge.user.props (not committed) and set local paths. -->
   <PropertyGroup>
-    <!-- KSP 1.12.5 install folder (contains KSP_x64.exe and KSP_x64_Data\Managed). -->
+    <!-- KSP 1.12.5 install folder (contains KSP_x64.exe and KSP_x64_Data\Managed). Used for references and as the Mod publish target. -->
     <KspDir>C:\Games\Kerbal Space Program</KspDir>
-    <!-- Folder where scripts/deploy.ps1 places KspBridge.Server. -->
-    <ServerDir>C:\Apps\KspBridge</ServerDir>
+    <!-- Server modules folders that publishing a KspBridge.Server.Modules.* project writes to (all server modules + manifest.json).
+         Use each running server's modules folder (ContentRootPath + ModulesDir). Separate several folders with ';'. -->
+    <ServerModulesDirs>C:\Apps\KspBridge\modules</ServerModulesDirs>
+    <!-- Optional: GameData\KspBridge folder that Mod publishing writes to. Empty = $(KspDir)\GameData\KspBridge. -->
+    <ModDeployDir></ModDeployDir>
   </PropertyGroup>
 </Project>

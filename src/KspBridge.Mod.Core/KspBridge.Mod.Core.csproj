@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>KspBridge.Mod.Core</RootNamespace>
     <KspManaged>$(KspDir)\KSP_x64_Data\Managed</KspManaged>
-    <!-- scripts/deploy.ps1 passes ModBuildStamp so every deploy has a new assembly version (Mono binds byte-loaded assemblies by name). -->
+    <!-- Publishing a Mod project (Directory.Build.targets) passes ModBuildStamp so every publish has a new assembly version (Mono binds byte-loaded assemblies by name). -->
     <Version Condition="'$(ModBuildStamp)' != ''">0.1.$(ModBuildStamp)</Version>
     <!-- Unity Mono returns an already loaded assembly with the same simple name (version ignored), so each deploy also gets a unique name. -->
     <AssemblyName Condition="'$(ModBuildStamp)' != ''">$(MSBuildProjectName).g$(ModBuildStamp.Replace(".", "_"))</AssemblyName>

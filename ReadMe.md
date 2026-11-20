@@ -13,7 +13,7 @@ Planner – Coordinator – Controller 세 계층으로 나뉩니다.
 | Controller | KSP 안 (`KspBridge.Mod.Core`) | 계획 실행 중 활성 기체의 `OnFlyByWire`에서 단계가 기체를 제어 |
 
 ```
-MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (상주, 수동 실행)
+MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (상주, 콘솔 또는 Windows 서비스)
                                                  └ 모듈 세대: KspBridge.Server.Modules.*  (도구)
                                     http://127.0.0.1:65530
                                                 KspBridge.Mod.Loader (KSP 플러그인, 고정)
@@ -23,7 +23,7 @@ MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (�
 양쪽 모두 **고정 호스트**와 **모듈 세대**로 나뉩니다.
 
 - 고정 호스트: 서버 프로세스, KSP Loader. 포트와 MCP 세션을 유지합니다.
-- 모듈 세대: 배포할 때마다 통째로 다시 읽힙니다.
+- 모듈 세대: 게시할 때마다 통째로 다시 읽힙니다.
   - 서버: collectible `AssemblyLoadContext`로 읽고, 이전 세대는 언로드합니다. 열린 MCP 세션에는 `notifications/tools/list_changed`가 갑니다.
   - KSP: `Assembly.Load(byte[])`로 읽습니다. Mono는 어셈블리를 내리지 못하므로 이전 세대는 메모리에 남습니다.
   - 실행 중인 계획은 `end_reason=reload`로 끝나고, 조종 콜백도 해제됩니다.
@@ -33,42 +33,51 @@ MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (�
 - .NET SDK 10
 - KSP 1.12.5
 
-## 빌드와 배포
+## 빌드와 게시
 
-1. `KspBridge.user.props.example`을 `KspBridge.user.props`로 복사하고 경로를 적습니다.
-   - `KspDir`: KSP 설치 폴더
-   - `ServerDir`: 서버를 배포할 폴더(비우면 서버 호스트 배포를 건너뜁니다)
-2. 빌드합니다.
+`KspBridge.user.props.example`을 `KspBridge.user.props`로 복사하고 경로를 적습니다(커밋하지 않습니다).
 
-   ```powershell
-   dotnet build KspBridge.slnx
-   ```
+- `KspDir`: KSP 설치 폴더. 빌드 참조와 Mod 게시 대상에 씁니다.
+- `ServerModulesDirs`: 서버 모듈을 게시할 폴더. 실행하는 서버의 모듈 폴더(`ContentRootPath` + `ModulesDir`)를 적고, 여러 개면 `;`로 나눕니다.
+- `ModDeployDir`(선택): Mod를 게시할 `GameData/KspBridge` 폴더. 비우면 `<KspDir>/GameData/KspBridge`입니다.
 
-3. 배포합니다. 빌드도 함께 합니다.
+빌드는 아무 데도 복사하지 않습니다. 배포는 게시(publish)로 합니다.
 
-   ```powershell
-   ./scripts/deploy.ps1
-   ```
+```powershell
+dotnet build KspBridge.slnx
+```
 
-배포 결과는 다음과 같습니다.
+| 게시할 프로젝트 | 결과 |
+|---|---|
+| `KspBridge.Server` | 게시 폴더에 서버 호스트, 모든 서버 모듈(`modules/`, `manifest.json`), 설정 샘플 `kspbridge.sample.yaml` |
+| `KspBridge.Server.Modules.*` 가운데 아무것 | 모든 서버 모듈과 `manifest.json`을 `ServerModulesDirs`의 폴더마다 둡니다. 목록에 없는 dll·pdb는 지웁니다 |
+| `KspBridge.Mod.Core`, `KspBridge.Mod.Modules.*` 가운데 아무것 | 새 세대 표식으로 Mod 모듈 전체를 빌드해 `GameData/KspBridge/PluginData/modules/`에 두고 이전 세대를 지웁니다 |
+| `KspBridge.Mod.Loader` | `GameData/KspBridge/Plugins/KspBridge.Mod.Loader.dll`, 없을 때만 `GameData/KspBridge/settings.cfg`(Mod HTTP 포트, 기본 65530) |
 
-- `GameData/KspBridge/Plugins/KspBridge.Mod.Loader.dll`: KSP가 시작할 때 읽는 고정 호스트입니다.
-- `GameData/KspBridge/PluginData/modules/`: Mod 모듈 세대와 `manifest.json`입니다.
-- `GameData/KspBridge/settings.cfg`: Mod HTTP 포트입니다(기본 65530).
-- `<ServerDir>/`: 서버 실행 파일과 `kspbridge.yaml`입니다(처음 배포할 때 만들어집니다).
-- `<ServerDir>/modules/`: 서버 모듈 세대와 `manifest.json`입니다.
+```powershell
+dotnet publish src/KspBridge.Server.Modules.Wait
+dotnet publish src/KspBridge.Mod.Core
+dotnet publish src/KspBridge.Mod.Loader
+dotnet publish src/KspBridge.Server -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o <게시 폴더>
+```
 
-KSP와 서버가 실행 중이면 `manifest.json` 변경을 보고 새 세대를 저절로 읽습니다. 고정 호스트 파일이 바뀌었을 때만 KSP나 서버를 다시 시작하라는 안내가 출력됩니다.
-
-실행 중인 서버는 자기 모듈 폴더를 `%LOCALAPPDATA%\KspBridge\servers\<pid>.json`에 등록하고 종료할 때 지웁니다. `deploy.ps1`은 `<ServerDir>/modules/`와 함께 등록된 서버의 모듈 폴더에도 서버 모듈을 배포합니다. 그래서 VS 게시 결과처럼 `ServerDir`가 아닌 폴더에서 띄운 서버도 경로를 적지 않고 모듈이 갱신됩니다. 서버가 실행 중일 때 배포해야 합니다.
+- 모듈은 게시 순서대로 파일을 다 둔 뒤 `manifest.json`을 마지막에 씁니다. 실행 중인 서버와 KSP는 이 파일이 바뀌면 새 세대를 저절로 읽습니다. 서버나 KSP를 멈출 필요가 없습니다.
+- Mod 모듈은 세대 이름으로 `KspBridge.Mod.Core`를 참조하므로 하나만 게시해도 늘 전체가 함께 나갑니다.
+- 고정 호스트(서버 exe와 호스트 DLL, Mod Loader)는 실행 중이면 잠겨 있어 게시가 실패합니다. 서버나 KSP를 멈춘 뒤 게시하고 다시 시작합니다.
+- Visual Studio 폴더 게시 프로필을 쓸 때는 기존 파일 삭제(`DeleteExistingFiles`)를 켜지 않습니다. 켜면 게시 폴더의 설정 파일·`modules`·로그가 지워집니다. CLI의 `dotnet publish -p:PublishProfile=...`는 프로필의 임시 폴더(`PublishDir`)까지만 쓰므로, 게시 폴더로 바로 보내려면 `-o`를 씁니다.
 
 ## 서버 실행과 MCP 등록
 
-서버는 클라이언트가 띄우지 않으므로 직접 실행합니다.
+서버는 클라이언트가 띄우지 않습니다. 게시 폴더의 `kspbridge.sample.yaml`을 복사해 설정 파일(예: `kspbridge.yaml`)을 만들고 값을 맞춘 뒤 콘솔이나 Windows 서비스로 실행합니다.
 
 ```powershell
-& "<ServerDir>\KspBridge.Server.exe" --config "<ServerDir>\kspbridge.yaml" --log "<ServerDir>\logs"
+& "<게시 폴더>\KspBridge.Server.exe" --config "<게시 폴더>\kspbridge.yaml" --log "<게시 폴더>\logs"
 ```
+
+- 콘솔: 위 명령으로 실행하고 Ctrl+C로 끝냅니다.
+- Windows 서비스: 같은 exe와 인자로 서비스를 등록합니다. 서비스는 현재 폴더 `C:\Windows\System32`에서 시작하므로 `--config`·`--log`와 설정 파일의 `ContentRootPath`를 절대 경로로 적습니다. 실행 계정은 등록할 때 정합니다.
+- 서비스로 실행 중일 때 서버 호스트를 바꾸려면 서비스를 멈추고, 서버를 게시한 뒤, 서비스를 다시 시작합니다. 서버 모듈은 서비스를 멈추지 않고 게시합니다.
+- 설정 오류처럼 서버가 시작하기 전에 난 오류는 stderr와 함께 `<--log 폴더>/KspBridge.Server.startup.log`에도 남습니다. 서비스가 시작되지 않으면 이 파일을 봅니다.
 
 Claude Code에는 한 번만 등록합니다.
 
@@ -129,7 +138,7 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
    - `[McpServerToolType]` 클래스에 `[McpServerTool(Name = ...)]` 메서드를 만듭니다.
    - 생성자나 매개변수로 `IBridgeClient`를 받아 `CallAsync("<이름>", "<op>", args)`를 부릅니다.
    - csproj는 `KspBridge.Server.Modules.Wait`를 본뜹니다.
-3. 두 프로젝트를 `KspBridge.slnx`에 추가하고 `./scripts/deploy.ps1`을 실행합니다. 배포 스크립트는 `*.Modules.*` 폴더를 찾아 매니페스트에 넣습니다.
+3. 두 프로젝트를 `KspBridge.slnx`에 추가하고 서버 모듈과 Mod 모듈을 게시합니다. 게시는 `src/KspBridge.Server.Modules.*`, `src/KspBridge.Mod.Modules.*` 폴더를 찾아 매니페스트에 넣습니다.
 
 보정·튜닝 기능도 주 기능을 고치지 말고 별도 모듈로 추가합니다.
 

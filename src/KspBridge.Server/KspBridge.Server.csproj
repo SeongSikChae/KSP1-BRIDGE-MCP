@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <PackageReference Include="CommandLineParser" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
@@ -17,6 +18,11 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\Protocol.cs" Link="Shared\Protocol.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 설정 샘플. 게시 출력에 늘 들어가며, 실제 설정 파일과 이름이 달라 사용자의 설정을 덮어쓰지 않는다. -->
+    <None Include="kspbridge.sample.yaml" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>

@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace KspBridge.Server.Modules
 {
     /// <summary>
-    /// 배포 스크립트가 모듈 DLL을 다 복사한 뒤 마지막에 쓰는 <c>manifest.json</c>.
+    /// 서버 모듈 게시(<c>Directory.Build.targets</c>)가 모듈 DLL을 다 복사한 뒤 마지막에 쓰는 <c>manifest.json</c>.
     /// 이 파일이 바뀌면 새 모듈 세대를 읽는다.
     /// </summary>
     public sealed class ModuleManifest
@@ -18,7 +18,7 @@ namespace KspBridge.Server.Modules
 
         public static ModuleManifest Read(string path)
         {
-            // 배포 스크립트가 쓰는 중일 수 있으므로 공유 읽기로 연다.
+            // 게시가 바꿔치기하는 중일 수 있으므로 공유 읽기로 연다.
             using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             return JsonSerializer.Deserialize<ModuleManifest>(stream)
                 ?? throw new InvalidDataException($"Empty manifest: {path}");

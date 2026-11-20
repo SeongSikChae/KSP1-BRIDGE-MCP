@@ -1,0 +1,204 @@
+<Project>
+
+  <!--
+    게시(publish)로 배포한다. 일반 빌드는 아무 데도 복사하지 않는다.
+    - KspBridge.Server.Modules.* 게시: 모든 서버 모듈을 $(ServerModulesDirs)의 폴더마다 두고 manifest.json을 마지막에 쓴다.
+    - KspBridge.Server 게시: 모든 서버 모듈과 manifest.json을 게시 출력의 modules\에 넣는다(단일 파일 게시에서도 파일로 남김).
+    - KspBridge.Mod.Core / KspBridge.Mod.Modules.* 게시: 새 세대 표식(ModBuildStamp)으로 Mod 세트를 빌드해
+      $(ModDeployDir)\PluginData\modules에 두고 manifest.json을 마지막에 쓴다.
+      Mod 모듈은 세대 이름으로 KspBridge.Mod.Core를 참조하므로 늘 세트로 게시한다.
+    - KspBridge.Mod.Loader 게시: Loader DLL을 $(ModDeployDir)\Plugins에, settings.cfg는 없을 때만 $(ModDeployDir)에 둔다.
+    실행 중인 서버와 KSP는 manifest.json 변경을 보고 새 세대를 읽는다.
+  -->
+
+  <PropertyGroup>
+    <ModDeployDir Condition="'$(ModDeployDir)' == '' and '$(KspDir)' != ''">$(KspDir)\GameData\KspBridge</ModDeployDir>
+    <!-- 모듈 세트를 빌드할 때 떼어 내는 게시 전용 전역 속성. 모듈은 RID 없이 복원되므로 이어받으면 NETSDK1047로 실패한다. -->
+    <_KspPublishOnlyProperties>RuntimeIdentifier;SelfContained;PublishSingleFile;PublishReadyToRun;PublishTrimmed;PublishDir;PublishUrl;PublishProfile;WebPublishMethod;DeleteExistingFiles;_IsPublishing</_KspPublishOnlyProperties>
+    <!-- 게시 대상 판정은 아래 세트 목록과 같은 기준(src\ 아래의 프로젝트)으로 한다. tests\의 같은 접두사 프로젝트는 대상이 아니다. -->
+    <_KspIsUnderSrc Condition="$([System.String]::Copy('$(MSBuildProjectDirectory)\').StartsWith('$(MSBuildThisFileDirectory)src\', StringComparison.OrdinalIgnoreCase))">true</_KspIsUnderSrc>
+    <_KspIsServerModule Condition="'$(_KspIsUnderSrc)' == 'true' and $(MSBuildProjectName.StartsWith('KspBridge.Server.Modules.'))">true</_KspIsServerModule>
+    <_KspIsModLogic Condition="'$(_KspIsUnderSrc)' == 'true' and ('$(MSBuildProjectName)' == 'KspBridge.Mod.Core' or $(MSBuildProjectName.StartsWith('KspBridge.Mod.Modules.')))">true</_KspIsModLogic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <_KspServerModuleProject Include="$(MSBuildThisFileDirectory)src\KspBridge.Server.Modules.*\*.csproj" />
+    <_KspModLogicProject Include="$(MSBuildThisFileDirectory)src\KspBridge.Mod.Core\KspBridge.Mod.Core.csproj;$(MSBuildThisFileDirectory)src\KspBridge.Mod.Modules.*\*.csproj" />
+  </ItemGroup>
+
+  <!-- 모듈 파일 복사(또는 manifest만 생성), manifest.json 바꿔치기 쓰기, 목록 밖 dll·pdb 삭제. Core 모듈을 맨 앞에 둔다. -->
+  <UsingTask TaskName="KspPublishModuleSet" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Modules ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <CoreName ParameterType="System.String" Required="true" />
+      <BuildStamp ParameterType="System.String" Required="true" />
+      <DestinationDir ParameterType="System.String" />
+      <ManifestOnlyPath ParameterType="System.String" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Collections.Generic" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var files = Modules.Select(m => m.GetMetadata("FullPath"))
+            .OrderBy(f => Path.GetFileName(f).StartsWith(CoreName + ".", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var names = files.Select(Path.GetFileName).ToList();
+        string json = "{\n  \"build\": \"" + BuildStamp + "\",\n  \"modules\": [\n"
+            + string.Join(",\n", names.Select(n => "    \"" + n + "\"")) + "\n  ]\n}\n";
+
+        if (!string.IsNullOrEmpty(ManifestOnlyPath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ManifestOnlyPath));
+            File.WriteAllText(ManifestOnlyPath, json);
+            return true;
+        }
+
+        Directory.CreateDirectory(DestinationDir);
+        // 같은 폴더로 가는 게시가 겹치면(예: 솔루션 전체 게시) 한 게시의 삭제가 다른 게시의 파일을 지울 수 있으므로 폴더마다 차례로 한다.
+        string mutexKey = Path.GetFullPath(DestinationDir).TrimEnd('\\', '/').ToUpperInvariant();
+        string mutexName = "KspBridgePublish_" + BitConverter.ToString(
+            System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(mutexKey))).Replace("-", "");
+        using var mutex = new System.Threading.Mutex(false, mutexName);
+        try { mutex.WaitOne(); } catch (System.Threading.AbandonedMutexException) { }
+        try
+        {
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string file in files)
+        {
+            string name = Path.GetFileName(file);
+            File.Copy(file, Path.Combine(DestinationDir, name), true);
+            keep.Add(name);
+            string pdb = Path.ChangeExtension(file, ".pdb");
+            if (File.Exists(pdb))
+            {
+                File.Copy(pdb, Path.Combine(DestinationDir, Path.GetFileName(pdb)), true);
+                keep.Add(Path.GetFileName(pdb));
+            }
+        }
+
+        string manifest = Path.Combine(DestinationDir, "manifest.json");
+        string temp = manifest + ".tmp";
+        File.WriteAllText(temp, json);
+        if (File.Exists(manifest))
+            File.Replace(temp, manifest, null);
+        else
+            File.Move(temp, manifest);
+        Log.LogMessage(MessageImportance.High, "  manifest: " + manifest + " (" + string.Join(", ", names) + ")");
+
+        foreach (string path in Directory.GetFiles(DestinationDir))
+        {
+            string ext = Path.GetExtension(path);
+            bool module = ext.Equals(".dll", StringComparison.OrdinalIgnoreCase) || ext.Equals(".pdb", StringComparison.OrdinalIgnoreCase);
+            if (module && !keep.Contains(Path.GetFileName(path)))
+            {
+                File.Delete(path);
+                Log.LogMessage(MessageImportance.High, "  이전 세대 삭제: " + Path.GetFileName(path));
+            }
+        }
+        }
+        finally
+        {
+            mutex.ReleaseMutex();
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- Mod 세대 표식: <2026-01-01부터 일수 % 65535>.<하루 중 2초 단위>(UTC). 게시마다 다르고 어셈블리 버전 범위 안이다. -->
+  <UsingTask TaskName="KspNewModBuildStamp" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Stamp ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        DateTime now = DateTime.UtcNow;
+        int days = (int)Math.Floor((now - new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalDays) % 65535;
+        int seconds = (int)Math.Floor(now.TimeOfDay.TotalSeconds / 2);
+        Stamp = days + "." + seconds;
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- 서버 모듈 세트 빌드: 게시 전용 속성을 떼고, 참조 그래프 밖이라 먼저 복원한 뒤 빌드한다. -->
+  <Target Name="_KspBuildServerModuleSet" Returns="@(_KspServerModuleOutput)">
+    <MSBuild Projects="@(_KspServerModuleProject)" Targets="Restore"
+             Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())"
+             RemoveProperties="$(_KspPublishOnlyProperties)" />
+    <MSBuild Projects="@(_KspServerModuleProject)" Targets="Build"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="$(_KspPublishOnlyProperties)">
+      <Output TaskParameter="TargetOutputs" ItemName="_KspServerModuleOutput" />
+    </MSBuild>
+  </Target>
+
+  <!-- 서버 모듈 프로젝트 게시: 모든 서버 모듈을 ServerModulesDirs의 폴더마다 둔다. -->
+  <Target Name="KspPublishServerModules" AfterTargets="Publish" Condition="'$(_KspIsServerModule)' == 'true'">
+    <Warning Condition="'$(ServerModulesDirs)' == ''"
+             Text="ServerModulesDirs가 비어 있어 서버 모듈을 배포하지 않았다. KspBridge.user.props에 서버 모듈 폴더를 적는다." />
+    <CallTarget Targets="_KspPublishServerModulesToDirs" Condition="'$(ServerModulesDirs)' != ''" />
+  </Target>
+
+  <Target Name="_KspPublishServerModulesToDirs" DependsOnTargets="_KspBuildServerModuleSet">
+    <ItemGroup>
+      <!-- 명령줄에서 %3B로 넘긴 구분자도 나눠지도록 이스케이프를 푼다. -->
+      <_KspServerModulesDir Include="$([MSBuild]::Unescape($(ServerModulesDirs)))" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_KspServerBuildStamp>$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))</_KspServerBuildStamp>
+    </PropertyGroup>
+    <Message Importance="High" Text="서버 모듈 배포: %(_KspServerModulesDir.FullPath)" />
+    <KspPublishModuleSet Modules="@(_KspServerModuleOutput)" CoreName="KspBridge.Server.Modules.Core"
+                         BuildStamp="$(_KspServerBuildStamp)" DestinationDir="%(_KspServerModulesDir.FullPath)" />
+  </Target>
+
+  <!-- 서버 프로젝트 게시: 게시 목록 계산 뒤(단일 파일 번들·복사 전) modules\ 항목을 더한다. -->
+  <Target Name="KspAddServerModulesToPublish" AfterTargets="ComputeResolvedFilesToPublishList"
+          DependsOnTargets="_KspBuildServerModuleSet" Condition="'$(MSBuildProjectName)' == 'KspBridge.Server'">
+    <PropertyGroup>
+      <_KspServerManifest>$(MSBuildProjectDirectory)\$(IntermediateOutputPath)kspbridge-modules\manifest.json</_KspServerManifest>
+    </PropertyGroup>
+    <KspPublishModuleSet Modules="@(_KspServerModuleOutput)" CoreName="KspBridge.Server.Modules.Core"
+                         BuildStamp="$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))" ManifestOnlyPath="$(_KspServerManifest)" />
+    <ItemGroup>
+      <_KspServerModuleFile Include="@(_KspServerModuleOutput)" />
+      <_KspServerModuleFile Include="@(_KspServerModuleOutput->'%(RootDir)%(Directory)%(Filename).pdb')" Condition="Exists('%(RootDir)%(Directory)%(Filename).pdb')" />
+      <ResolvedFileToPublish Include="@(_KspServerModuleFile)" RelativePath="modules\%(Filename)%(Extension)"
+                             CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+      <ResolvedFileToPublish Include="$(_KspServerManifest)" RelativePath="modules\manifest.json"
+                             CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Mod 프로젝트 게시: 새 세대 표식으로 Mod 세트를 빌드해 PluginData\modules에 둔다. -->
+  <Target Name="KspPublishModSet" AfterTargets="Publish" Condition="'$(_KspIsModLogic)' == 'true'">
+    <Error Condition="'$(ModDeployDir)' == ''" Text="ModDeployDir(또는 KspDir)가 비어 있다. KspBridge.user.props를 확인한다." />
+    <KspNewModBuildStamp>
+      <Output TaskParameter="Stamp" PropertyName="_KspModStamp" />
+    </KspNewModBuildStamp>
+    <Message Importance="High" Text="Mod 배포: $(ModDeployDir)\PluginData\modules (ModBuildStamp=$(_KspModStamp))" />
+    <MSBuild Projects="@(_KspModLogicProject)" Targets="Restore"
+             Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())"
+             RemoveProperties="$(_KspPublishOnlyProperties)" />
+    <MSBuild Projects="@(_KspModLogicProject)" Targets="Build"
+             Properties="Configuration=$(Configuration);ModBuildStamp=$(_KspModStamp)"
+             RemoveProperties="$(_KspPublishOnlyProperties)">
+      <Output TaskParameter="TargetOutputs" ItemName="_KspModLogicOutput" />
+    </MSBuild>
+    <KspPublishModuleSet Modules="@(_KspModLogicOutput)" CoreName="KspBridge.Mod.Core"
+                         BuildStamp="$(_KspModStamp)" DestinationDir="$(ModDeployDir)\PluginData\modules" />
+  </Target>
+
+  <!-- Loader 게시: 고정 호스트라 바뀌면 KSP를 다시 시작해야 반영된다. -->
+  <Target Name="KspPublishLoader" AfterTargets="Publish" Condition="'$(MSBuildProjectName)' == 'KspBridge.Mod.Loader'">
+    <Error Condition="'$(ModDeployDir)' == ''" Text="ModDeployDir(또는 KspDir)가 비어 있다. KspBridge.user.props를 확인한다." />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ModDeployDir)\Plugins" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\settings.cfg" DestinationFolder="$(ModDeployDir)"
+          Condition="!Exists('$(ModDeployDir)\settings.cfg')" />
+    <Message Importance="High" Text="Loader 배포: $(ModDeployDir)\Plugins" />
+  </Target>
+
+</Project>

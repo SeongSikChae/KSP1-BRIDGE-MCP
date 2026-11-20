@@ -8,7 +8,14 @@
     <Version>0.1.0</Version>
   </PropertyGroup>
 
-  <!-- Local machine paths (KspDir, ServerDir); not committed. -p:Name=value on the command line still wins. -->
+  <!-- A Mod build with a generation stamp (ModBuildStamp, set by Mod publishing) gets its own bin/obj so it never shares
+       output with the unstamped build or with another stamp (publishes can overlap, e.g. publishing the whole solution). -->
+  <PropertyGroup Condition="'$(ModBuildStamp)' != ''">
+    <OutputPath>bin\stamped\$(ModBuildStamp)\</OutputPath>
+    <IntermediateOutputPath>obj\stamped\$(ModBuildStamp)\</IntermediateOutputPath>
+  </PropertyGroup>
+
+  <!-- Local machine paths (KspDir, ServerModulesDirs, ModDeployDir); not committed. -p:Name=value on the command line still wins. -->
   <Import Project="$(MSBuildThisFileDirectory)KspBridge.user.props" Condition="Exists('$(MSBuildThisFileDirectory)KspBridge.user.props')" />
 
 </Project>

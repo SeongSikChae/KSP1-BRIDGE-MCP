@@ -41,6 +41,7 @@ namespace KspBridge.Server
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Configuration error: {ex.Message}");
+                StartupErrorLog.Write(cmdMain.LogDirPath, "Configuration", ex.Message);
                 return ExitCode.ConfigurationError;
             }
 
@@ -52,6 +53,7 @@ namespace KspBridge.Server
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Host creation error: {ex}");
+                StartupErrorLog.Write(cmdMain.LogDirPath, "HostCreation", ex.Message, ex);
                 return ExitCode.RuntimeError;
             }
 
@@ -61,9 +63,6 @@ namespace KspBridge.Server
                 try
                 {
                     await app.StartAsync();
-                    // 테스트 서버(CreateWebApplication)는 등록하지 않는다. 실제 실행만 deploy.ps1의 배포 대상이 된다.
-                    using ServerRegistration? registration = ServerRegistration.Register(
-                        appConfiguration.Port!.Value, app.Services.GetRequiredService<ModuleHost>().ModulesDir, logger);
                     await app.WaitForShutdownAsync();
                     return ExitCode.Success;
                 }
@@ -91,6 +90,8 @@ namespace KspBridge.Server
             builder.Logging.AddServerSerilog(logDirPath, "KspBridge.Server.log");
             builder.WebHost.ConfigureServerKestrel(appConfiguration.Port!.Value);
 
+            // 서비스 제어 관리자가 시작했을 때만 서비스 수명 관리를 쓴다. 콘솔 실행과 ContentRootPath는 그대로다.
+            builder.Services.AddWindowsService();
             builder.Services.AddSingleton(appConfiguration);
             builder.Services.AddProblemDetails();
             builder.Services.AddHealthChecks();

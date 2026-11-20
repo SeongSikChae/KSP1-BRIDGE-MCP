@@ -22,7 +22,7 @@ internal static class FixtureModule
 {
     public static string FileName => Path.GetFileName(typeof(FixtureTools).Assembly.Location);
 
-    /// <summary>모듈 폴더에 이 어셈블리를 복사하고 매니페스트를 쓴다(배포 스크립트와 같은 순서).</summary>
+    /// <summary>모듈 폴더에 이 어셈블리를 복사하고 매니페스트를 쓴다(서버 모듈 게시와 같은 순서: 모듈 먼저, 매니페스트 마지막).</summary>
     public static void Deploy(string modulesDir, params string[] extraEntries)
     {
         Directory.CreateDirectory(modulesDir);

@@ -1,0 +1,22 @@
+# KspBridge.Server 설정 샘플
+# 이 파일을 복사해 다른 이름(예: kspbridge.yaml)으로 저장한 뒤 값을 맞춰 쓴다. 게시할 때마다 이 샘플은 덮어써진다.
+# 실행: KspBridge.Server.exe --config <설정 파일 절대 경로> --log <로그 폴더 절대 경로>
+# 서비스로 실행하면 현재 폴더가 C:\Windows\System32이므로 --config·--log와 ContentRootPath는 절대 경로로 적는다.
+# 모든 키가 필수다.
+
+# 서버 콘텐츠 루트(절대 경로). 상대 경로 ModulesDir의 기준이 된다.
+ContentRootPath: <서버 폴더 절대 경로>
+
+# MCP HTTP 포트(127.0.0.1에만 바인딩). MCP 클라이언트 주소: http://127.0.0.1:65531/mcp
+Port: 65531
+
+# KSP Mod HTTP 주소. http이고 loopback 주소여야 한다.
+# 게임 폴더 GameData/KspBridge/settings.cfg의 port 값과 맞춘다.
+ModUrl: http://127.0.0.1:65530
+
+# Mod 요청 시간 제한(ms). 100..60000
+RequestTimeoutMs: 3000
+
+# 서버 모듈 폴더(ContentRootPath 기준 상대 경로 허용). manifest.json을 감시한다.
+# 서버 모듈을 게시할 대상(KspBridge.user.props의 ServerModulesDirs)에 이 폴더를 적는다.
+ModulesDir: modules

@@ -42,6 +42,23 @@ public sealed class ExitCodeTests
     }
 
     [TestMethod]
+    public void InvalidConfig_WritesStartupErrorLog()
+    {
+        string dir = TestServers.NewTempDir();
+        string config = Path.Combine(dir, "bad.yaml");
+        File.WriteAllText(config, $"ContentRootPath: {dir.Replace('\\', '/')}\nPort: 1\nModUrl: http://example.com:8650\nRequestTimeoutMs: 3000\nModulesDir: modules\n");
+        string logDir = Path.Combine(dir, "log");
+
+        Assert.AreEqual(2, Run("--config", config, "--log", logDir).ExitCode);
+
+        string startupLog = Path.Combine(logDir, KspBridge.Server.Core.StartupErrorLog.FileName);
+        Assert.IsTrue(File.Exists(startupLog), "startup error log was not written");
+        string text = File.ReadAllText(startupLog);
+        StringAssert.Contains(text, "[Configuration]");
+        StringAssert.Contains(text, "loopback");
+    }
+
+    [TestMethod]
     public void MissingConfigFile_Returns2()
         => Assert.AreEqual(2, Run("--config", Path.Combine(TestServers.NewTempDir(), "none.yaml"), "--log", "log").ExitCode);
 }
