@@ -43,6 +43,16 @@ namespace KspBridge.Mod.Core
         void End(string reason);
     }
 
+    /// <summary>
+    /// Optional on an <see cref="IStepRun"/>: how far the step is from its goal, shown by get_plan (step_progress).
+    /// Steps that do not implement it show null.
+    /// </summary>
+    public interface IStepProgress
+    {
+        /// <summary>Called on request (main thread) with the context's UT set to now; return null when there is nothing to show.</summary>
+        Dictionary<string, object> Progress(StepContext context);
+    }
+
     public enum StepStatus
     {
         Running,

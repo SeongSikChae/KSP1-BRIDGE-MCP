@@ -1,4 +1,5 @@
 using KspBridge.Mod.Core;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -51,11 +52,18 @@ namespace KspBridge.Mod.Modules.Wait
         }
     }
 
-    internal sealed class WaitRun : IStepRun
+    internal sealed class WaitRun : IStepRun, IStepProgress
     {
         private readonly double seconds;
 
         public WaitRun(double seconds) => this.seconds = seconds;
+
+        /// <summary>Goal and time left (game seconds, never below 0), shown by get_plan.</summary>
+        public Dictionary<string, object> Progress(StepContext context) => new Dictionary<string, object>
+        {
+            ["target_s"] = seconds,
+            ["remaining_s"] = Math.Max(0, seconds - context.Elapsed),
+        };
 
         public void Begin(StepContext context)
         {

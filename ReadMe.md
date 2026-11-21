@@ -106,7 +106,9 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `get_flight_events` | core | 단계·계획 이벤트(`since`로 새 이벤트만 읽기) |
 | `list_step_types` | core | 로드된 단계 종류와 매개변수 |
 | `submit_wait` | wait | `wait` 한 단계 계획 |
+| `get_flight` | flight | 활성 기체의 비행 상태: 위치·고도·속도·궤도 요소·자세·조종 상태·질량·추력·TWR·스테이지 Δv(`include`로 스테이지별 표·자원·천체 상수) |
 | `debug_launch`, `debug_revert`, `debug_space_center` | debug | 검증용 발사·되돌리기·우주센터 이동 |
+| `debug_set_orbit` | debug | 검증용: 활성 기체를 지정 Ap·Pe·경사각 궤도로 옮김(게임의 궤도 설정 치트) |
 | `editor_enter`, `editor_leave` | editor | VAB/SPH 에디터 진입·시설 전환·우주센터로 이탈 |
 | `editor_list_parts` | editor | 쓸 수 있는 부품 목록(분류·검색·페이지) |
 | `editor_get_ship` | editor | 조립 중인 기체(부품 트리, 부착, 스테이지, 대칭, 질량) |
@@ -117,6 +119,10 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `editor_get_part_settings`, `editor_set_part_settings` | editor | 에디터에서 바꿀 수 있는 자원 양·모듈 설정(추력 제한, 짐벌, 분리 힘 등) |
 | `editor_get_stages`, `editor_set_stage`, `editor_swap_stages` | editor | 스테이지 조회, 부품 옮기기, 두 스테이지 바꾸기 |
 | `check_ship` | check | 발사 전 조립 점검: 지정 천체 기준 스테이지별 질량·Δv·TWR·연소 시간, 무게중심 어긋남, 구조 경고 8종 |
+
+`get_plan`의 실행 중 계획(`current`)에는 진행 값이 붙는다. 계획 경과 시간(`elapsed_s`), 단계 경과 시간(`step_elapsed_s`), timeout까지 남은 시간(`step_timeout_remaining_s`), 단계가 보고한 목표까지 남은 양(`step_progress`, 예: `wait`의 `target_s`·`remaining_s`)이다. 단계가 아직 시작되지 않았으면 단계 값은 `null`이다. 같은 계획 요약을 돌려주는 `submit_plan`·`submit_wait` 응답에도 같은 값이 붙는다.
+
+`get_flight`는 기체를 바꾸지 않는다. Δv·연소 시간·스테이지 TWR은 게임 Δv 계산기의 값이며, 계산기가 아직 값을 내지 않았으면 `delta_v_ready`가 `false`이고 그 값들은 `null`이다.
 
 `check_ship`은 기체를 바꾸지 않는다. 스테이지 값은 게임 Δv 계산기의 값이며, 다른 천체를 지정하면 점검하는 동안만 게임 Δv 창의 천체가 그 천체로 잠깐 바뀌었다가 원래 천체로 돌아온다.
 

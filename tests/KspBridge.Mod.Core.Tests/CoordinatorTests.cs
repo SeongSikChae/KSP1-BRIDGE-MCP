@@ -21,6 +21,7 @@ namespace KspBridge.Mod.Core.Tests
         {
             registry = new StepRegistry();
             registry.Add(new FakeStepType());
+            registry.Add(new ProgressStepType());
             events = new EventLog(() => ut);
             coordinator = new Coordinator(registry, events, () => ut, () => null, () => block, () => session);
             coordinator.PlanStarted += () => started++;
@@ -149,6 +150,151 @@ namespace KspBridge.Mod.Core.Tests
             session = 7;   // a scene change bumps the session before aborting
             coordinator.Abort(EndReasons.SceneChange, null);
             Assert.AreEqual(1, coordinator.LastSession);
+        }
+
+        private static string ProgressStep(double seconds, bool throws = false, string extra = "")
+            => "{\"type\":\"progress\",\"params\":{\"seconds\":" + seconds + ",\"throws\":" + (throws ? "true" : "false") + "}" + extra + "}";
+
+        [TestMethod]
+        public void Submit_Answer_HasPlanElapsed_AndNullStepValues_BeforeTheStepBegins()
+        {
+            ut = 100;
+            Dictionary<string, object> answer = coordinator.Submit(Plan(ProgressStep(10, extra: ",\"timeout_s\":20")), replace: false);
+
+            Assert.AreEqual(0.0, (double)answer["elapsed_s"], 1e-9);
+            Assert.IsNull(answer["step_elapsed_s"]);
+            Assert.IsNull(answer["step_timeout_remaining_s"]);
+            Assert.IsNull(answer["step_progress"]);
+            Assert.IsNull(answer["step_progress_error"]);
+        }
+
+        [TestMethod]
+        public void RunningStep_ShowsElapsed_TimeoutLeft_AndReportedProgress()
+        {
+            coordinator.Submit(Plan(ProgressStep(10, extra: ",\"timeout_s\":20")), replace: false);
+            Run(3);
+
+            Dictionary<string, object> current = coordinator.CurrentSummaryWithProgress();
+
+            Assert.AreEqual(ut, (double)current["elapsed_s"], 1e-9);
+            double stepElapsed = (double)current["step_elapsed_s"];
+            Assert.AreEqual(3, stepElapsed, 0.05);
+            Assert.AreEqual(20 - stepElapsed, (double)current["step_timeout_remaining_s"], 1e-9);
+            Dictionary<string, object> progress = (Dictionary<string, object>)current["step_progress"];
+            Assert.AreEqual(10 - stepElapsed, (double)progress["left_s"], 1e-9, "the step sees the request's UT");
+            Assert.IsNull(current["step_progress_error"]);
+        }
+
+        [TestMethod]
+        public void StepWithoutTimeout_HasNullTimeoutLeft_AndStepWithoutReport_HasNullProgress()
+        {
+            coordinator.Submit(Plan(Step(10)), replace: false);
+            Run(1);
+
+            Dictionary<string, object> current = coordinator.CurrentSummaryWithProgress();
+
+            Assert.IsNotNull(current["step_elapsed_s"]);
+            Assert.IsNull(current["step_timeout_remaining_s"]);
+            Assert.IsNull(current["step_progress"]);
+            Assert.IsNull(current["step_progress_error"]);
+        }
+
+        [TestMethod]
+        public void BetweenSteps_StepValuesAreNull()
+        {
+            coordinator.Submit(Plan(ProgressStep(1), ProgressStep(5)), replace: false);
+            while (coordinator.CurrentSummary == null || (int)coordinator.CurrentSummary["step_index"] == 0)
+            {
+                ut += 0.02;
+                coordinator.FixedUpdate();
+            }
+
+            Dictionary<string, object> current = coordinator.CurrentSummaryWithProgress();   // step 1 begins on the next frame
+
+            Assert.AreEqual(1, current["step_index"]);
+            Assert.IsNotNull(current["elapsed_s"]);
+            Assert.IsNull(current["step_elapsed_s"]);
+            Assert.IsNull(current["step_timeout_remaining_s"]);
+            Assert.IsNull(current["step_progress"]);
+        }
+
+        [TestMethod]
+        public void ProgressException_IsShown_AndThePlanKeepsRunning()
+        {
+            coordinator.Submit(Plan(ProgressStep(5, throws: true)), replace: false);
+            Run(1);
+
+            Dictionary<string, object> current = coordinator.CurrentSummaryWithProgress();
+
+            Assert.IsNull(current["step_progress"]);
+            StringAssert.Contains((string)current["step_progress_error"], "InvalidOperationException");
+            Assert.IsTrue(coordinator.Running);
+            Run(6);
+            Assert.AreEqual(EndReasons.Completed, coordinator.LastSummary["end_reason"]);
+        }
+
+        [TestMethod]
+        public void EndedPlan_AndPlainSummary_HaveNoProgressValues()
+        {
+            coordinator.Submit(Plan(ProgressStep(5)), replace: false);
+            Run(1);
+            Assert.IsFalse(coordinator.CurrentSummary.ContainsKey("elapsed_s"), "get_status reads the plain summary");
+            Assert.AreEqual(0, ProgressRun.Calls, "the plain summary never calls the progress report");
+
+            Run(6);
+
+            Assert.IsNull(coordinator.CurrentSummaryWithProgress());
+            Assert.IsFalse(coordinator.LastSummary.ContainsKey("elapsed_s"));
+            Assert.IsFalse(coordinator.LastSummary.ContainsKey("step_progress"));
+        }
+
+        private sealed class ProgressStepType : IStepType
+        {
+            public string Name => "progress";
+
+            public string Describe() => "test step that reports progress";
+
+            public IStepRun Create(Dictionary<string, object> parameters)
+            {
+                ProgressRun.Calls = 0;
+                return new ProgressRun(parameters.Num("seconds", required: true).Value, parameters.Bool("throws"));
+            }
+        }
+
+        private sealed class ProgressRun : IStepRun, IStepProgress
+        {
+            public static int Calls;
+
+            private readonly double seconds;
+            private readonly bool throws;
+
+            public ProgressRun(double seconds, bool throws)
+            {
+                this.seconds = seconds;
+                this.throws = throws;
+            }
+
+            public Dictionary<string, object> Progress(StepContext context)
+            {
+                Calls++;
+                if (throws)
+                    throw new System.InvalidOperationException("report failed");
+                return new Dictionary<string, object> { ["left_s"] = seconds - context.Elapsed };
+            }
+
+            public void Begin(StepContext context)
+            {
+            }
+
+            public StepResult Judge(StepContext context) => context.Elapsed >= seconds ? StepResult.Done : StepResult.Running;
+
+            public void Control(FlightCtrlState state, StepContext context)
+            {
+            }
+
+            public void End(string reason)
+            {
+            }
         }
 
         private sealed class FakeStepType : IStepType

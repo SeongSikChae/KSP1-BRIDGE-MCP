@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -56,18 +57,66 @@ namespace KspBridge.Mod.Core
 
         public PlanStep CurrentStep => StepIndex < Steps.Count ? Steps[StepIndex] : null;
 
-        public Dictionary<string, object> ToDict() => new Dictionary<string, object>
+        /// <summary>Summary without progress values (ended plans, get_status).</summary>
+        public Dictionary<string, object> ToDict() => ToDict(null);
+
+        /// <summary>Summary; with <paramref name="now"/> (UT) the running plan's progress values are added.</summary>
+        public Dictionary<string, object> ToDict(double? now)
         {
-            ["id"] = Id,
-            ["state"] = State,
-            ["step_index"] = StepIndex,
-            ["step_type"] = CurrentStep?.Type,
-            ["step_count"] = Steps.Count,
-            ["end_reason"] = EndReason,
-            ["end_detail"] = EndDetail,
-            ["submitted_ut"] = SubmittedUT,
-            ["ended_ut"] = EndedUT,
-            ["steps"] = Steps.Select((s, i) => (object)s.ToDict(i)).ToList(),
-        };
+            Dictionary<string, object> summary = new Dictionary<string, object>
+            {
+                ["id"] = Id,
+                ["state"] = State,
+                ["step_index"] = StepIndex,
+                ["step_type"] = CurrentStep?.Type,
+                ["step_count"] = Steps.Count,
+                ["end_reason"] = EndReason,
+                ["end_detail"] = EndDetail,
+                ["submitted_ut"] = SubmittedUT,
+                ["ended_ut"] = EndedUT,
+                ["steps"] = Steps.Select((s, i) => (object)s.ToDict(i)).ToList(),
+            };
+            if (now.HasValue && EndReason == null)
+                PlanProgress.Add(this, summary, now.Value);
+            return summary;
+        }
+    }
+
+    /// <summary>
+    /// Progress values of a running plan (get_plan current, submit responses). Step values are null while the current step has
+    /// not begun (right after submit, and between steps until the next physics frame). A step's progress report never affects
+    /// the plan: an exception is shown as step_progress_error.
+    /// </summary>
+    internal static class PlanProgress
+    {
+        public static void Add(Plan plan, Dictionary<string, object> summary, double now)
+        {
+            summary["elapsed_s"] = now - plan.SubmittedUT;
+            PlanStep step = plan.CurrentStep;
+            bool begun = step != null && step.Begun && step.State == "running" && step.StartUT.HasValue;
+            double? stepElapsed = begun ? now - step.StartUT.Value : (double?)null;
+            summary["step_elapsed_s"] = stepElapsed;
+            summary["step_timeout_remaining_s"] = begun && step.TimeoutS.HasValue
+                ? Math.Max(0, step.TimeoutS.Value - stepElapsed.Value)
+                : (double?)null;
+
+            object progress = null;
+            string error = null;
+            if (begun && step.Run is IStepProgress reporter)
+            {
+                try
+                {
+                    step.Context.UT = now;
+                    progress = reporter.Progress(step.Context);
+                }
+                catch (Exception ex)
+                {
+                    progress = null;
+                    error = ex.GetType().Name + ": " + ex.Message;
+                }
+            }
+            summary["step_progress"] = progress;
+            summary["step_progress_error"] = error;
+        }
     }
 }

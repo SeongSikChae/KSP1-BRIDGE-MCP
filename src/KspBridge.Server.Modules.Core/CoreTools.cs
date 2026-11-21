@@ -72,6 +72,7 @@ namespace KspBridge.Server.Modules.Core
                      "disconnected. plan = {\"steps\":[{\"type\":\"<step type>\",\"params\":{...},\"timeout_s\":<optional>}]}. " +
                      "Step types and their params come from list_step_types. A plan needs the flight scene with ready=true. " +
                      "If a plan is running, set replace=true to end it (end_reason=planner_abort) and start this one. " +
+                     "The answer is the plan summary with the same progress values as get_plan's current. " +
                      "Follow progress with get_plan / get_flight_events.")]
         public async Task<string> SubmitPlan(
             [Description("Plan object: {\"steps\":[{\"type\":\"wait\",\"params\":{\"seconds\":5}}]}")] JsonElement plan,
@@ -84,7 +85,11 @@ namespace KspBridge.Server.Modules.Core
 
         [McpServerTool(Name = "get_plan", ReadOnly = true, Idempotent = true)]
         [Description("The running plan (current) and the last ended plan (last) with every step's state, end_reason " +
-                     "(completed, planner_abort, step_failed, timeout, reload, vessel_change, scene_change, new_flight) and end_detail.")]
+                     "(completed, planner_abort, step_failed, timeout, reload, vessel_change, scene_change, new_flight) and end_detail. " +
+                     "current also has progress values in game seconds: elapsed_s (since submit), step_elapsed_s, " +
+                     "step_timeout_remaining_s (null without timeout_s), step_progress (what the step reports, e.g. wait: target_s, " +
+                     "remaining_s; null when the step reports nothing) and step_progress_error. Step values are null until the current " +
+                     "step begins (right after submit and between steps). Works in any scene and never fails.")]
         public async Task<string> GetPlan(CancellationToken cancellationToken)
             => (await bridge.CallAsync("core", "plan.get", null, cancellationToken)).ToJson();
 

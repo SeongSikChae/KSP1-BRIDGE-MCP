@@ -28,6 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="KspBridge.Mod.Modules.Debug.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\KspBridge.Mod.Core\KspBridge.Mod.Core.csproj" Private="false" />
     <ProjectReference Include="..\KspBridge.Mod.Loader\KspBridge.Mod.Loader.csproj" Private="false" />
   </ItemGroup>

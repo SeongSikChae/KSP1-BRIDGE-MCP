@@ -29,7 +29,7 @@ namespace KspBridge.Mod.Core
         private object PlanGet()
             => new Dictionary<string, object>
             {
-                ["current"] = logic.Coordinator.CurrentSummary,
+                ["current"] = logic.Coordinator.CurrentSummaryWithProgress(),
                 ["last"] = logic.Coordinator.LastSummary,
             };
 

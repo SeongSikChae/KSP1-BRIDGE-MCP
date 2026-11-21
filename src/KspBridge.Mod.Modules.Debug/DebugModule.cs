@@ -6,11 +6,14 @@ namespace KspBridge.Mod.Modules.Debug
 {
     /// <summary>
     /// Verification helpers so tests run through MCP alone (no clicking in the game): launch a craft,
-    /// revert to launch, go to the space center. Scene loads end a running plan through the core session tracking.
+    /// revert to launch, go to the space center, put the active vessel on a given orbit. Scene loads end a running plan through
+    /// the core session tracking.
     /// </summary>
     public sealed class DebugModule : IBridgeModule
     {
         private ModuleContext context;
+        private PendingOrbit pendingOrbit;
+        private int nextOrbitId = 1;
 
         public string Name => "debug";
 
@@ -20,6 +23,103 @@ namespace KspBridge.Mod.Modules.Debug
             context.AddHandler("launch", Launch);
             context.AddHandler("revert", _ => Revert());
             context.AddHandler("space_center", _ => SpaceCenter());
+            context.AddHandler("set_orbit.start", SetOrbitStart);
+            context.AddHandler("set_orbit.result", SetOrbitResult);
+            context.Subscriptions.Add(GameEvents.onGameSceneLoadRequested, scene => pendingOrbit?.Cancel("the scene changed to " + scene));
+            context.Subscriptions.Add(() => pendingOrbit?.Cancel("the debug module was reloaded"));
+        }
+
+        private static double Now => UnityEngine.Time.realtimeSinceStartup;
+
+        /// <summary>
+        /// Starts moving the active vessel to the given orbit with the game's set-orbit cheat (SetShipOrbit). The game puts the
+        /// vessel on rails and updates its situation a few frames later, so set_orbit.result is asked until it shows the orbit.
+        /// </summary>
+        private object SetOrbitStart(Dictionary<string, object> args)
+        {
+            RequireReadyGame();
+            Vessel vessel = context.Session.InFlight && FlightGlobals.fetch != null ? FlightGlobals.ActiveVessel : null;
+            if (vessel == null)
+                throw BridgeException.NotReady("set_orbit needs the flight scene with an active vessel (now " + context.Session.Scene + ")");
+
+            OrbitRequest request = OrbitRequest.Parse(args, Bodies(), vessel.mainBody.bodyName);
+            if (context.Coordinator.Running)
+                throw BridgeException.BadRequest("a plan is running; end it with abort_plan before set_orbit (nothing was changed)");
+            if (pendingOrbit != null && !pendingOrbit.CanReplace(Now))
+                throw BridgeException.BadRequest("set_orbit request " + pendingOrbit.Id + " is still in progress");
+
+            context.Log("debug set_orbit " + request.Body.Name + " Ap " + request.Apoapsis + " Pe " + request.Periapsis + " inc " + request.Inclination);
+            FlightGlobals.fetch.SetShipOrbit(request.Body.Index, request.Eccentricity, request.SemiMajorAxis, request.Inclination, 0, 0, 0, 0);
+            pendingOrbit = new PendingOrbit(nextOrbitId++, Now, request);
+            return new Dictionary<string, object> { ["request"] = pendingOrbit.Id, ["pending"] = true };
+        }
+
+        private object SetOrbitResult(Dictionary<string, object> args)
+        {
+            double value = args.Num("request", required: true).Value;
+            PendingOrbit pending = pendingOrbit;
+            if (pending == null || value != pending.Id)
+                throw BridgeException.BadRequest("'request' must be the number set_orbit.start returned");
+
+            if (pending.State == OrbitState.Waiting)
+            {
+                Vessel vessel = context.Session.InFlight && FlightGlobals.fetch != null ? FlightGlobals.ActiveVessel : null;
+                if (vessel != null && vessel.orbit != null && pending.Request.IsApplied(vessel.mainBody.bodyName, vessel.situation.ToString(),
+                        vessel.orbit.ApA, vessel.orbit.PeA))
+                {
+                    pending.Apply(new Dictionary<string, object>
+                    {
+                        ["applied"] = true,
+                        ["body"] = vessel.mainBody.bodyName,
+                        ["situation"] = vessel.situation.ToString(),
+                        ["apoapsis_m"] = vessel.orbit.ApA,
+                        ["periapsis_m"] = vessel.orbit.PeA,
+                        ["inclination_deg"] = vessel.orbit.inclination,
+                    });
+                }
+                else
+                {
+                    pending.Expire(Now);
+                }
+            }
+
+            switch (pending.State)
+            {
+                case OrbitState.Applied:
+                    return pending.Result;
+                case OrbitState.Waiting:
+                    return new Dictionary<string, object> { ["request"] = pending.Id, ["pending"] = true };
+                default:
+                    throw BridgeException.NotReady(pending.Reason);
+            }
+        }
+
+        private static List<OrbitBody> Bodies()
+        {
+            List<OrbitBody> bodies = new List<OrbitBody>();
+            for (int i = 0; i < FlightGlobals.Bodies.Count; i++)
+            {
+                CelestialBody b = FlightGlobals.Bodies[i];
+                if (b == null)
+                    continue;
+                double? terrainMax = null;
+                if (b.pqsController != null)
+                {
+                    double height = b.pqsController.radiusMax - b.pqsController.radius;
+                    if (height > 0)
+                        terrainMax = height;
+                }
+                bodies.Add(new OrbitBody
+                {
+                    Name = b.bodyName,
+                    Index = i,
+                    Radius = b.Radius,
+                    AtmosphereTop = b.atmosphere ? b.atmosphereDepth : (double?)null,
+                    TerrainMax = terrainMax,
+                    SphereOfInfluence = b.sphereOfInfluence,
+                });
+            }
+            return bodies;
         }
 
         private void RequireReadyGame()

@@ -57,7 +57,11 @@ namespace KspBridge.Mod.Core
         public Dictionary<string, object> LastSummary { get; set; }
         public int LastSession { get; set; } = -1;
 
+        /// <summary>The running plan without progress values (get_status reads it; it never calls a step's progress report).</summary>
         public Dictionary<string, object> CurrentSummary => current?.ToDict();
+
+        /// <summary>The running plan with progress values at the current UT (get_plan current).</summary>
+        public Dictionary<string, object> CurrentSummaryWithProgress() => current?.ToDict(SafeClock());
 
         public Dictionary<string, object> Submit(Dictionary<string, object> body, bool replace)
         {
@@ -112,7 +116,7 @@ namespace KspBridge.Mod.Core
             controlFailure = null;
             events.Add("plan_submitted", plan.Id, new Dictionary<string, object> { ["steps"] = plan.Steps.Count });
             PlanStarted?.Invoke();
-            return plan.ToDict();
+            return plan.ToDict(SafeClock());
         }
 
         public Dictionary<string, object> Abort(string reason, string detail)
