@@ -109,6 +109,10 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `get_flight` | flight | 활성 기체의 비행 상태: 위치·고도·속도·궤도 요소·자세·조종 상태·질량·추력·TWR·스테이지 Δv(`include`로 스테이지별 표·자원·천체 상수) |
 | `debug_launch`, `debug_revert`, `debug_space_center` | debug | 검증용 발사·되돌리기·우주센터 이동 |
 | `debug_set_orbit` | debug | 검증용: 활성 기체를 지정 Ap·Pe·경사각 궤도로 옮김(게임의 궤도 설정 치트) |
+| `debug_list_vessels` | debug | 검증용: 비행 장면의 기체 목록(id·이름·종류·상황·천체·로드·소유·활성·거리) |
+| `debug_switch_vessel` | debug | 검증용: 로드된 소유 기체로 활성 기체 전환(장면 재로드 없음, `force`로 게임의 전환 금지 상태 무시) |
+| `debug_save` | debug | 검증용: 이름 있는 저장(생략하면 `quicksave`, `persistent`는 쓰지 않음) |
+| `debug_load` | debug | 검증용: 비행 중 저장한 파일을 불러와 저장 때의 활성 기체로 비행 시작 |
 | `editor_enter`, `editor_leave` | editor | VAB/SPH 에디터 진입·시설 전환·우주센터로 이탈 |
 | `editor_list_parts` | editor | 쓸 수 있는 부품 목록(분류·검색·페이지) |
 | `editor_get_ship` | editor | 조립 중인 기체(부품 트리, 부착, 스테이지, 대칭, 질량) |
