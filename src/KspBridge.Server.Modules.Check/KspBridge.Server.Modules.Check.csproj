@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Reloadable server tool module. Contracts and the MCP SDK come from the host at runtime (not copied). -->
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KspBridge.Server.Contracts\KspBridge.Server.Contracts.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

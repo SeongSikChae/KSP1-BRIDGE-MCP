@@ -10,7 +10,7 @@ using System.Runtime.CompilerServices;
 namespace KspBridge.Server.Modules
 {
     /// <summary>
-    /// 서버 모듈 세대를 관리한다. 모든 MCP 세션이 공유하는 도구 컬렉션 <see cref="Tools"/>를 갖고,
+    /// 서버 모듈 세대를 관리한다. 모든 MCP 요청이 공유하는 도구 컬렉션 <see cref="Tools"/>를 갖고,
     /// 새 세대를 원자적으로 읽어 도구를 교체한 뒤 이전 세대 ALC를 내린다. 읽기에 실패하면 이전 세대를 유지한다.
     /// </summary>
     public sealed class ModuleHost : IServerHostInfo
@@ -33,7 +33,7 @@ namespace KspBridge.Server.Modules
 
         public string ModulesDir { get; }
 
-        /// <summary>모든 MCP 세션이 공유하는 도구 컬렉션(호스트 도구 + 현재 세대 모듈 도구).</summary>
+        /// <summary>모든 MCP 요청이 공유하는 도구 컬렉션(호스트 도구 + 현재 세대 모듈 도구).</summary>
         public McpServerPrimitiveCollection<McpServerTool> Tools { get; } = new();
 
         public string HostVersion { get; } = typeof(ModuleHost).Assembly.GetName().Version?.ToString() ?? "0";

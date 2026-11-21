@@ -22,9 +22,9 @@ MCP 클라이언트 ── http://127.0.0.1:65531/mcp ── KspBridge.Server (�
 
 양쪽 모두 **고정 호스트**와 **모듈 세대**로 나뉩니다.
 
-- 고정 호스트: 서버 프로세스, KSP Loader. 포트와 MCP 세션을 유지합니다.
+- 고정 호스트: 서버 프로세스, KSP Loader. 포트를 유지합니다.
 - 모듈 세대: 게시할 때마다 통째로 다시 읽힙니다.
-  - 서버: collectible `AssemblyLoadContext`로 읽고, 이전 세대는 언로드합니다. 열린 MCP 세션에는 `notifications/tools/list_changed`가 갑니다.
+  - 서버: collectible `AssemblyLoadContext`로 읽고, 이전 세대는 언로드합니다. `subscriptions/listen`으로 구독한 클라이언트에 `notifications/tools/list_changed`가 갑니다.
   - KSP: `Assembly.Load(byte[])`로 읽습니다. Mono는 어셈블리를 내리지 못하므로 이전 세대는 메모리에 남습니다.
   - 실행 중인 계획은 `end_reason=reload`로 끝나고, 조종 콜백도 해제됩니다.
 
@@ -85,7 +85,7 @@ Claude Code에는 한 번만 등록합니다.
 claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 ```
 
-서버 프로세스를 다시 실행하면 기존 MCP 세션이 끊길 수 있습니다. 그때는 클라이언트에서 다시 연결합니다(Claude Code: `/mcp`).
+서버는 최신 MCP 프로토콜(`2026-07-28`)로 세션 없이 동작합니다. 서버 프로세스를 다시 실행한 뒤 모듈을 게시해도 도구 목록이 바뀌지 않으면 클라이언트에서 MCP를 다시 연결합니다(Claude Code: `/mcp`).
 
 종료 코드는 다음과 같습니다.
 
@@ -116,6 +116,9 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `editor_remove`, `editor_replace`, `editor_move` | editor | 제거(대칭 짝·아래 부품 포함), 다른 부품으로 교체, 이동·회전 |
 | `editor_get_part_settings`, `editor_set_part_settings` | editor | 에디터에서 바꿀 수 있는 자원 양·모듈 설정(추력 제한, 짐벌, 분리 힘 등) |
 | `editor_get_stages`, `editor_set_stage`, `editor_swap_stages` | editor | 스테이지 조회, 부품 옮기기, 두 스테이지 바꾸기 |
+| `check_ship` | check | 발사 전 조립 점검: 지정 천체 기준 스테이지별 질량·Δv·TWR·연소 시간, 무게중심 어긋남, 구조 경고 8종 |
+
+`check_ship`은 기체를 바꾸지 않는다. 스테이지 값은 게임 Δv 계산기의 값이며, 다른 천체를 지정하면 점검하는 동안만 게임 Δv 창의 천체가 그 천체로 잠깐 바뀌었다가 원래 천체로 돌아온다.
 
 조립 편집 도구는 기체를 craft로 다시 만들어 에디터에 다시 불러오는 방식이다. 편집할 때마다 아래 두 파일을 쓴다.
 

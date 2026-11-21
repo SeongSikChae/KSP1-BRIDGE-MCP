@@ -100,20 +100,22 @@ namespace KspBridge.Server
             builder.Services.AddSingleton<ModuleHost>();
             builder.Services.AddSingleton<IServerHostInfo>(sp => sp.GetRequiredService<ModuleHost>());
             builder.Services.AddHostedService<ManifestWatcher>();
+            builder.Services.AddSingleton<ToolListSubscriptions>();
             builder.Services.AddMcpServer(options =>
             {
                 options.ServerInfo = new() { Name = "kspbridge", Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0" };
             }).WithHttpTransport(transport =>
             {
-                // 서버가 먼저 list_changed를 보내려면 세션을 유지해야 한다(기본값 Stateless에서는 보낼 수 없음).
-                transport.SessionMode = HttpServerSessionMode.Stateful;
-                // HTTP 세션마다 옵션이 따로 만들어지므로, 모든 세션이 모듈 호스트의 공유 도구 컬렉션을 쓰게 한다.
+                // 최신 프로토콜(2026-07-28)은 세션이 없다. 서버가 먼저 보내는 알림은 subscriptions/listen 스트림으로만 간다.
+                transport.SessionMode = HttpServerSessionMode.Stateless;
+                // 옵션은 요청마다 만들어지므로, 모든 요청이 모듈 호스트의 공유 도구 컬렉션과 listen 처리기를 쓰게 한다.
                 transport.ConfigureSessionOptions = (context, options, _) =>
                 {
                     options.ToolCollection = context.RequestServices.GetRequiredService<ModuleHost>().Tools;
                     options.Capabilities ??= new();
                     options.Capabilities.Tools ??= new();
                     options.Capabilities.Tools.ListChanged = true;
+                    options.Handlers.SubscriptionsListenHandler = context.RequestServices.GetRequiredService<ToolListSubscriptions>().HandleAsync;
                     return Task.CompletedTask;
                 };
             });
