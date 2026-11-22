@@ -74,4 +74,29 @@ namespace KspBridge.Mod.Core
 
         public IStepType Find(string name) => name != null && types.TryGetValue(name, out IStepType type) ? type : null;
     }
+
+    /// <summary>Plan guards registered by modules, in the order they are asked (priority, then registration).</summary>
+    public sealed class GuardRegistry
+    {
+        private readonly List<IPlanGuard> guards = new List<IPlanGuard>();
+        private readonly Dictionary<string, GuardOption> options = new Dictionary<string, GuardOption>(StringComparer.Ordinal);
+
+        public IReadOnlyList<IPlanGuard> Guards => guards;
+
+        /// <summary>Every abort_on key of the registered guards.</summary>
+        public IEnumerable<GuardOption> Options => options.Values;
+
+        public void Add(IPlanGuard guard)
+        {
+            foreach (GuardOption option in guard.Options)
+            {
+                if (options.ContainsKey(option.Key))
+                    throw new InvalidOperationException("Duplicate guard option " + option.Key);
+            }
+            foreach (GuardOption option in guard.Options)
+                options[option.Key] = option;
+            int index = guards.FindIndex(g => g.Priority > guard.Priority);
+            guards.Insert(index < 0 ? guards.Count : index, guard);
+        }
+    }
 }

@@ -4,20 +4,33 @@ using UnityEngine;
 namespace KspBridge.Mod.Modules.Flight
 {
     /// <summary>Reads the active vessel's state from the game into the pure <see cref="FlightData"/> (KSP side).</summary>
-    internal static class FlightSnapshot
+    public static class FlightSnapshot
     {
         /// <summary>The editor_get_stages rule: the part has a staging icon and staging is on. A separator that has fired
         /// removes its own icon and turns staging off, so it is not counted (D020).</summary>
-        public static bool IsStaged(Part part)
+        internal static bool IsStaged(Part part)
             => (part.hasStagingIcon || (part.stackIcon != null && part.stackIcon.StageIcon != null)) && part.stagingOn;
 
-        public static FlightData Take(Vessel v)
+        /// <summary>Everything get_flight answers, with the staged parts, the resources and the game's delta-v values.</summary>
+        internal static FlightData Take(Vessel v)
+        {
+            FlightData d = TakeBasic(v);
+            AddPartLists(v, d);
+            AddDeltaV(v, d);
+            return d;
+        }
+
+        /// <summary>
+        /// The values that cost no list per part, so a module may read them every physics frame. Staged parts, resources and
+        /// delta-v are left empty; FlightReport gives the same answer for the rest.
+        /// </summary>
+        public static FlightData TakeBasic(Vessel v)
         {
             CelestialBody body = v.mainBody;
             Orbit orbit = v.orbit;
             Transform reference = v.ReferenceTransform;
 
-            FlightData d = new FlightData
+            return new FlightData
             {
                 Vessel = v.GetDisplayName(),
                 Situation = v.situation.ToString(),
@@ -50,6 +63,7 @@ namespace KspBridge.Mod.Modules.Flight
                 Sas = v.ActionGroups[KSPActionGroup.SAS],
                 Rcs = v.ActionGroups[KSPActionGroup.RCS],
                 Mass = v.GetTotalMass(),
+                Thrust = Thrust(v),
                 Gravity = FlightGlobals.getGeeForceAtPosition(v.CoMD).magnitude,
                 CurrentStage = v.currentStage,
                 BodyInfo = new BodyData
@@ -62,15 +76,32 @@ namespace KspBridge.Mod.Modules.Flight
                     SphereOfInfluence = body.sphereOfInfluence,
                 },
             };
+        }
 
-            Dictionary<string, ResourceTotal> resources = new Dictionary<string, ResourceTotal>();
+        private static double Thrust(Vessel v)
+        {
             double thrust = 0;
             foreach (Part p in v.parts)
             {
                 if (p == null)
                     continue;
-                foreach (ModuleEngines engine in p.FindModulesImplementing<ModuleEngines>())
-                    thrust += engine.finalThrust;
+                PartModuleList modules = p.Modules;
+                for (int i = 0; i < modules.Count; i++)
+                {
+                    if (modules[i] is ModuleEngines engine)
+                        thrust += engine.finalThrust;
+                }
+            }
+            return thrust;
+        }
+
+        private static void AddPartLists(Vessel v, FlightData d)
+        {
+            Dictionary<string, ResourceTotal> resources = new Dictionary<string, ResourceTotal>();
+            foreach (Part p in v.parts)
+            {
+                if (p == null)
+                    continue;
                 if (IsStaged(p))
                     d.StagedParts.Add(new StagedPart(p.inverseStage, p.State == PartStates.ACTIVE || p.State == PartStates.DEACTIVATED));
                 foreach (PartResource r in p.Resources)
@@ -83,9 +114,11 @@ namespace KspBridge.Mod.Modules.Flight
                     total.Max += r.maxAmount;
                 }
             }
-            d.Thrust = thrust;
             d.Resources.AddRange(resources.Values);
+        }
 
+        private static void AddDeltaV(Vessel v, FlightData d)
+        {
             VesselDeltaV vd = v.VesselDeltaV;
             if (vd == null)
             {
@@ -119,7 +152,6 @@ namespace KspBridge.Mod.Modules.Flight
                     });
                 }
             }
-            return d;
         }
 
         private static Vec V(Vector3d v) => new Vec(v.x, v.y, v.z);

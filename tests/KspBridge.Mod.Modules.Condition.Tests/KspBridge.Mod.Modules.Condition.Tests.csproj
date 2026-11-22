@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Tests the parts of the condition module that do not touch game state (ConditionArgs, ConditionValues, ConditionSet, NoThrustRule,
+       LossLog). net472 like the code under test. KSP assemblies are copied so signatures that mention KSP types load and the
+       Vessel.Situations names can be read; no Unity/KSP API is called. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <KspManaged>$(KspDir)\KSP_x64_Data\Managed</KspManaged>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" PrivateAssets="all" />
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(KspManaged)\Assembly-CSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(KspManaged)\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(KspManaged)\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Core\KspBridge.Mod.Core.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Loader\KspBridge.Mod.Loader.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Flight\KspBridge.Mod.Modules.Flight.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Condition\KspBridge.Mod.Modules.Condition.csproj" />
+  </ItemGroup>
+
+</Project>

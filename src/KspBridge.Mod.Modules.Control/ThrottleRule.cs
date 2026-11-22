@@ -6,8 +6,8 @@ namespace KspBridge.Mod.Modules.Control
     internal static class ThrottleRule
     {
         /// <summary>
-        /// The plan did not complete and its vessel is still there: abort, step failure, timeout or reload. A scene change, a new
-        /// flight and a vessel change leave the throttle alone.
+        /// The plan did not complete and its vessel is still there: abort, step failure, timeout, reload, part loss or no thrust. A
+        /// scene change, a new flight, a vessel change and a destroyed vessel leave the throttle alone.
         /// </summary>
         public static bool ShouldCut(string endReason, bool sameVessel)
         {
@@ -19,6 +19,8 @@ namespace KspBridge.Mod.Modules.Control
                 case EndReasons.StepFailed:
                 case EndReasons.Timeout:
                 case EndReasons.Reload:
+                case EndReasons.PartLoss:
+                case EndReasons.NoThrust:
                     return true;
                 default:
                     return false;

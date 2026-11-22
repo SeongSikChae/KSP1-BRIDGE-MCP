@@ -21,9 +21,10 @@ namespace KspBridge.Mod.Modules.Control
 
         public string Describe()
             => "Set the throttle to params.value (0..1, required) as if the player had. Completes on the same frame. The value stays in " +
-               "the later steps and after the plan completes; when the plan ends by planner_abort, step_failed, timeout or reload the " +
-               "throttle is set to 0 (event throttle_cut). Fails the plan (step_failed) when there is no active vessel or the vessel is " +
-               "not controllable (no working control source: no crew, power or signal); the failing step changes nothing.";
+               "the later steps and after the plan completes; when the plan ends by planner_abort, step_failed, timeout, reload, " +
+               "part_loss or no_thrust the throttle is set to 0 (event throttle_cut). Fails the plan (step_failed) when there is no " +
+               "active vessel or the vessel is not controllable (no working control source: no crew, power or signal); the failing " +
+               "step changes nothing.";
 
         public IStepRun Create(Dictionary<string, object> parameters) => new ThrottleRun(events, ControlArgs.Throttle(parameters));
 

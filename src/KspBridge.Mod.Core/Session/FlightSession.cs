@@ -40,7 +40,12 @@ namespace KspBridge.Mod.Core
             string reason = BlockReason();
             if (reason != null)
                 return reason;
-            return InFlight ? null : "plans run in the flight scene (now " + Scene + ")";
+            if (!InFlight)
+                return "plans run in the flight scene (now " + Scene + ")";
+            // The game keeps a destroyed vessel active until the player leaves or another vessel takes over.
+            return FlightGlobals.ActiveVessel.state == Vessel.State.DEAD
+                ? "the active vessel is destroyed; revert the flight or switch to another vessel"
+                : null;
         }
 
         public void Hook(Subscriptions subscriptions, ICoordinator coordinator)

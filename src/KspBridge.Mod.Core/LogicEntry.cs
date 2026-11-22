@@ -21,6 +21,7 @@ namespace KspBridge.Mod.Core
         internal ILoaderHost Host { get; private set; }
         internal Router Router { get; private set; }
         internal StepRegistry Steps { get; private set; }
+        internal GuardRegistry Guards { get; private set; }
         internal Subscriptions Subscriptions { get; private set; }
         internal EventLog Events { get; private set; }
         internal Coordinator Coordinator { get; private set; }
@@ -32,10 +33,11 @@ namespace KspBridge.Mod.Core
             Host = host;
             Router = new Router(host.LogError);
             Steps = new StepRegistry();
+            Guards = new GuardRegistry();
             Subscriptions = new Subscriptions(host.LogError);
             Events = new EventLog(Clock);
             Session = new FlightSession();
-            Coordinator = new Coordinator(Steps, Events, Clock, ActiveVessel, Session.PlanBlockReason, () => Session.Id);
+            Coordinator = new Coordinator(Steps, Events, Clock, ActiveVessel, Session.PlanBlockReason, () => Session.Id, Guards);
             Controller = new Controller(Coordinator);
             Subscriptions.Add(() => Controller.Detach());
 
@@ -78,7 +80,7 @@ namespace KspBridge.Mod.Core
                 foreach (Type type in SafeTypes(assembly).Where(t => typeof(IBridgeModule).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface))
                 {
                     IBridgeModule module = (IBridgeModule)Activator.CreateInstance(type);
-                    module.Register(new ModuleContext(module.Name, Router, Steps, Subscriptions, Coordinator, Events, Host.Log, Session));
+                    module.Register(new ModuleContext(module.Name, Router, Steps, Subscriptions, Coordinator, Events, Host.Log, Session, Guards));
                     Host.Log("module " + module.Name + " registered (" + assembly.GetName().Name + ")");
                 }
             }

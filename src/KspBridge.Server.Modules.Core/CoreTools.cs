@@ -27,8 +27,8 @@ namespace KspBridge.Server.Modules.Core
         [McpServerTool(Name = "get_status", ReadOnly = true, Idempotent = true)]
         [Description("Bridge and game status: scene, ready (requests may touch the game), versions of server host/modules, mod loader/logic " +
                      "and whether their protocol matches, reload generations, active vessel (name, situation, altitude), the current plan " +
-                     "(null when no plan belongs to this flight), and the controller (attached, bridge_flybywire_handlers). Call it first and " +
-                     "before any scene change; if mod.ok is false the error says why (KSP not running, not loaded, busy).")]
+                     "(null when no plan belongs to this flight; with its abort_on), and the controller (attached, " +
+                     "bridge_flybywire_handlers). Call it first and before any scene change; if mod.ok is false the error says why (KSP not running, not loaded, busy).")]
         public async Task<string> GetStatus(CancellationToken cancellationToken)
         {
             BridgeResult mod = await bridge.CallAsync("core", "status", null, cancellationToken);
@@ -69,8 +69,13 @@ namespace KspBridge.Server.Modules.Core
 
         [McpServerTool(Name = "submit_plan", Destructive = false)]
         [Description("Submit a flight plan to the in-game Coordinator. It runs step by step on physics frames even if you are slow or " +
-                     "disconnected. plan = {\"steps\":[{\"type\":\"<step type>\",\"params\":{...},\"timeout_s\":<optional>}]}. " +
-                     "Step types and their params come from list_step_types. A plan needs the flight scene with ready=true. " +
+                     "disconnected. plan = {\"steps\":[{\"type\":\"<step type>\",\"params\":{...},\"timeout_s\":<optional>}]," +
+                     "\"abort_on\":<optional>}. " +
+                     "Step types and their params come from list_step_types. A plan needs the flight scene with ready=true and an " +
+                     "active vessel that is not destroyed. The plan ends by itself when the vessel is destroyed (vessel_destroyed, always on) and, unless " +
+                     "abort_on={\"part_loss\":false}, when it loses a part by an explosion or a broken joint (part_loss; staging is no " +
+                     "loss). abort_on={\"no_thrust\":true} also ends it when the throttle is up and every engine that ran is out " +
+                     "(no_thrust; off by default so a plan can wait for burnout and stage). " +
                      "If a plan is running, set replace=true to end it (end_reason=planner_abort) and start this one. " +
                      "The answer is the plan summary with the same progress values as get_plan's current. " +
                      "Follow progress with get_plan / get_flight_events.")]
@@ -85,7 +90,8 @@ namespace KspBridge.Server.Modules.Core
 
         [McpServerTool(Name = "get_plan", ReadOnly = true, Idempotent = true)]
         [Description("The running plan (current) and the last ended plan (last) with every step's state, end_reason " +
-                     "(completed, planner_abort, step_failed, timeout, reload, vessel_change, scene_change, new_flight) and end_detail. " +
+                     "(completed, planner_abort, step_failed, timeout, reload, vessel_change, scene_change, new_flight, " +
+                     "vessel_destroyed, part_loss, no_thrust) and end_detail, and abort_on (which safety aborts the plan has on). " +
                      "current also has progress values in game seconds: elapsed_s (since submit), step_elapsed_s, " +
                      "step_timeout_remaining_s (null without timeout_s), step_progress (what the step reports, e.g. wait: target_s, " +
                      "remaining_s; null when the step reports nothing) and step_progress_error. Step values are null until the current " +
@@ -104,8 +110,11 @@ namespace KspBridge.Server.Modules.Core
 
         [McpServerTool(Name = "get_flight_events", ReadOnly = true, Idempotent = true)]
         [Description("Flight events after seq 'since' (plan_submitted, step_started, step_completed, plan_completed, plan_aborted, " +
-                     "hold_released, plan_end_error, logic_started, and from control steps throttle_cut, stage_activated, " +
-                     "action_group_changed), oldest first. Pass the returned last_seq as 'since' next time to read only new events.")]
+                     "hold_released, plan_end_error, plan_guard_error, logic_started, from control steps throttle_cut, stage_activated, " +
+                     "action_group_changed, from wait_until condition_met (every condition with its value), and parts_lost (count and " +
+                     "parts: name, kind exploded/broke_off, cause crash, collision, crash_splashdown, overheat, over_g, over_pressure " +
+                     "or null) whenever the vessel loses parts while a plan runs), oldest first. " +
+                     "Pass the returned last_seq as 'since' next time to read only new events.")]
         public async Task<string> GetFlightEvents(
             [Description("Return events with seq greater than this")] long since = 0,
             [Description("Maximum number of events")] int limit = 100,

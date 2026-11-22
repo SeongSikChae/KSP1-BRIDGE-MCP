@@ -9,7 +9,9 @@ namespace KspBridge.Mod.Core
     {
         bool Running { get; }
 
-        /// <summary>Validates and starts a plan ({"steps":[{"type","params","timeout_s"}]}). Returns the plan summary.</summary>
+        /// <summary>
+        /// Validates and starts a plan ({"steps":[{"type","params","timeout_s"}],"abort_on":{...}}). Returns the plan summary.
+        /// </summary>
         Dictionary<string, object> Submit(Dictionary<string, object> plan, bool replace);
 
         /// <summary>Ends the running plan with <paramref name="reason"/>. Returns its summary, or null when no plan runs.</summary>
@@ -17,8 +19,8 @@ namespace KspBridge.Mod.Core
     }
 
     /// <summary>
-    /// Runs a submitted plan step by step on physics frames: begins the step, applies its timeout, asks it to judge
-    /// itself, and moves on or ends the plan. Keeps running regardless of the Planner (LLM) being slow or gone.
+    /// Runs a submitted plan step by step on physics frames: asks the guards, begins the step, applies its timeout, asks it to
+    /// judge itself, and moves on or ends the plan. Keeps running regardless of the Planner (LLM) being slow or gone.
     /// KSP-independent except through the injected clock/vessel/readiness, so the state machine is unit-tested.
     /// </summary>
     public sealed class Coordinator : ICoordinator
@@ -29,12 +31,15 @@ namespace KspBridge.Mod.Core
         private readonly Func<Vessel> vessel;
         private readonly Func<string> blockReason;
         private readonly Func<int> sessionId;
+        private readonly GuardRegistry guards;
         private Plan current;
         private string controlFailure;
+        private string guardFailure;
 
         public Coordinator(StepRegistry registry, EventLog events, Func<double> clock, Func<Vessel> vessel,
-            Func<string> blockReason, Func<int> sessionId)
+            Func<string> blockReason, Func<int> sessionId, GuardRegistry guards = null)
         {
+            this.guards = guards ?? new GuardRegistry();
             this.registry = registry;
             this.events = events;
             this.clock = clock;
@@ -73,7 +78,7 @@ namespace KspBridge.Mod.Core
             if (steps.Count == 0)
                 throw BridgeException.BadRequest("'steps' must not be empty");
 
-            Plan plan = new Plan { SessionId = sessionId(), SubmittedUT = clock() };
+            Plan plan = new Plan { SessionId = sessionId(), SubmittedUT = clock(), AbortOn = ParseAbortOn(body) };
             for (int i = 0; i < steps.Count; i++)
             {
                 if (!(steps[i] is Dictionary<string, object> step))
@@ -111,16 +116,46 @@ namespace KspBridge.Mod.Core
                 Finish(EndReasons.PlannerAbort, "replaced by a new plan");
             }
 
-            PlanScope scope = new PlanScope(this, plan);
-            foreach (PlanStep step in plan.Steps)
-                step.Context.Plan = scope;
-
             plan.Id = NextPlanId++;
+            PlanScope scope = new PlanScope(this, plan);
+            for (int i = 0; i < plan.Steps.Count; i++)
+            {
+                StepContext context = plan.Steps[i].Context;
+                context.Plan = scope;
+                context.PlanId = plan.Id;
+                context.StepIndex = i;
+            }
+
             current = plan;
             controlFailure = null;
+            guardFailure = null;
             events.Add("plan_submitted", plan.Id, new Dictionary<string, object> { ["steps"] = plan.Steps.Count });
+            StartGuards(plan);
             PlanStarted?.Invoke();
             return plan.ToDict(SafeClock());
+        }
+
+        /// <summary>The plan's abort_on with every known key: what the plan says, otherwise the guard's default.</summary>
+        private Dictionary<string, bool> ParseAbortOn(Dictionary<string, object> body)
+        {
+            Dictionary<string, bool> values = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (GuardOption option in guards.Options)
+                values[option.Key] = option.Default;
+            Dictionary<string, object> given = body.Obj("abort_on");
+            if (given == null)
+                return values;
+            foreach (KeyValuePair<string, object> pair in given)
+            {
+                if (!values.ContainsKey(pair.Key))
+                {
+                    throw BridgeException.BadRequest("abort_on: unknown key '" + pair.Key + "' (one of "
+                        + string.Join(", ", values.Keys) + ")");
+                }
+                values[pair.Key] = pair.Value is bool on
+                    ? on
+                    : throw BridgeException.BadRequest("abort_on." + pair.Key + " must be a boolean");
+            }
+            return values;
         }
 
         public Dictionary<string, object> Abort(string reason, string detail)
@@ -144,6 +179,9 @@ namespace KspBridge.Mod.Core
 
             try
             {
+                if (EndedByGuard(plan, step))
+                    return;
+
                 if (controlFailure != null)
                 {
                     // Also before Begin: a hold can fail between steps, and the next step must not act on the vessel then.
@@ -175,7 +213,12 @@ namespace KspBridge.Mod.Core
                 if (current != plan)
                     return;
                 if (result.Status == StepStatus.Done)
+                {
+                    // A plan never completes over trouble its own last step caused on this frame.
+                    if (plan.StepIndex + 1 >= plan.Steps.Count && EndedByGuard(plan, step))
+                        return;
                     CompleteStep(plan, step, ut);
+                }
                 else if (result.Status == StepStatus.Failed)
                     FailStep(step, result.Message);
             }
@@ -206,6 +249,68 @@ namespace KspBridge.Mod.Core
             {
                 // Judged on the next physics frame; never throw into KSP's input pipeline.
                 controlFailure = ex.GetType().Name + ": " + ex.Message;
+            }
+        }
+
+        private void StartGuards(Plan plan)
+        {
+            foreach (IPlanGuard guard in guards.Guards)
+            {
+                try
+                {
+                    guard.Start(plan.Id);
+                }
+                catch (Exception ex)
+                {
+                    // The plan must not run unwatched; judged on the next physics frame.
+                    guardFailure = guardFailure ?? ex.GetType().Name + ": " + ex.Message;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Asks every guard (each also records its own events) and ends the plan with the first trip, or fails the step when a
+        /// guard could not do its work and no other tripped.
+        /// </summary>
+        private bool EndedByGuard(Plan plan, PlanStep step)
+        {
+            GuardTrip trip = null;
+            string failure = guardFailure;
+            foreach (IPlanGuard guard in guards.Guards)
+            {
+                try
+                {
+                    GuardTrip found = guard.Check(key => plan.AbortOn.TryGetValue(key, out bool on) && on);
+                    trip = trip ?? found;
+                }
+                catch (Exception ex)
+                {
+                    failure = failure ?? ex.GetType().Name + ": " + ex.Message;
+                }
+            }
+            if (trip != null)
+                Finish(trip.Reason, trip.Detail);
+            else if (failure != null)
+                FailStep(step, "guard error: " + failure);
+            return current != plan;
+        }
+
+        private void StopGuards(Plan plan)
+        {
+            foreach (IPlanGuard guard in guards.Guards)
+            {
+                try
+                {
+                    guard.Stop();
+                }
+                catch (Exception ex)
+                {
+                    events.Add("plan_guard_error", plan.Id, new Dictionary<string, object>
+                    {
+                        ["guard"] = guard.GetType().Name,
+                        ["message"] = ex.GetType().Name + ": " + ex.Message,
+                    });
+                }
             }
         }
 
@@ -243,9 +348,11 @@ namespace KspBridge.Mod.Core
             plan.EndedUT = ut;
             current = null;
             controlFailure = null;
+            guardFailure = null;
 
             ReleaseHold(plan, reason);
             RunEndActions(plan, reason);
+            StopGuards(plan);
 
             Dictionary<string, object> summary = plan.ToDict();
             LastSummary = summary;

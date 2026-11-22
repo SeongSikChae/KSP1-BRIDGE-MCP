@@ -15,6 +15,9 @@ namespace KspBridge.Mod.Core
         public const string VesselChange = "vessel_change";
         public const string SceneChange = "scene_change";
         public const string NewFlight = "new_flight";
+        public const string VesselDestroyed = "vessel_destroyed";
+        public const string PartLoss = "part_loss";
+        public const string NoThrust = "no_thrust";
     }
 
     internal sealed class PlanStep
@@ -57,6 +60,9 @@ namespace KspBridge.Mod.Core
         public List<PlanStep> Steps = new List<PlanStep>();
         public IPlanHold Hold;
         public List<PlanEndAction> EndActions = new List<PlanEndAction>();
+
+        /// <summary>Every guard option and whether this plan has it on.</summary>
+        public Dictionary<string, bool> AbortOn = new Dictionary<string, bool>();
         public string State = "pending";   // pending, running, completed, aborted
         public int StepIndex;
         public string EndReason;
@@ -83,6 +89,7 @@ namespace KspBridge.Mod.Core
                 ["end_detail"] = EndDetail,
                 ["submitted_ut"] = SubmittedUT,
                 ["ended_ut"] = EndedUT,
+                ["abort_on"] = AbortOn.ToDictionary(o => o.Key, o => (object)o.Value),
                 ["steps"] = Steps.Select((s, i) => (object)s.ToDict(i)).ToList(),
             };
             if (now.HasValue && EndReason == null)

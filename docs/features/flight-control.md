@@ -10,13 +10,13 @@ Controller 기본 제어. 스로틀·자세·스테이징·액션 그룹을 계�
 - 자세 유지: 자세 단계가 시작된 뒤 풀릴 때까지 Mod가 활성 기체의 기수를 목표 방향으로 조종하는 상태. 한 번에 하나만 있다.
 - 조종 불가: 활성 기체의 `Vessel.IsControllable`이 거짓인 상태(게임의 `Vessel.CurrentControlLevel`이 `NONE`. 부분 조종 `PARTIAL_UNMANNED`·`PARTIAL_MANNED`는 조종 불가가 아님). 이때 게임은 플레이어의 기체 조작 입력을 잠그고 엔진은 스로틀 값을 받지 않는다. 조종 입력(`Vessel.ctrlState`)을 직접 읽는 부품은 Mod의 입력에 계속 움직인다(D023).
 - 정렬: 기수 방향과 목표 방향 사이 각도가 허용각 이하이고(롤을 지정했으면 롤 오차도 허용각 이하), 기체 각속도 크기가 정지 기준 이하인 상태. 허용각의 기본값은 2°, 정지 기준의 기본값은 0.5°/s이다(D016).
-- 스로틀을 내리는 종료 사유: `planner_abort`·`step_failed`·`timeout`·`reload`(D005·D006).
+- 스로틀을 내리는 종료 사유: `planner_abort`·`step_failed`·`timeout`·`reload`(D005·D006)·`part_loss`·`no_thrust`(docs/features/flight-condition.md의 안전 중단).
 
 ## 요구(완료 조건)
 
 - R1. 기본 제어가 Mod 모듈과 MCP 서버 모듈 쌍(`control`)으로 더해지고 핫리로드로 반영된다. 단계 종류 `throttle`·`attitude`·`attitude_off`·`stage`·`action_group`이 `list_step_types`에 나오고, 각 설명에 인자(이름·범위·기본값)와 완료·실패 조건이 들어간다.
 - R2. `throttle`은 `params.value`(0 이상 1 이하)를 받아 그 단계가 시작된 물리 프레임에 활성 기체의 스로틀을 그 값으로 바꾸고 같은 프레임에 완료된다. 바꾼 값은 뒤 단계(조종 입력을 넣지 않는 `wait` 포함) 동안과 계획이 `completed`로 끝난 뒤에도 그대로 남는다(D001). 단계가 시작될 때 활성 기체가 조종 불가이면 스로틀을 바꾸지 않고 단계가 실패해 계획이 `step_failed`로 끝난다(D022). 값이 없거나 범위를 벗어나거나 수가 아니면 계획 제출이 `bad_request`이다.
-- R3. 계획이 스로틀을 내리는 종료 사유로 끝나면, 그 계획에서 스로틀을 바꾼 `throttle` 단계가 하나라도 있었고 종료 시점의 활성 기체가 그 계획을 실행하던 기체와 같을 때 스로틀을 0으로 내리고 이벤트 `throttle_cut`을 남긴다(D005·D006). `completed`·`new_flight`·`scene_change`·`vessel_change`로 끝나거나 스로틀을 바꾼 `throttle` 단계가 없는 계획이면 스로틀을 바꾸지 않는다.
+- R3. 계획이 스로틀을 내리는 종료 사유로 끝나면, 그 계획에서 스로틀을 바꾼 `throttle` 단계가 하나라도 있었고 종료 시점의 활성 기체가 그 계획을 실행하던 기체와 같을 때 스로틀을 0으로 내리고 이벤트 `throttle_cut`을 남긴다(D005·D006). `completed`·`new_flight`·`scene_change`·`vessel_change`·`vessel_destroyed`로 끝나거나 스로틀을 바꾼 `throttle` 단계가 없는 계획이면 스로틀을 바꾸지 않는다.
 - R4. `attitude`는 목표로 `params.pitch`(−90~90°)와 `params.heading`(0 이상 360 미만°)을 함께 받거나, `params.direction`(`prograde`·`retrograde`·`normal`·`antinormal`·`radial_out`·`radial_in`·`surface_prograde`·`surface_retrograde`) 하나를 받는다. `params.roll`(−180~180°)은 피치·헤딩 목표일 때만 받는다. 허용각(`tolerance_deg`)·정지 기준(`settle_rate_dps`)은 0보다 커야 한다. 목표가 둘 다 있거나 둘 다 없거나, 피치·헤딩 가운데 하나만 있거나, 모르는 방향 이름이거나, 범위를 벗어나거나, `direction`과 `roll`을 함께 주면 계획 제출이 `bad_request`이다.
 - R5. `attitude`가 시작되면 그 프레임에 SAS가 켜져 있으면 끄고(D003), 자세 유지를 그 목표로 시작한다(이미 자세 유지 중이면 목표를 바꾼다). 단계는 정렬된 물리 프레임에 완료되며(D002), 정렬되지 않으면 단계의 `timeout_s`로 계획이 `timeout`으로 끝난다. 기준 방향은 기체가 움직이는 동안 매 물리 프레임의 방향을 따르고, 방향을 정할 수 없으면(속도 1 m/s 미만 등) 정렬되지 않은 상태로 회전만 멈추며 기다린다(D014). 실행 중에는 `get_plan`의 단계 진행(`step_progress`)에 목표, 기수 방향의 각도 오차(°, 방향을 정할 수 없으면 `null`), 롤 오차(롤 지정 때만, °), 각속도 크기(°/s), 허용각, 정지 기준이 나온다. 단계가 시작될 때 활성 기체가 없거나 조종 불가이면 SAS와 자세 유지를 바꾸지 않고, 정렬을 기다리는 동안 조종 불가가 되면 그 물리 프레임에, 단계가 실패해 계획이 `step_failed`로 끝난다(D022).
 - R6. 자세 유지는 `attitude` 단계가 완료된 뒤에도 같은 계획의 뒤 단계(조종 입력을 넣지 않는 단계 포함) 동안 이어진다. 다른 `attitude` 단계, `attitude_off` 단계, SAS 켜기(R9), 계획 종료(사유와 상관없이) 가운데 먼저 일어난 것으로 풀리고, 풀린 사유가 이벤트 `hold_released`로 남는다. 풀린 뒤 Mod는 피치·요·롤 입력을 넣지 않는다. `attitude_off`는 그 단계가 시작된 프레임에 완료되며, 자세 유지가 없을 때도 실패하지 않는다. 자세 유지가 풀려도 SAS는 꺼진 채로 둔다(D003).
@@ -38,5 +38,6 @@ Controller 기본 제어. 스로틀·자세·스테이징·액션 그룹을 계�
 | 날짜 | 작업 | 바꾼 요구 | 변경 폴더 |
 |---|---|---|---|
 | 2026-11-22 | 기본-제어 | R1~R11 추가(기준 spec 처음 만듦) | docs/specs/기본-제어/ |
+| 2026-11-22 | 조건-종료 | R3 바꿈(스로틀을 내리는 종료 사유에 `part_loss`·`no_thrust`) | docs/specs/조건-종료/ |
 
 표에 없는 이전 변경: 기록 없음

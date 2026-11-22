@@ -59,6 +59,7 @@ namespace KspBridge.Mod.Core
                 ["step_index"] = plan["step_index"],
                 ["step_type"] = plan["step_type"],
                 ["end_reason"] = plan["end_reason"],
+                ["abort_on"] = plan.TryGetValue("abort_on", out object abortOn) ? abortOn : null,
             };
         }
 

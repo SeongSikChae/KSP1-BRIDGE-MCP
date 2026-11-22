@@ -86,6 +86,61 @@ namespace KspBridge.Mod.Core
         void AtEnd(string key, Action<string> action);
     }
 
+    /// <summary>One key of a plan's abort_on that a guard offers, and its value when the plan leaves it out.</summary>
+    public sealed class GuardOption
+    {
+        public GuardOption(string key, bool defaultOn)
+        {
+            Key = key;
+            Default = defaultOn;
+        }
+
+        public string Key { get; }
+        public bool Default { get; }
+    }
+
+    /// <summary>Why a guard ends the plan.</summary>
+    public sealed class GuardTrip
+    {
+        public GuardTrip(string reason, string detail)
+        {
+            Reason = reason;
+            Detail = detail;
+        }
+
+        /// <summary>Plan end reason (plan.end_reason).</summary>
+        public string Reason { get; }
+
+        /// <summary>What happened (plan.end_detail).</summary>
+        public string Detail { get; }
+    }
+
+    /// <summary>
+    /// Watches for trouble while a plan runs, whatever step is running, and ends the plan with its own reason. The Coordinator
+    /// asks it every physics frame before it judges the step, and once more before the plan completes. A guard only collects in
+    /// game events and reports from Check, so a plan never ends in the middle of the game's own event.
+    /// </summary>
+    public interface IPlanGuard
+    {
+        /// <summary>The abort_on keys this guard understands; empty when it is always on.</summary>
+        IReadOnlyList<GuardOption> Options { get; }
+
+        /// <summary>The trip of the guard with the lowest number wins when several trip together.</summary>
+        int Priority { get; }
+
+        /// <summary>A plan was accepted; anything seen before belongs to no plan.</summary>
+        void Start(int planId);
+
+        /// <summary>
+        /// Null when nothing is wrong. <paramref name="enabled"/> tells whether the plan turned a key of <see cref="Options"/> on.
+        /// An exception fails the plan's current step.
+        /// </summary>
+        GuardTrip Check(Func<string, bool> enabled);
+
+        /// <summary>The plan ended; what was seen but not checked yet may still be recorded as events.</summary>
+        void Stop();
+    }
+
     public enum StepStatus
     {
         Running,
@@ -116,6 +171,10 @@ namespace KspBridge.Mod.Core
 
         public Dictionary<string, object> Parameters { get; }
 
+        /// <summary>The plan the step belongs to and its place in it (0-based).</summary>
+        public int PlanId { get; internal set; }
+        public int StepIndex { get; internal set; }
+
         /// <summary>Game time (UT, seconds) now.</summary>
         public double UT { get; internal set; }
 
@@ -139,13 +198,15 @@ namespace KspBridge.Mod.Core
     {
         private readonly Router router;
         private readonly StepRegistry steps;
+        private readonly GuardRegistry guards;
 
         internal ModuleContext(string moduleName, Router router, StepRegistry steps, Subscriptions subscriptions,
-            ICoordinator coordinator, EventLog events, Action<string> log, FlightSession session)
+            ICoordinator coordinator, EventLog events, Action<string> log, FlightSession session, GuardRegistry guards = null)
         {
             ModuleName = moduleName;
             this.router = router;
             this.steps = steps;
+            this.guards = guards ?? new GuardRegistry();
             Subscriptions = subscriptions;
             Coordinator = coordinator;
             Events = events;
@@ -164,6 +225,8 @@ namespace KspBridge.Mod.Core
         public FlightSession Session { get; }
 
         public void AddStepType(IStepType stepType) => steps.Add(stepType);
+
+        public void AddGuard(IPlanGuard guard) => guards.Add(guard);
 
         public void AddHandler(string op, RequestHandler handler) => router.Add(ModuleName + "/" + op, handler);
     }
