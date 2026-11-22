@@ -53,6 +53,39 @@ namespace KspBridge.Mod.Core
         Dictionary<string, object> Progress(StepContext context);
     }
 
+    /// <summary>
+    /// Control input a module keeps on the vessel for the rest of the plan, across steps (e.g. holding an attitude). A plan has
+    /// at most one. The core calls it every frame of the vessel's OnFlyByWire before the running step, also between steps,
+    /// and releases it when the plan ends for any reason.
+    /// </summary>
+    public interface IPlanHold
+    {
+        /// <summary>Writes the input. An exception fails the plan's current step on the next physics frame.</summary>
+        void Control(FlightCtrlState state, Vessel vessel);
+
+        /// <summary>What is held, shown by get_plan (hold) and the hold_released event.</summary>
+        Dictionary<string, object> Describe();
+    }
+
+    /// <summary>What a step may keep beyond itself in the plan it runs in. Throws once that plan has ended.</summary>
+    public interface IPlanScope
+    {
+        /// <summary>The hold now in effect; null when there is none.</summary>
+        IPlanHold Hold { get; }
+
+        /// <summary>Puts <paramref name="hold"/> in effect; a hold already in effect is released with <paramref name="reason"/>.</summary>
+        void SetHold(IPlanHold hold, string reason);
+
+        /// <summary>Releases the hold with <paramref name="reason"/> (event hold_released); false when there is none.</summary>
+        bool ReleaseHold(string reason);
+
+        /// <summary>
+        /// Calls <paramref name="action"/> with the end reason once when the plan ends, after the hold is released. Only the first
+        /// action of a <paramref name="key"/> is kept. An exception is recorded as plan_end_error and never stops the end.
+        /// </summary>
+        void AtEnd(string key, Action<string> action);
+    }
+
     public enum StepStatus
     {
         Running,
@@ -93,6 +126,9 @@ namespace KspBridge.Mod.Core
 
         /// <summary>Active vessel; null outside flight.</summary>
         public Vessel Vessel { get; internal set; }
+
+        /// <summary>The plan the step runs in: hold and end actions that outlive the step.</summary>
+        public IPlanScope Plan { get; internal set; }
     }
 
     /// <summary>Handler for POST /api/{module}/{op}. Returns the data object; throw BridgeException for expected failures.</summary>

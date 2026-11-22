@@ -89,7 +89,9 @@ namespace KspBridge.Server.Modules.Core
                      "current also has progress values in game seconds: elapsed_s (since submit), step_elapsed_s, " +
                      "step_timeout_remaining_s (null without timeout_s), step_progress (what the step reports, e.g. wait: target_s, " +
                      "remaining_s; null when the step reports nothing) and step_progress_error. Step values are null until the current " +
-                     "step begins (right after submit and between steps). Works in any scene and never fails.")]
+                     "step begins (right after submit and between steps). current.hold is what the plan keeps holding across steps " +
+                     "(e.g. {type: attitude, target}; null when nothing is held) and hold_error why it could not be read. " +
+                     "Works in any scene and never fails.")]
         public async Task<string> GetPlan(CancellationToken cancellationToken)
             => (await bridge.CallAsync("core", "plan.get", null, cancellationToken)).ToJson();
 
@@ -102,7 +104,8 @@ namespace KspBridge.Server.Modules.Core
 
         [McpServerTool(Name = "get_flight_events", ReadOnly = true, Idempotent = true)]
         [Description("Flight events after seq 'since' (plan_submitted, step_started, step_completed, plan_completed, plan_aborted, " +
-                     "logic_started), oldest first. Pass the returned last_seq as 'since' next time to read only new events.")]
+                     "hold_released, plan_end_error, logic_started, and from control steps throttle_cut, stage_activated, " +
+                     "action_group_changed), oldest first. Pass the returned last_seq as 'since' next time to read only new events.")]
         public async Task<string> GetFlightEvents(
             [Description("Return events with seq greater than this")] long since = 0,
             [Description("Maximum number of events")] int limit = 100,

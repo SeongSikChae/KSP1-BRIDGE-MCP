@@ -22,6 +22,8 @@ namespace KspBridge.Mod.Core.Tests
             registry = new StepRegistry();
             registry.Add(new FakeStepType());
             registry.Add(new ProgressStepType());
+            registry.Add(new ScopeStepType());
+            ScopeStepType.Reset();
             events = new EventLog(() => ut);
             coordinator = new Coordinator(registry, events, () => ut, () => null, () => block, () => session);
             coordinator.PlanStarted += () => started++;
@@ -246,6 +248,322 @@ namespace KspBridge.Mod.Core.Tests
             Assert.IsNull(coordinator.CurrentSummaryWithProgress());
             Assert.IsFalse(coordinator.LastSummary.ContainsKey("elapsed_s"));
             Assert.IsFalse(coordinator.LastSummary.ContainsKey("step_progress"));
+        }
+
+        [TestMethod]
+        public void Hold_IsCalledBeforeTheStep_InLaterSteps_AndBetweenSteps()
+        {
+            List<string> calls = new List<string>();
+            FakeHold hold = new FakeHold { OnControl = () => calls.Add("hold") };
+            ScopeStepType.OnBegin = c =>
+            {
+                if (c.Plan.Hold == null)
+                    c.Plan.SetHold(hold, "first");
+            };
+            ScopeStepType.OnControl = () => calls.Add("step");
+            coordinator.Submit(Plan(ScopeStep(), ScopeStep(), Step(60)), replace: false);
+
+            coordinator.Control(null);
+            Assert.AreEqual(0, calls.Count, "no hold yet and the first step has not begun");
+
+            Frame();   // step 0 begins and completes
+            coordinator.Control(null);   // between steps
+            CollectionAssert.AreEqual(new[] { "hold" }, calls);
+
+            calls.Clear();
+            ScopeStepType.Finish = false;
+            Frame();   // step 1 begins and keeps running
+            coordinator.Control(null);
+            CollectionAssert.AreEqual(new[] { "hold", "step" }, calls);
+
+            calls.Clear();
+            ScopeStepType.Finish = true;
+            Frame();
+            Frame();   // the plain step runs
+            coordinator.Control(null);
+            CollectionAssert.AreEqual(new[] { "hold" }, calls);
+        }
+
+        [TestMethod]
+        public void Hold_Replaced_Released_AndEndedByCompletion_LeaveEventsWithReasons()
+        {
+            FakeHold first = new FakeHold { Name = "a" };
+            FakeHold second = new FakeHold { Name = "b" };
+            int step = 0;
+            ScopeStepType.OnBegin = c =>
+            {
+                switch (step++)
+                {
+                    case 0:
+                        Assert.IsFalse(c.Plan.ReleaseHold("nothing"));
+                        c.Plan.SetHold(first, "x");
+                        break;
+                    case 1:
+                        c.Plan.SetHold(second, "attitude");
+                        break;
+                    case 2:
+                        Assert.IsTrue(c.Plan.ReleaseHold("attitude_off"));
+                        Assert.IsNull(c.Plan.Hold);
+                        break;
+                    default:
+                        c.Plan.SetHold(first, "x");
+                        break;
+                }
+            };
+            coordinator.Submit(Plan(ScopeStep(), ScopeStep(), ScopeStep(), ScopeStep()), replace: false);
+            Run(1);
+
+            CollectionAssert.AreEqual(new[] { "attitude:a", "attitude_off:b", "completed:a" }, HoldReleases());
+            string[] types = EventTypes();
+            Assert.AreEqual("plan_completed", types[types.Length - 1], "the hold is released before the plan end event");
+        }
+
+        [TestMethod]
+        [DataRow(EndReasons.PlannerAbort)]
+        [DataRow(EndReasons.Reload)]
+        [DataRow(EndReasons.VesselChange)]
+        [DataRow(EndReasons.SceneChange)]
+        [DataRow(EndReasons.NewFlight)]
+        public void Hold_EndsWithThePlan_AndIsNotCalledAgain(string reason)
+        {
+            FakeHold hold = new FakeHold { Name = "a" };
+            ScopeStepType.OnBegin = c => c.Plan.SetHold(hold, "x");
+            coordinator.Submit(Plan(ScopeStep(), Step(60)), replace: false);
+            Run(1);
+            coordinator.Control(null);
+            Assert.AreEqual(1, hold.Calls);
+
+            coordinator.Abort(reason, null);
+            coordinator.Control(null);
+
+            Assert.AreEqual(1, hold.Calls);
+            CollectionAssert.AreEqual(new[] { reason + ":a" }, HoldReleases());
+        }
+
+        [TestMethod]
+        public void Hold_EndsOnTimeout_AndOnStepFailure()
+        {
+            ScopeStepType.OnBegin = c => c.Plan.SetHold(new FakeHold { Name = "a" }, "x");
+            coordinator.Submit(Plan(ScopeStep(), Step(60, ",\"timeout_s\":1")), replace: false);
+            Run(3);
+            coordinator.Submit(Plan(ScopeStep(), Step(-1)), replace: false);
+            Run(4);
+
+            CollectionAssert.AreEqual(new[] { "timeout:a", "step_failed:a" }, HoldReleases());
+        }
+
+        [TestMethod]
+        public void Summary_ShowsTheHold_OnlyWithProgress_AndTheSubmitAnswerIsNull()
+        {
+            ScopeStepType.OnBegin = c => c.Plan.SetHold(new FakeHold { Name = "a" }, "x");
+            Dictionary<string, object> answer = coordinator.Submit(Plan(ScopeStep(), Step(1)), replace: false);
+            Assert.IsTrue(answer.ContainsKey("hold"));
+            Assert.IsNull(answer["hold"]);
+            Assert.IsNull(answer["hold_error"]);
+
+            Run(0.5);
+            Dictionary<string, object> current = coordinator.CurrentSummaryWithProgress();
+            Assert.AreEqual("a", ((Dictionary<string, object>)current["hold"])["name"]);
+            Assert.IsNull(current["hold_error"]);
+            Assert.IsFalse(coordinator.CurrentSummary.ContainsKey("hold"), "get_status reads the plain summary");
+
+            Run(3);
+            Assert.IsFalse(coordinator.LastSummary.ContainsKey("hold"));
+        }
+
+        [TestMethod]
+        public void HoldDescribeException_IsShown_AndThePlanKeepsRunning()
+        {
+            ScopeStepType.OnBegin = c => c.Plan.SetHold(new FakeHold { ThrowOnDescribe = true }, "x");
+            coordinator.Submit(Plan(ScopeStep(), Step(1)), replace: false);
+            Run(0.5);
+
+            Dictionary<string, object> current = coordinator.CurrentSummaryWithProgress();
+            Assert.IsNull(current["hold"]);
+            StringAssert.Contains((string)current["hold_error"], "InvalidOperationException");
+
+            Run(3);
+            Assert.AreEqual(EndReasons.Completed, coordinator.LastSummary["end_reason"]);
+        }
+
+        [TestMethod]
+        public void HoldException_FailsTheRunningStep()
+        {
+            FakeHold hold = new FakeHold();
+            ScopeStepType.OnBegin = c => c.Plan.SetHold(hold, "x");
+            coordinator.Submit(Plan(ScopeStep(), Step(60)), replace: false);
+            Run(1);
+            hold.OnControl = () => throw new System.InvalidOperationException("boom");
+
+            coordinator.Control(null);
+            Frame();
+
+            Assert.AreEqual(EndReasons.StepFailed, coordinator.LastSummary["end_reason"]);
+            StringAssert.Contains((string)coordinator.LastSummary["end_detail"], "control error: InvalidOperationException: boom");
+        }
+
+        [TestMethod]
+        public void HoldException_BetweenSteps_FailsTheNextStep_WithoutBeginningIt()
+        {
+            FakeHold hold = new FakeHold { OnControl = () => throw new System.InvalidOperationException("boom") };
+            int begun = 0;
+            ScopeStepType.OnBegin = c =>
+            {
+                begun++;
+                c.Plan.SetHold(hold, "x");
+            };
+            coordinator.Submit(Plan(ScopeStep(), ScopeStep()), replace: false);
+            Frame();
+
+            coordinator.Control(null);   // step 0 is done, step 1 has not begun
+            Frame();
+
+            Assert.AreEqual(1, begun);
+            Assert.AreEqual(EndReasons.StepFailed, coordinator.LastSummary["end_reason"]);
+            Assert.AreEqual(1, EventTypes().Count(t => t == "step_started"));
+        }
+
+        [TestMethod]
+        public void BeginException_FailsOnlyThatPlan()
+        {
+            ScopeStepType.OnBegin = c => throw new System.InvalidOperationException("no vessel");
+            coordinator.Submit(Plan(ScopeStep()), replace: false);
+            Run(0.1);
+            Assert.AreEqual(EndReasons.StepFailed, coordinator.LastSummary["end_reason"]);
+
+            ScopeStepType.OnBegin = null;
+            coordinator.Submit(Plan(ScopeStep()), replace: false);
+            Run(1);
+            Assert.AreEqual(EndReasons.Completed, coordinator.LastSummary["end_reason"]);
+        }
+
+        [TestMethod]
+        public void EndActions_RunOnce_AfterTheHoldIsReleased_AndOnlyTheFirstOfAKey()
+        {
+            List<string> calls = new List<string>();
+            int step = 0;
+            ScopeStepType.OnBegin = c =>
+            {
+                int n = step++;
+                c.Plan.SetHold(new FakeHold { Name = "h" + n }, "attitude");
+                c.Plan.AtEnd("cut", r => calls.Add(n + ":" + r + ":" + HoldReleases().Length));
+            };
+            coordinator.Submit(Plan(ScopeStep(), ScopeStep(), Step(60)), replace: false);
+            Run(1);
+
+            coordinator.Abort(EndReasons.PlannerAbort, null);
+            coordinator.Abort(EndReasons.PlannerAbort, null);
+
+            CollectionAssert.AreEqual(new[] { "0:planner_abort:2" }, calls);
+        }
+
+        [TestMethod]
+        public void EndActionException_IsRecorded_AndDoesNotStopTheEnd()
+        {
+            List<string> calls = new List<string>();
+            ScopeStepType.OnBegin = c =>
+            {
+                c.Plan.AtEnd("bad", r => throw new System.InvalidOperationException("boom"));
+                c.Plan.AtEnd("good", r => calls.Add(r));
+            };
+            coordinator.Submit(Plan(ScopeStep()), replace: false);
+            Run(1);
+
+            CollectionAssert.AreEqual(new[] { "completed" }, calls);
+            CollectionAssert.AreEqual(new[] { "completed" }, ended);
+            Dictionary<string, object> error = events.Since(0, 1000).Single(e => (string)e["type"] == "plan_end_error");
+            Assert.AreEqual("bad", ((Dictionary<string, object>)error["data"])["key"]);
+        }
+
+        [TestMethod]
+        public void PlanEndedInBegin_IsNotCompleted()
+        {
+            ScopeStepType.OnBegin = c => coordinator.Abort(EndReasons.VesselChange, "staging changed the vessel");
+            coordinator.Submit(Plan(ScopeStep()), replace: false);
+            Run(1);
+
+            Assert.AreEqual(EndReasons.VesselChange, coordinator.LastSummary["end_reason"]);
+            CollectionAssert.AreEqual(new[] { "plan_submitted", "step_started", "plan_aborted" }, EventTypes());
+        }
+
+        [TestMethod]
+        public void ScopeOfAnEndedPlan_Throws()
+        {
+            IPlanScope scope = null;
+            ScopeStepType.OnBegin = c => scope = c.Plan;
+            coordinator.Submit(Plan(ScopeStep()), replace: false);
+            Run(1);
+
+            Assert.ThrowsExactly<System.InvalidOperationException>(() => scope.SetHold(new FakeHold(), "x"));
+            Assert.ThrowsExactly<System.InvalidOperationException>(() => scope.ReleaseHold("x"));
+            Assert.ThrowsExactly<System.InvalidOperationException>(() => scope.AtEnd("x", r => { }));
+        }
+
+        private void Frame()
+        {
+            ut += 0.02;
+            coordinator.FixedUpdate();
+        }
+
+        private static string ScopeStep() => "{\"type\":\"scope\"}";
+
+        private string[] HoldReleases() => events.Since(0, 1000).Where(e => (string)e["type"] == "hold_released")
+            .Select(e => (Dictionary<string, object>)e["data"])
+            .Select(d => d["reason"] + ":" + ((Dictionary<string, object>)d["hold"])?["name"]).ToArray();
+
+        private sealed class FakeHold : IPlanHold
+        {
+            public string Name;
+            public int Calls;
+            public System.Action OnControl;
+            public bool ThrowOnDescribe;
+
+            public void Control(FlightCtrlState state, Vessel vessel)
+            {
+                Calls++;
+                OnControl?.Invoke();
+            }
+
+            public Dictionary<string, object> Describe()
+            {
+                if (ThrowOnDescribe)
+                    throw new System.InvalidOperationException("describe failed");
+                return new Dictionary<string, object> { ["name"] = Name };
+            }
+        }
+
+        /// <summary>Runs OnBegin with the context of the step and completes on the same frame (unless Finish is false).</summary>
+        private sealed class ScopeStepType : IStepType
+        {
+            public static System.Action<StepContext> OnBegin;
+            public static System.Action OnControl;
+            public static bool Finish = true;
+
+            public static void Reset()
+            {
+                OnBegin = null;
+                OnControl = null;
+                Finish = true;
+            }
+
+            public string Name => "scope";
+
+            public string Describe() => "test step that uses the plan scope";
+
+            public IStepRun Create(Dictionary<string, object> parameters) => new ScopeRun();
+        }
+
+        private sealed class ScopeRun : IStepRun
+        {
+            public void Begin(StepContext context) => ScopeStepType.OnBegin?.Invoke(context);
+
+            public StepResult Judge(StepContext context) => ScopeStepType.Finish ? StepResult.Done : StepResult.Running;
+
+            public void Control(FlightCtrlState state, StepContext context) => ScopeStepType.OnControl?.Invoke();
+
+            public void End(string reason)
+            {
+            }
         }
 
         private sealed class ProgressStepType : IStepType

@@ -4,8 +4,8 @@ using System.Linq;
 namespace KspBridge.Mod.Core
 {
     /// <summary>
-    /// Realtime control: while a plan runs, hooks the active vessel's OnFlyByWire and lets the running step write
-    /// FlightCtrlState every physics frame. Detached when the plan ends, the vessel changes, or the generation stops,
+    /// Realtime control: while a plan runs, hooks the active vessel's OnFlyByWire and lets the plan's hold and then the running
+    /// step write FlightCtrlState every physics frame. Detached when the plan ends, the vessel changes, or the generation stops,
     /// so no control input outlives the plan or a reload.
     /// </summary>
     public sealed class Controller

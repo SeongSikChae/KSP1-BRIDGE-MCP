@@ -128,6 +128,18 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 
 `get_plan`의 실행 중 계획(`current`)에는 진행 값이 붙는다. 계획 경과 시간(`elapsed_s`), 단계 경과 시간(`step_elapsed_s`), timeout까지 남은 시간(`step_timeout_remaining_s`), 단계가 보고한 목표까지 남은 양(`step_progress`, 예: `wait`의 `target_s`·`remaining_s`)이다. 단계가 아직 시작되지 않았으면 단계 값은 `null`이다. 같은 계획 요약을 돌려주는 `submit_plan`·`submit_wait` 응답에도 같은 값이 붙는다.
 
+기본 제어는 별도 도구 없이 계획 단계로 쓴다. 인자는 `list_step_types`에 나온다.
+
+| 단계 | 하는 일 |
+|---|---|
+| `throttle` | 스로틀을 바꾼다. 값은 뒤 단계와 계획 완료 뒤에도 남고, 계획이 중단·단계 실패·timeout·reload로 끝나면 0으로 내린다. 조종 불가인 기체(승무원·전기·통신 등이 없음)에서는 단계가 실패한다 |
+| `attitude` | 피치·헤딩(·롤)이나 기준 방향으로 기수를 돌리고, 정렬되면 완료하며, 뒤 단계 동안 자세를 계속 유지한다. SAS를 끈다. 조종 불가인 기체이거나 정렬을 기다리다 조종 불가가 되면 단계가 실패한다 |
+| `attitude_off` | 유지 중인 자세를 푼다 |
+| `stage` | 다음 스테이지를 작동한다. 게임이 거절하면(작동 직후 약 0.6초) 단계가 실패하므로 두 번 잇는 사이에 `wait`를 둔다 |
+| `action_group` | 사용자 그룹 1~10, 기어·조명·브레이크·어보트, SAS·RCS를 켜고 끈다. SAS를 켜면 유지 중인 자세가 풀린다 |
+
+유지 중인 자세는 `get_plan` `current`의 `hold`에 나오고, 풀리면 이벤트 `hold_released`에 사유가 남는다. 계획이 끝나면 늘 풀린다.
+
 `get_flight`는 기체를 바꾸지 않는다. Δv·연소 시간·스테이지 TWR은 게임 Δv 계산기의 값이며, 계산기가 아직 값을 내지 않았으면 `delta_v_ready`가 `false`이고 그 값들은 `null`이다.
 
 `check_ship`은 기체를 바꾸지 않는다. 스테이지 값은 게임 Δv 계산기의 값이며, 다른 천체를 지정하면 점검하는 동안만 게임 Δv 창의 천체가 그 천체로 잠깐 바뀌었다가 원래 천체로 돌아온다.
@@ -148,6 +160,7 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 1. **Mod 모듈**: `src/KspBridge.Mod.Modules.<이름>/`
    - `IBridgeModule`을 구현합니다.
    - `Register`에서 `context.AddStepType(...)`(Coordinator가 판정하고 Controller가 제어할 단계)와 `context.AddHandler(op, ...)`(`POST /api/<이름>/<op>`)를 등록합니다.
+   - 단계가 끝난 뒤에도 계획이 끝날 때까지 이어질 입력은 `StepContext.Plan.SetHold(...)`(`IPlanHold`)로 걸고, 계획이 끝날 때 할 일은 `StepContext.Plan.AtEnd(...)`로 등록합니다. 계획이 어떤 사유로 끝나든 코어가 hold를 풀고 등록한 일을 부릅니다.
    - GameEvents 같은 외부 구독은 `context.Subscriptions`에 등록합니다. 그래야 reload할 때 해제됩니다.
    - csproj는 `KspBridge.Mod.Modules.Wait`를 본뜹니다.
 2. **서버 모듈**: `src/KspBridge.Server.Modules.<이름>/`

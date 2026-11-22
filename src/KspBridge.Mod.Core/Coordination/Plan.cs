@@ -43,11 +43,20 @@ namespace KspBridge.Mod.Core
         };
     }
 
+    /// <summary>An action a step registered for the end of the plan (IPlanScope.AtEnd).</summary>
+    internal sealed class PlanEndAction
+    {
+        public string Key;
+        public Action<string> Action;
+    }
+
     internal sealed class Plan
     {
         public int Id;
         public int SessionId;
         public List<PlanStep> Steps = new List<PlanStep>();
+        public IPlanHold Hold;
+        public List<PlanEndAction> EndActions = new List<PlanEndAction>();
         public string State = "pending";   // pending, running, completed, aborted
         public int StepIndex;
         public string EndReason;
@@ -85,7 +94,7 @@ namespace KspBridge.Mod.Core
     /// <summary>
     /// Progress values of a running plan (get_plan current, submit responses). Step values are null while the current step has
     /// not begun (right after submit, and between steps until the next physics frame). A step's progress report never affects
-    /// the plan: an exception is shown as step_progress_error.
+    /// the plan: an exception is shown as step_progress_error (hold_error for the hold).
     /// </summary>
     internal static class PlanProgress
     {
@@ -117,6 +126,24 @@ namespace KspBridge.Mod.Core
             }
             summary["step_progress"] = progress;
             summary["step_progress_error"] = error;
+
+            summary["hold"] = DescribeHold(plan.Hold, out string holdError);
+            summary["hold_error"] = holdError;
+        }
+
+        /// <summary>What <paramref name="hold"/> reports; null with the error when it throws.</summary>
+        public static Dictionary<string, object> DescribeHold(IPlanHold hold, out string error)
+        {
+            error = null;
+            try
+            {
+                return hold?.Describe();
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + ": " + ex.Message;
+                return null;
+            }
         }
     }
 }

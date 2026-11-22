@@ -111,6 +111,10 @@ namespace KspBridge.Mod.Core
                 Finish(EndReasons.PlannerAbort, "replaced by a new plan");
             }
 
+            PlanScope scope = new PlanScope(this, plan);
+            foreach (PlanStep step in plan.Steps)
+                step.Context.Plan = scope;
+
             plan.Id = NextPlanId++;
             current = plan;
             controlFailure = null;
@@ -140,6 +144,13 @@ namespace KspBridge.Mod.Core
 
             try
             {
+                if (controlFailure != null)
+                {
+                    // Also before Begin: a hold can fail between steps, and the next step must not act on the vessel then.
+                    FailStep(step, "control error: " + controlFailure);
+                    return;
+                }
+
                 if (!step.Begun)
                 {
                     step.Begun = true;
@@ -149,12 +160,8 @@ namespace KspBridge.Mod.Core
                     plan.State = "running";
                     events.Add("step_started", plan.Id, new Dictionary<string, object> { ["index"] = plan.StepIndex, ["type"] = step.Type });
                     step.Run.Begin(step.Context);
-                }
-
-                if (controlFailure != null)
-                {
-                    FailStep(step, "control error: " + controlFailure);
-                    return;
+                    if (current != plan)
+                        return;   // Begin raised a game event that ended the plan (e.g. staging changed the active vessel)
                 }
 
                 if (step.TimeoutS.HasValue && step.Context.Elapsed > step.TimeoutS.Value)
@@ -165,6 +172,8 @@ namespace KspBridge.Mod.Core
                 }
 
                 StepResult result = step.Run.Judge(step.Context);
+                if (current != plan)
+                    return;
                 if (result.Status == StepStatus.Done)
                     CompleteStep(plan, step, ut);
                 else if (result.Status == StepStatus.Failed)
@@ -177,15 +186,21 @@ namespace KspBridge.Mod.Core
             }
         }
 
-        /// <summary>Called from the vessel's OnFlyByWire: the running step controls the vessel.</summary>
+        /// <summary>
+        /// Called from the vessel's OnFlyByWire: the plan's hold writes first (also between steps), then the running step, so a
+        /// step that writes an axis itself wins.
+        /// </summary>
         public void Control(FlightCtrlState state)
         {
-            PlanStep step = current?.CurrentStep;
-            if (step == null || !step.Begun || controlFailure != null)
+            Plan plan = current;
+            if (plan == null || controlFailure != null)
                 return;
             try
             {
-                step.Run.Control(state, step.Context);
+                plan.Hold?.Control(state, vessel());
+                PlanStep step = plan.CurrentStep;
+                if (step != null && step.Begun)
+                    step.Run.Control(state, step.Context);
             }
             catch (Exception ex)
             {
@@ -229,6 +244,9 @@ namespace KspBridge.Mod.Core
             current = null;
             controlFailure = null;
 
+            ReleaseHold(plan, reason);
+            RunEndActions(plan, reason);
+
             Dictionary<string, object> summary = plan.ToDict();
             LastSummary = summary;
             LastSession = plan.SessionId;
@@ -236,6 +254,82 @@ namespace KspBridge.Mod.Core
                 new Dictionary<string, object> { ["end_reason"] = reason, ["detail"] = detail });
             PlanEnded?.Invoke(reason);
             return summary;
+        }
+
+        private bool ReleaseHold(Plan plan, string reason)
+        {
+            IPlanHold hold = plan.Hold;
+            if (hold == null)
+                return false;
+            plan.Hold = null;
+            events.Add("hold_released", plan.Id, new Dictionary<string, object>
+            {
+                ["reason"] = reason,
+                ["hold"] = PlanProgress.DescribeHold(hold, out _),
+            });
+            return true;
+        }
+
+        private void RunEndActions(Plan plan, string reason)
+        {
+            foreach (PlanEndAction end in plan.EndActions)
+            {
+                try
+                {
+                    end.Action(reason);
+                }
+                catch (Exception ex)
+                {
+                    events.Add("plan_end_error", plan.Id, new Dictionary<string, object>
+                    {
+                        ["key"] = end.Key,
+                        ["message"] = ex.GetType().Name + ": " + ex.Message,
+                    });
+                }
+            }
+        }
+
+        /// <summary>The hold and end actions of one plan; unusable once the plan has ended.</summary>
+        private sealed class PlanScope : IPlanScope
+        {
+            private readonly Coordinator coordinator;
+            private readonly Plan plan;
+
+            public PlanScope(Coordinator coordinator, Plan plan)
+            {
+                this.coordinator = coordinator;
+                this.plan = plan;
+            }
+
+            public IPlanHold Hold => plan.Hold;
+
+            public void SetHold(IPlanHold hold, string reason)
+            {
+                if (hold == null)
+                    throw new ArgumentNullException(nameof(hold));
+                RequireRunning();
+                coordinator.ReleaseHold(plan, reason);
+                plan.Hold = hold;
+            }
+
+            public bool ReleaseHold(string reason)
+            {
+                RequireRunning();
+                return coordinator.ReleaseHold(plan, reason);
+            }
+
+            public void AtEnd(string key, Action<string> action)
+            {
+                RequireRunning();
+                if (!plan.EndActions.Exists(a => a.Key == key))
+                    plan.EndActions.Add(new PlanEndAction { Key = key, Action = action });
+            }
+
+            private void RequireRunning()
+            {
+                if (coordinator.current != plan)
+                    throw new InvalidOperationException("the plan has ended");
+            }
         }
 
         private static void SafeEnd(PlanStep step, string reason)
