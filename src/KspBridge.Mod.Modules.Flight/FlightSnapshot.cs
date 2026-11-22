@@ -59,6 +59,7 @@ namespace KspBridge.Mod.Modules.Flight
                 East = V(v.east),
                 Nose = reference != null ? V(reference.up) : Vec.Zero,
                 Top = reference != null ? -V(reference.forward) : Vec.Zero,
+                Warp = Warp(v),
                 Throttle = v.ctrlState != null ? v.ctrlState.mainThrottle : 0,
                 Sas = v.ActionGroups[KSPActionGroup.SAS],
                 Rcs = v.ActionGroups[KSPActionGroup.RCS],
@@ -77,6 +78,14 @@ namespace KspBridge.Mod.Modules.Flight
                 },
             };
         }
+
+        /// <summary>The game's time warp now and whether <paramref name="v"/> is on rails.</summary>
+        public static WarpState Warp(Vessel v) => new WarpState
+        {
+            Rate = TimeWarp.CurrentRate,
+            Physics = TimeWarp.WarpMode == TimeWarp.Modes.LOW,
+            OnRails = v.packed,
+        };
 
         private static double Thrust(Vessel v)
         {

@@ -111,7 +111,9 @@ namespace KspBridge.Server.Modules.Core
         [McpServerTool(Name = "get_flight_events", ReadOnly = true, Idempotent = true)]
         [Description("Flight events after seq 'since' (plan_submitted, step_started, step_completed, plan_completed, plan_aborted, " +
                      "hold_released, plan_end_error, plan_guard_error, logic_started, from control steps throttle_cut, stage_activated, " +
-                     "action_group_changed, from wait_until condition_met (every condition with its value), and parts_lost (count and " +
+                     "action_group_changed, from wait_until condition_met (every condition with its value), from warp warp_completed " +
+                     "(target_ut, ut, error_s, max_rails_rate, max_physics_rate, real_s, blocked) and warp_released (reason, rate: the " +
+                     "plan ended while warping and the rate went to 1), and parts_lost (count and " +
                      "parts: name, kind exploded/broke_off, cause crash, collision, crash_splashdown, overheat, over_g, over_pressure " +
                      "or null) whenever the vessel loses parts while a plan runs), oldest first. " +
                      "Pass the returned last_seq as 'since' next time to read only new events.")]

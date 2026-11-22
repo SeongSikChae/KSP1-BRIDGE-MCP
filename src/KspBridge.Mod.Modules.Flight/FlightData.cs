@@ -38,6 +38,18 @@ namespace KspBridge.Mod.Modules.Flight
         public double SphereOfInfluence;
     }
 
+    /// <summary>The game's time warp and whether the vessel is on rails (out of the physics).</summary>
+    public sealed class WarpState
+    {
+        /// <summary>Current rate, also while the game is changing it; 1 without warp.</summary>
+        public double Rate = 1;
+
+        /// <summary>The game's physics warp mode (otherwise rails).</summary>
+        public bool Physics;
+
+        public bool OnRails;
+    }
+
     /// <summary>The active vessel's state read from the game (<see cref="FlightSnapshot"/>), with no game types in it.</summary>
     public sealed class FlightData
     {
@@ -76,6 +88,8 @@ namespace KspBridge.Mod.Modules.Flight
         public Vec East;
         public Vec Nose;
         public Vec Top;
+
+        public WarpState Warp = new WarpState();
 
         public double Throttle;
         public bool Sas;

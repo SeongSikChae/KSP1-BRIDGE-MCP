@@ -62,7 +62,7 @@ namespace KspBridge.Mod.Modules.Flight.Tests
 
         private static readonly string[] DefaultKeys =
         {
-            "vessel", "situation", "body", "ut", "met_s", "position", "speed", "orbit", "attitude", "control", "mass_t", "thrust_kn",
+            "vessel", "situation", "body", "ut", "met_s", "position", "speed", "orbit", "attitude", "control", "time_warp", "mass_t", "thrust_kn",
             "twr", "stage", "delta_v_ready", "delta_v_not_ready_reason",
         };
 
@@ -82,6 +82,22 @@ namespace KspBridge.Mod.Modules.Flight.Tests
             CollectionAssert.AreEquivalent(DefaultKeys.Concat(new[] { "stages", "resources", "body_info" }).ToArray(), all.Keys.ToArray());
             foreach (string key in DefaultKeys)
                 Assert.AreEqual(Json.Write(plain[key]), Json.Write(all[key]), key);
+        }
+
+        [TestMethod]
+        [DataRow(1, false, false, "none")]
+        [DataRow(1, true, true, "none")]
+        [DataRow(1.2, false, true, "rails")]
+        [DataRow(100000, false, true, "rails")]
+        [DataRow(4, true, false, "physics")]
+        public void TimeWarp_ModeFollowsTheRateAndTheGamesMode(double rate, bool physics, bool onRails, string mode)
+        {
+            FlightData d = Pad();
+            d.Warp = new WarpState { Rate = rate, Physics = physics, OnRails = onRails };
+            Dictionary<string, object> w = Obj(FlightReport.Build(d, FlightInclude.None), "time_warp");
+            Assert.AreEqual(rate, (double)w["rate"]);
+            Assert.AreEqual(mode, w["mode"]);
+            Assert.AreEqual(onRails, w["on_rails"]);
         }
 
         [TestMethod]

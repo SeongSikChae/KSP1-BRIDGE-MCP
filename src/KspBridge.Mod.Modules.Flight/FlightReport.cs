@@ -106,6 +106,7 @@ namespace KspBridge.Mod.Modules.Flight
                     ["sas"] = d.Sas,
                     ["rcs"] = d.Rcs,
                 },
+                ["time_warp"] = TimeWarp(d.Warp),
                 ["mass_t"] = d.Mass,
                 ["thrust_kn"] = d.Thrust,
                 ["twr"] = Twr(d.Thrust, d.Mass, d.Gravity),
@@ -124,6 +125,14 @@ namespace KspBridge.Mod.Modules.Flight
                 answer["body_info"] = BodyInfo(d.BodyInfo);
             return answer;
         }
+
+        /// <summary>The time_warp part of the answer; a step that warps reports the same.</summary>
+        public static Dictionary<string, object> TimeWarp(WarpState warp) => new Dictionary<string, object>
+        {
+            ["rate"] = warp.Rate,
+            ["mode"] = !(warp.Rate > 1) ? "none" : warp.Physics ? "physics" : "rails",
+            ["on_rails"] = warp.OnRails,
+        };
 
         /// <summary>Current thrust over weight at the vessel's position; 0 when mass or gravity is 0.</summary>
         public static double Twr(double thrustKn, double massT, double gravity)

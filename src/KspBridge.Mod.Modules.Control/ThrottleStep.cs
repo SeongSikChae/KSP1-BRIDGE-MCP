@@ -22,7 +22,8 @@ namespace KspBridge.Mod.Modules.Control
         public string Describe()
             => "Set the throttle to params.value (0..1, required) as if the player had. Completes on the same frame. The value stays in " +
                "the later steps and after the plan completes; when the plan ends by planner_abort, step_failed, timeout, reload, " +
-               "part_loss or no_thrust the throttle is set to 0 (event throttle_cut). Fails the plan (step_failed) when there is no " +
+               "part_loss or no_thrust the throttle is set to 0 (event throttle_cut). On rails in a warp step it reads 0 and warp puts it " +
+               "back when it completes; if the plan ends before that it may stay 0. Fails the plan (step_failed) when there is no " +
                "active vessel or the vessel is not controllable (no working control source: no crew, power or signal); the failing " +
                "step changes nothing.";
 

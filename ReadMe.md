@@ -106,7 +106,7 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `get_flight_events` | core | 단계·계획 이벤트(`since`로 새 이벤트만 읽기) |
 | `list_step_types` | core | 로드된 단계 종류와 매개변수 |
 | `submit_wait` | wait | `wait` 한 단계 계획 |
-| `get_flight` | flight | 활성 기체의 비행 상태: 위치·고도·속도·궤도 요소·자세·조종 상태·질량·추력·TWR·스테이지 Δv(`include`로 스테이지별 표·자원·천체 상수) |
+| `get_flight` | flight | 활성 기체의 비행 상태: 위치·고도·속도·궤도 요소·자세·조종 상태·시간 가속·질량·추력·TWR·스테이지 Δv(`include`로 스테이지별 표·자원·천체 상수) |
 | `debug_launch`, `debug_revert`, `debug_space_center` | debug | 검증용 발사·되돌리기·우주센터 이동 |
 | `debug_set_orbit` | debug | 검증용: 활성 기체를 지정 Ap·Pe·경사각 궤도로 옮김(게임의 궤도 설정 치트) |
 | `debug_list_vessels` | debug | 검증용: 비행 장면의 기체 목록(id·이름·종류·상황·천체·로드·소유·활성·거리) |
@@ -143,6 +143,14 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 ```json
 { "type": "wait_until", "params": { "all": [ { "value": "apoapsis_m", "op": ">=", "to": 80000 } ] }, "timeout_s": 300 }
 ```
+
+시간 가속 단계는 `warp`이다. `params.seconds`(단계 시작부터 게임 시간), `params.ut`(게임 시각), `params.to`(`apoapsis`·`periapsis`, 몇 초 전은 `lead_s`) 가운데 하나를 목표로 받아, 게임이 허용하는 만큼 레일 가속으로 가고 목표 전에 1배로 내려 완료한다. 대기권·추력 중처럼 레일 가속이 막힌 구간은 1배로 진행하며, `physics_rate`(2~4)를 적었을 때만 그 구간에서 물리 가속을 쓴다. 레일 배율의 상한은 `max_rate`이다. 실행되는 동안 배율은 단계가 정하고, 계획이 어떻게 끝나도 1배로 돌아온다. 레일 위에서는 스로틀이 0으로 보이고 단계가 완료될 때 되돌아온다.
+
+```json
+{ "type": "warp", "params": { "to": "apoapsis", "lead_s": 30 } }
+```
+
+도착 오차, 쓴 배율, 레일이 막혔던 이유는 이벤트 `warp_completed`에, 중간에 끝나 배율을 되돌린 것은 `warp_released`에 남는다. 지금 배율은 `get_flight`의 `time_warp`에 나온다.
 
 계획은 이상이 생기면 스스로 끝난다. `abort_on`은 계획 전체에 하나 둔다(예: `{ "steps": [...], "abort_on": { "no_thrust": true } }`).
 

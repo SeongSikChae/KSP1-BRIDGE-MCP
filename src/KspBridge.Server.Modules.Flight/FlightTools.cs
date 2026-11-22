@@ -21,7 +21,9 @@ namespace KspBridge.Server.Modules.Flight
                      "altitude_m above sea level, terrain_altitude_m above ground or water); speed (surface, orbital, vertical (up +), " +
                      "horizontal surface, m/s); orbit (apoapsis/periapsis m above sea level, inclination deg, eccentricity, semi-major " +
                      "axis m, period s, time to apoapsis/periapsis s; apoapsis, period and time to apoapsis are null on open orbits); " +
-                     "attitude (navball pitch/heading/roll deg, right wing down is + roll); control (throttle 0-1, sas, rcs); mass_t, " +
+                     "attitude (navball pitch/heading/roll deg, right wing down is + roll); control (throttle 0-1, sas, rcs; the throttle " +
+                     "reads 0 on rails); time_warp (rate, mode none/rails/physics, on_rails: out of the physics, also for a moment " +
+                     "after rails warp); mass_t, " +
                      "thrust_kn (current), twr (current thrust / weight here); stage: last_activated (null before staging or when its " +
                      "parts are gone), next (fires on the next staging), reference (last_activated, else next) with its delta-v (here " +
                      "and vacuum, m/s), burn time and TWR from the game's delta-v calculator, and the vessel's total delta-v. When the " +
