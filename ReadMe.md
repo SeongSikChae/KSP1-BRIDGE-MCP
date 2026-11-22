@@ -123,12 +123,16 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `editor_get_part_settings`, `editor_set_part_settings` | editor | 에디터에서 바꿀 수 있는 자원 양·모듈 설정(추력 제한, 짐벌, 분리 힘 등) |
 | `editor_get_stages`, `editor_set_stage`, `editor_swap_stages` | editor | 스테이지 조회, 부품 옮기기, 두 스테이지 바꾸기 |
 | `check_ship` | check | 발사 전 조립 점검: 지정 천체 기준 스테이지별 질량·Δv·TWR·연소 시간, 무게중심 어긋남, 구조 경고 8종 |
+| `measure_start`, `measure_stop` | measure | 검증용 계측 시작·끝: 계측 중 물리 프레임마다 활성 기체의 값(조종 상태·입력, 질량·추력, 자세·각속도, 스테이지, 고도·속도)을 모음 |
+| `get_measurement` | measure | 실행 중이거나 가장 최근에 끝난 계측의 항목별 요약(경과 시간 범위 지정 가능)과 표본 목록 |
 
 `get_plan`의 실행 중 계획(`current`)에는 진행 값이 붙는다. 계획 경과 시간(`elapsed_s`), 단계 경과 시간(`step_elapsed_s`), timeout까지 남은 시간(`step_timeout_remaining_s`), 단계가 보고한 목표까지 남은 양(`step_progress`, 예: `wait`의 `target_s`·`remaining_s`)이다. 단계가 아직 시작되지 않았으면 단계 값은 `null`이다. 같은 계획 요약을 돌려주는 `submit_plan`·`submit_wait` 응답에도 같은 값이 붙는다.
 
 `get_flight`는 기체를 바꾸지 않는다. Δv·연소 시간·스테이지 TWR은 게임 Δv 계산기의 값이며, 계산기가 아직 값을 내지 않았으면 `delta_v_ready`가 `false`이고 그 값들은 `null`이다.
 
 `check_ship`은 기체를 바꾸지 않는다. 스테이지 값은 게임 Δv 계산기의 값이며, 다른 천체를 지정하면 점검하는 동안만 게임 Δv 창의 천체가 그 천체로 잠깐 바뀌었다가 원래 천체로 돌아온다.
+
+계측은 기체와 계획을 바꾸지 않으며 한 번에 하나만 실행된다. 구간 경계를 물리 프레임에 맞추려면 계획 단계 `measure_start`·`measure_stop`을 넣는다(예: `measure_start` → `wait` → `measure_stop`). 단계는 시작한 프레임에 완료되고, 계획이 끝나도 계측은 계속된다. 표본 상한(`sample_limit`)은 기본 30,000개, 최대 180,000개이며 이르면 계측이 사유 `sample_limit`로 끝난다. 새 비행·장면 전환·활성 기체 변경에서도 사유와 함께 끝나고, Mod를 다시 읽으면 계측 데이터가 사라진다.
 
 조립 편집 도구는 기체를 craft로 다시 만들어 에디터에 다시 불러오는 방식이다. 편집할 때마다 아래 두 파일을 쓴다.
 
