@@ -5,7 +5,7 @@ using UnityEngine;
 namespace KspBridge.Mod.Modules.Control
 {
     /// <summary>The vessel values attitude control needs, read on a physics frame.</summary>
-    internal struct VesselAttitude
+    public struct VesselAttitude
     {
         public FlightFrame Frame;
         public Vec Right;
@@ -19,7 +19,7 @@ namespace KspBridge.Mod.Modules.Control
         public Vec Inertia;
     }
 
-    internal static class VesselReader
+    public static class VesselReader
     {
         /// <summary>Attitude, velocities, rate and inertia. The nose and top are where get_flight takes them (FlightSnapshot).</summary>
         public static VesselAttitude Read(Vessel v)

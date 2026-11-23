@@ -19,7 +19,7 @@ namespace KspBridge.Mod.Modules.Control
                "params.settle_rate_dps (> 0, default 0.5). Turns SAS off and leaves it off. Completes when the nose (and the roll if " +
                "given) is within tolerance_deg and the angular speed is at most settle_rate_dps; set timeout_s, otherwise it waits " +
                "forever when the vessel cannot get there. A direction that cannot be determined (speed below 1 m/s) counts as not " +
-               "aligned: the turning is stopped and it waits. The hold ends with another attitude step, attitude_off, action_group " +
+               "aligned: the turning is stopped and it waits. The hold ends with another attitude step, an ascend or circularize step, attitude_off, action_group " +
                "sas on, or the plan's end (event hold_released). step_progress: target, angle_error_deg, roll_error_deg, rate_dps, " +
                "tolerance_deg, settle_rate_dps. Fails the plan (step_failed) when there is no active vessel, or when the vessel is not " +
                "controllable (no working control source: no crew, power or signal) at the start or while it waits to align.";
@@ -102,29 +102,6 @@ namespace KspBridge.Mod.Modules.Control
             public void End(string reason)
             {
             }
-        }
-    }
-
-    internal static class ControlStep
-    {
-        /// <summary>The active vessel; an exception (the step fails) when there is none.</summary>
-        public static Vessel RequireVessel(StepContext context)
-        {
-            if (context.Vessel == null)
-                throw new InvalidOperationException("there is no active vessel");
-            return context.Vessel;
-        }
-
-        /// <summary>
-        /// The active vessel when the game lets it be controlled (D022, D023); an exception (the step fails) otherwise. Partial
-        /// control counts as controllable. Checked before a step changes anything.
-        /// </summary>
-        public static Vessel RequireControllable(StepContext context)
-        {
-            Vessel vessel = RequireVessel(context);
-            if (!vessel.IsControllable)
-                throw new InvalidOperationException("the vessel is not controllable");
-            return vessel;
         }
     }
 }

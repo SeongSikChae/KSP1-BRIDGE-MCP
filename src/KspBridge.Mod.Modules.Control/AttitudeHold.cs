@@ -6,20 +6,31 @@ namespace KspBridge.Mod.Modules.Control
 {
     /// <summary>
     /// Holds an attitude for the rest of the plan: every frame the nose is steered to the target (a direction follows its current
-    /// value). While the target has no direction only the turning is stopped (D014).
+    /// value). While the target has no direction only the turning is stopped (D014). A step that steers along a changing target
+    /// (ascend, circularize) changes <see cref="Target"/> and <see cref="Type"/> in place, so the hold is not released.
     /// </summary>
-    internal sealed class AttitudeHold : IPlanHold
+    public sealed class AttitudeHold : IPlanHold
     {
-        private readonly AttitudeTarget target;
+        public const string AttitudeType = "attitude";
 
-        public AttitudeHold(AttitudeTarget target) => this.target = target;
+        public AttitudeHold(AttitudeTarget target, string type = AttitudeType)
+        {
+            Target = target;
+            Type = type;
+        }
+
+        /// <summary>The target steered to from the next frame on.</summary>
+        public AttitudeTarget Target { get; set; }
+
+        /// <summary>What get_plan's hold shows as type: attitude, or the name of the step that steers.</summary>
+        public string Type { get; set; }
 
         public void Control(FlightCtrlState state, Vessel vessel)
         {
             if (vessel == null || vessel.ReferenceTransform == null)
                 return;
             VesselAttitude now = VesselReader.Read(vessel);
-            Vec command = AttitudeLaw.Command(Error(target, now).Rotation, now.Rate, VesselReader.Torque(vessel), now.Inertia);
+            Vec command = AttitudeLaw.Command(Error(Target, now).Rotation, now.Rate, VesselReader.Torque(vessel), now.Inertia);
             state.pitch = (float)command.X;
             state.roll = (float)command.Y;
             state.yaw = (float)command.Z;
@@ -27,8 +38,8 @@ namespace KspBridge.Mod.Modules.Control
 
         public Dictionary<string, object> Describe() => new Dictionary<string, object>
         {
-            ["type"] = "attitude",
-            ["target"] = target.Describe(),
+            ["type"] = Type,
+            ["target"] = Target.Describe(),
         };
 
         /// <summary>Error of <paramref name="now"/> against the target as it is now; undefined (default) without a direction.</summary>

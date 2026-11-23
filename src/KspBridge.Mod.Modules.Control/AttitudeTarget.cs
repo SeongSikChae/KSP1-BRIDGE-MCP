@@ -5,7 +5,7 @@ using System.Collections.Generic;
 namespace KspBridge.Mod.Modules.Control
 {
     /// <summary>Reference directions an attitude can follow.</summary>
-    internal enum AttitudeDirection
+    public enum AttitudeDirection
     {
         Prograde,
         Retrograde,
@@ -18,7 +18,7 @@ namespace KspBridge.Mod.Modules.Control
     }
 
     /// <summary>What the target directions are computed from; world vectors, any one consistent frame.</summary>
-    internal struct FlightFrame
+    public struct FlightFrame
     {
         public Vec Up;
         public Vec North;
@@ -31,7 +31,7 @@ namespace KspBridge.Mod.Modules.Control
     }
 
     /// <summary>Where the nose should point and, when a roll is asked for, where the vessel's top should point.</summary>
-    internal readonly struct TargetVectors
+    public readonly struct TargetVectors
     {
         public TargetVectors(Vec nose, Vec? top)
         {
@@ -48,7 +48,7 @@ namespace KspBridge.Mod.Modules.Control
     }
 
     /// <summary>An attitude to hold: pitch and heading with an optional roll (flight-observation's surface attitude), or a direction.</summary>
-    internal sealed class AttitudeTarget
+    public sealed class AttitudeTarget
     {
         /// <summary>Below this speed (m/s) a velocity direction counts as undefined (D014).</summary>
         public const double MinSpeed = 1;

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/KspBridge.Mod.Core/KspBridge.Mod.Core.csproj" />
     <Project Path="src/KspBridge.Mod.Loader/KspBridge.Mod.Loader.csproj" />
+    <Project Path="src/KspBridge.Mod.Modules.Ascent/KspBridge.Mod.Modules.Ascent.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Check/KspBridge.Mod.Modules.Check.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Condition/KspBridge.Mod.Modules.Condition.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Control/KspBridge.Mod.Modules.Control.csproj" />
@@ -13,6 +14,7 @@
     <Project Path="src/KspBridge.Mod.Modules.Warp/KspBridge.Mod.Modules.Warp.csproj" />
     <Project Path="src/KspBridge.Server.Contracts/KspBridge.Server.Contracts.csproj" />
     <Project Path="src/KspBridge.Server.Core/KspBridge.Server.Core.csproj" />
+    <Project Path="src/KspBridge.Server.Modules.Ascent/KspBridge.Server.Modules.Ascent.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Check/KspBridge.Server.Modules.Check.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Condition/KspBridge.Server.Modules.Condition.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Control/KspBridge.Server.Modules.Control.csproj" />
@@ -27,6 +29,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/KspBridge.Mod.Core.Tests/KspBridge.Mod.Core.Tests.csproj" />
+    <Project Path="tests/KspBridge.Mod.Modules.Ascent.Tests/KspBridge.Mod.Modules.Ascent.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Check.Tests/KspBridge.Mod.Modules.Check.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Condition.Tests/KspBridge.Mod.Modules.Condition.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Control.Tests/KspBridge.Mod.Modules.Control.Tests.csproj" />

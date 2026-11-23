@@ -4,7 +4,7 @@ using System;
 namespace KspBridge.Mod.Modules.Control
 {
     /// <summary>How far the vessel is from its target attitude. Vectors are in the reference transform's local axes.</summary>
-    internal readonly struct AttitudeError
+    public readonly struct AttitudeError
     {
         public AttitudeError(Vec rotation, double angleDeg, double? rollDeg)
         {
@@ -31,7 +31,7 @@ namespace KspBridge.Mod.Modules.Control
     /// rates follow v = ω × r. A control command c gives the torque −c × available torque on its axis (reaction wheels apply
     /// ReferenceTransform.rotation × −input × torque), with x = pitch, y = roll, z = yaw.
     /// </summary>
-    internal static class AttitudeLaw
+    public static class AttitudeLaw
     {
         /// <summary>Time (s) in which the remaining angle would be closed at the wanted rate.</summary>
         public const double AngleTime = 2;

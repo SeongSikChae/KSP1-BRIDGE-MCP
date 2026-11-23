@@ -152,6 +152,23 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 
 도착 오차, 쓴 배율, 레일이 막혔던 이유는 이벤트 `warp_completed`에, 중간에 끝나 배율을 되돌린 것은 `warp_released`에 남는다. 지금 배율은 `get_flight`의 `time_warp`에 나온다.
 
+궤도 진입 단계는 `ascend`(상승)와 `circularize`(원궤도화)이다. `ascend`는 발사대에서 `params.apoapsis_m`(대기권보다 높게)까지 중력 선회로 올라가 대기권 밖에서 끝나고, `circularize`는 다음 Ap에서 연소해 원궤도로 만든다. 그 사이의 시간 가속은 `warp`가 한다.
+
+```json
+{ "steps": [
+  { "type": "ascend", "params": { "apoapsis_m": 80000 } },
+  { "type": "warp", "params": { "to": "apoapsis", "lead_s": 60 } },
+  { "type": "circularize" } ] }
+```
+
+- 기수는 고도와 Ap 가운데 덜 진행된 쪽에 맞춰 눕혀, Ap가 대기권 밖으로 나가기 전에는 수평이 되지 않는다. 대기 안에서는 받음각을 `max_aoa_deg`(기본 5°) 안으로 묶고, 동압이 `max_q_kpa`(기본 20 kPa)의 80%를 넘으면 스로틀을 줄인다.
+- 방향은 `heading`(기본 90°)이나 `inclination_deg`(`launch` `north`·`south`)로 준다. 경사각을 주면 자전이 준 속도를 빼고 방위를 계속 고친다. `ascend`는 원궤도 속도에 닿기 전에 끝나므로 경사각은 `circularize`에도 같은 `inclination_deg`를 주어 원궤도화 연소에서 맞춘다(예: 두 단계에 `"inclination_deg": 45`). 그 위도에서 낼 수 없는 경사각이면 정동이나 정서로 향한다.
+- 두 단계는 자동 스테이징을 한다(`auto_stage`, 기본 켬). 다음 스테이지가 버릴 엔진이 모두 꺼졌는데 다른 엔진이 돌면(`boosters_out`, 병렬 부스터), 또는 켜진 엔진이 없으면(`no_running_engine`, 첫 점화 포함) 작동하며, 그 뒤에 쓸 엔진이 없으면 작동하지 않아 사령선 분리·낙하산은 건드리지 않는다.
+- 고체 부스터는 스로틀을 따르지 않으므로 동압 제한을 받지 않는다. 조립할 때 `editor_set_part_settings`로 추력 제한을 맞춘다.
+- `abort_on.no_thrust`와 함께 쓰지 않는다. 단이 다 탄 프레임에 자동 스테이징보다 먼저 계획이 끝난다.
+- 대기 안에서 동압이 1 kPa 이상이거나 엔진이 추력을 내는 동안 기수가 목표에서 30°를 넘게 3초 벗어나면(조종 상실), 추력이 필요한데 쓸 엔진이 없으면(엔진 소진), 또는 자동 스테이징으로 작동한 스테이지의 부품이 하나도 작동하지 않으면 단계가 실패하고 스로틀이 0이 된다.
+- 완료되면 이벤트 `ascend_completed`·`circularize_completed`에 궤도와 동압 최대 등이 남고, 자세는 궤도 프로그레이드로 이어진다.
+
 계획은 이상이 생기면 스스로 끝난다. `abort_on`은 계획 전체에 하나 둔다(예: `{ "steps": [...], "abort_on": { "no_thrust": true } }`).
 
 | 종료 사유 | 언제 | `abort_on` |
