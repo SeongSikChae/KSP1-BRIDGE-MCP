@@ -9,6 +9,7 @@
     <Project Path="src/KspBridge.Mod.Modules.Debug/KspBridge.Mod.Modules.Debug.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Editor/KspBridge.Mod.Modules.Editor.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Flight/KspBridge.Mod.Modules.Flight.csproj" />
+    <Project Path="src/KspBridge.Mod.Modules.Maneuver/KspBridge.Mod.Modules.Maneuver.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Measure/KspBridge.Mod.Modules.Measure.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Wait/KspBridge.Mod.Modules.Wait.csproj" />
     <Project Path="src/KspBridge.Mod.Modules.Warp/KspBridge.Mod.Modules.Warp.csproj" />
@@ -22,6 +23,7 @@
     <Project Path="src/KspBridge.Server.Modules.Debug/KspBridge.Server.Modules.Debug.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Editor/KspBridge.Server.Modules.Editor.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Flight/KspBridge.Server.Modules.Flight.csproj" />
+    <Project Path="src/KspBridge.Server.Modules.Maneuver/KspBridge.Server.Modules.Maneuver.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Measure/KspBridge.Server.Modules.Measure.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Wait/KspBridge.Server.Modules.Wait.csproj" />
     <Project Path="src/KspBridge.Server.Modules.Warp/KspBridge.Server.Modules.Warp.csproj" />
@@ -36,6 +38,7 @@
     <Project Path="tests/KspBridge.Mod.Modules.Debug.Tests/KspBridge.Mod.Modules.Debug.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Editor.Tests/KspBridge.Mod.Modules.Editor.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Flight.Tests/KspBridge.Mod.Modules.Flight.Tests.csproj" />
+    <Project Path="tests/KspBridge.Mod.Modules.Maneuver.Tests/KspBridge.Mod.Modules.Maneuver.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Measure.Tests/KspBridge.Mod.Modules.Measure.Tests.csproj" />
     <Project Path="tests/KspBridge.Mod.Modules.Warp.Tests/KspBridge.Mod.Modules.Warp.Tests.csproj" />
     <Project Path="tests/KspBridge.Server.Core.Tests/KspBridge.Server.Core.Tests.csproj" />

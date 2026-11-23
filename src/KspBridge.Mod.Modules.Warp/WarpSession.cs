@@ -68,7 +68,7 @@ namespace KspBridge.Mod.Modules.Warp
                 return;
             }
             startThrottle = game.Throttle;
-            WarpTarget target = WarpTarget.From(args, ut, game.ReadOrbit);
+            WarpTarget target = WarpTarget.From(args, ut, game.ReadOrbit, game.ReadNode);
             TargetUt = target.Ut;
             Failure = target.Failure;
         }

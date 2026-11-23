@@ -17,27 +17,27 @@ namespace KspBridge.Mod.Modules.Ascent
     }
 
     /// <summary>
-    /// The circularize step without the game (spec C8-C10): the burn start centered on the apoapsis, the burn direction (fixed below
-    /// 10 m/s), the 5° gate, the throttle and completion.
+    /// The circularize step without the game (spec C8-C10): the burn start centered on the apoapsis and the delta-v to the circular
+    /// velocity; the burn itself (direction fixed below 10 m/s, the 5° gate, the throttle and completion) is <see cref="BurnControl"/>.
     /// </summary>
     internal sealed class CircularizeLogic
     {
-        public const double LockMps = 10;
-        public const double GateDeg = 5;
-        public const double FadeSeconds = 2;
-        public const double MinThrottle = 0.05;
-        public const double GrowMps = 0.05;
-        public const double NoThrustKn = 0.01;
+        public const double LockMps = BurnControl.LockMps;
+        public const double GateDeg = BurnControl.GateDeg;
+        public const double FadeSeconds = BurnControl.FadeSeconds;
+        public const double MinThrottle = BurnControl.MinThrottle;
+        public const double GrowMps = BurnControl.GrowMps;
+        public const double NoThrustKn = BurnControl.NoThrustKn;
 
         private readonly CircularizeArgs args;
+        private readonly BurnControl burn;
         private bool burning;
-        private double? lockedPitch;
-        private double lockedHeading;
-        private double? minimum;
-        private CircularizeCommand last;
-        private double noseError;
 
-        public CircularizeLogic(CircularizeArgs args) => this.args = args;
+        public CircularizeLogic(CircularizeArgs args)
+        {
+            this.args = args;
+            burn = new BurnControl(args.ToleranceMps, args.AutoStage);
+        }
 
         public double StartUt { get; private set; }
         public double? BurnSeconds { get; private set; }
@@ -87,46 +87,20 @@ namespace KspBridge.Mod.Modules.Ascent
                 }
             }
 
-            CircularizeCommand c = new CircularizeCommand();
-            if (lockedPitch.HasValue)
-            {
-                c.PitchDeg = lockedPitch.Value;
-                c.HeadingDeg = lockedHeading;
-            }
-            else
-            {
-                AoaLimit.PitchHeading(dv, r.Up, r.North, r.East, 0, out c.PitchDeg, out c.HeadingDeg);
-                if (burning && RemainingDv < LockMps)
-                {
-                    lockedPitch = c.PitchDeg;
-                    lockedHeading = c.HeadingDeg;
-                }
-            }
-            noseError = AoaLimit.AngleDeg(r.Nose, AoaLimit.Direction(c.PitchDeg, c.HeadingDeg, r.Up, r.North, r.East));
-
-            if (burning && RemainingDv <= args.ToleranceMps)
-            {
-                c.Done = true;
-            }
-            else if (burning && Grew(r))
-            {
-                c.Done = true;
-            }
-            if (c.Done)
-            {
-                last = c;
-                return c;
-            }
-
-            c.WantThrust = burning;
-            if (burning && noseError <= GateDeg)
-                c.Throttle = accel > 0 ? Clamp(RemainingDv / (accel * FadeSeconds), MinThrottle, 1) : 1;
-            if (StageRule.Exhausted(c.WantThrust, args.AutoStage, r.NextStage, r.Engines))
-                c.Failure = "engines exhausted: thrust is wanted but no engine runs and staging cannot light one";
-            c.Stage = StageRule.Judge(c.WantThrust, args.AutoStage, r.NextStage, r.Engines);
-            last = c;
+            CircularizeCommand c = From(burn.Tick(dv, burning, r));
             return c;
         }
+
+        private static CircularizeCommand From(BurnCommand b) => new CircularizeCommand
+        {
+            PitchDeg = b.PitchDeg,
+            HeadingDeg = b.HeadingDeg,
+            Throttle = b.Throttle,
+            WantThrust = b.WantThrust,
+            Stage = b.Stage,
+            Done = b.Done,
+            Failure = b.Failure,
+        };
 
         /// <summary>step_progress (spec C10).</summary>
         public Dictionary<string, object> Progress(int stages) => new Dictionary<string, object>
@@ -135,28 +109,10 @@ namespace KspBridge.Mod.Modules.Ascent
             ["start_ut"] = StartUt,
             ["burn_time_s"] = BurnSeconds,
             ["remaining_dv_mps"] = RemainingDv,
-            ["nose_error_deg"] = last == null ? (double?)null : noseError,
-            ["throttle"] = last?.Throttle,
+            ["nose_error_deg"] = burn.Last == null ? (double?)null : burn.NoseError,
+            ["throttle"] = burn.Last?.Throttle,
             ["stages"] = stages,
         };
-
-        /// <summary>
-        /// Grew again (spec C9): the minimum is kept only on thrusting frames (engine thrust ≥ 0.01 kN) below 10 m/s and dropped on
-        /// any other frame; done when a thrusting frame below 10 m/s is more than 0.05 m/s above it.
-        /// </summary>
-        private bool Grew(AscentReading r)
-        {
-            bool thrusting = r.Thrust >= NoThrustKn;
-            if (!thrusting || RemainingDv >= LockMps)
-            {
-                minimum = null;
-                return false;
-            }
-            if (minimum.HasValue && RemainingDv > minimum.Value + GrowMps)
-                return true;
-            minimum = minimum.HasValue ? Math.Min(minimum.Value, RemainingDv) : RemainingDv;
-            return false;
-        }
 
         /// <summary>
         /// The circular orbital velocity here (spec C8): horizontal with the circular speed, along the current horizontal velocity
@@ -183,6 +139,5 @@ namespace KspBridge.Mod.Modules.Ascent
             return Math.Max(0, Math.Sqrt(r.Gm / rAp) - vAp);
         }
 
-        private static double Clamp(double x, double min, double max) => double.IsNaN(x) ? min : x < min ? min : x > max ? max : x;
     }
 }

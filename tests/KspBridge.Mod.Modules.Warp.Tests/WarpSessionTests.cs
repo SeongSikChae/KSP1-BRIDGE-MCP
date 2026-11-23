@@ -1,3 +1,4 @@
+using KspBridge.Mod.Modules.Maneuver;
 using KspBridge.Mod.Modules.Warp;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
@@ -427,6 +428,20 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             Assert.AreEqual(WarpProgress.Failed, progress);
             Assert.AreEqual(100.0, session.Stop());
             Assert.AreEqual(1.0, game.Rate);
+        }
+
+        [TestMethod]
+        public void Node_TargetIsTheBurnStartMinusLead_OrItsFailure()
+        {
+            game.Node = new NodeStartResult { NodeUt = game.Ut + 1000, BurnSeconds = 40, StartUt = game.Ut + 980 };
+            Begin(new WarpArgs { Goal = WarpGoal.Node, Lead = 60 });
+            Assert.AreEqual(game.Ut + 920, session.TargetUt, 0.1);
+            Assert.IsNull(session.Failure);
+
+            game.Node = new NodeStartResult { Failure = "there is no maneuver node; make one with create_node" };
+            Begin(new WarpArgs { Goal = WarpGoal.Node, Lead = 60 });
+            Assert.AreEqual(WarpProgress.Failed, progress);
+            StringAssert.Contains(session.Failure, "no maneuver node");
         }
 
         [TestMethod]

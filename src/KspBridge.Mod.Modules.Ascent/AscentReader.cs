@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace KspBridge.Mod.Modules.Ascent
 {
     /// <summary>Reads <see cref="AscentReading"/> from the active vessel (KSP side).</summary>
-    internal static class AscentReader
+    public static class AscentReader
     {
         public static AscentReading Read(Vessel v)
         {

@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Reloadable feature module (Mod side): the warp step type.
-       net472 for KSP 1.12.5 / Unity 2019.4 Mono. Uses the flight module's public snapshot and report. -->
+       net472 for KSP 1.12.5 / Unity 2019.4 Mono. Uses the flight module's public snapshot and report, and the
+       maneuver module's first node start for the node target. -->
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
@@ -35,8 +36,11 @@
   <ItemGroup>
     <ProjectReference Include="..\KspBridge.Mod.Core\KspBridge.Mod.Core.csproj" Private="false" />
     <ProjectReference Include="..\KspBridge.Mod.Loader\KspBridge.Mod.Loader.csproj" Private="false" />
-    <!-- Same generation set: the generation loader resolves it by name (GenerationLoader.Resolve). -->
+    <!-- Same generation set: the generation loader resolves them by name (GenerationLoader.Resolve). -->
     <ProjectReference Include="..\KspBridge.Mod.Modules.Flight\KspBridge.Mod.Modules.Flight.csproj" Private="false" />
+    <ProjectReference Include="..\KspBridge.Mod.Modules.Control\KspBridge.Mod.Modules.Control.csproj" Private="false" />
+    <ProjectReference Include="..\KspBridge.Mod.Modules.Ascent\KspBridge.Mod.Modules.Ascent.csproj" Private="false" />
+    <ProjectReference Include="..\KspBridge.Mod.Modules.Maneuver\KspBridge.Mod.Modules.Maneuver.csproj" Private="false" />
   </ItemGroup>
 
 </Project>

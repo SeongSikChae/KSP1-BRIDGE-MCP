@@ -1,3 +1,4 @@
+using KspBridge.Mod.Modules.Maneuver;
 using KspBridge.Mod.Modules.Warp;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
@@ -44,6 +45,23 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             WarpTarget past = To(WarpGoal.Apoapsis, Closed(), 5000);
             Assert.IsNull(past.Failure);
             Assert.AreEqual(900.0, past.Ut);
+        }
+
+        [TestMethod]
+        public void Node_BurnStartMinusLead_NeedsNoOrbit()
+        {
+            Func<OrbitReading> none = () => throw new InvalidOperationException();
+            NodeStartResult start = new NodeStartResult { NodeUt = 7000, BurnSeconds = 40, StartUt = 6980 };
+            Assert.AreEqual(6920.0, WarpTarget.From(new WarpArgs { Goal = WarpGoal.Node, Lead = 60 }, 5000, none, () => start).Ut);
+            Assert.AreEqual(6980.0, WarpTarget.From(new WarpArgs { Goal = WarpGoal.Node }, 5000, none, () => start).Ut);
+        }
+
+        [TestMethod]
+        public void Node_PassesTheStartFailureOn()
+        {
+            NodeStartResult failed = new NodeStartResult { Failure = "the first node's time has passed (D009)" };
+            WarpTarget t = WarpTarget.From(new WarpArgs { Goal = WarpGoal.Node, Lead = 60 }, 5000, Closed, () => failed);
+            Assert.AreEqual("the first node's time has passed (D009)", t.Failure);
         }
 
         [TestMethod]

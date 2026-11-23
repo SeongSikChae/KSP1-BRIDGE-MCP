@@ -1,3 +1,4 @@
+using KspBridge.Mod.Modules.Maneuver;
 using System;
 
 namespace KspBridge.Mod.Modules.Warp
@@ -33,7 +34,8 @@ namespace KspBridge.Mod.Modules.Warp
         public string Failure { get; }
 
         /// <param name="orbit">Asked for only when the goal is a point of the orbit.</param>
-        public static WarpTarget From(WarpArgs args, double ut, Func<OrbitReading> orbit)
+        /// <param name="node">Asked for only when the goal is the node: the maneuver module's start checks and burn start (D014).</param>
+        public static WarpTarget From(WarpArgs args, double ut, Func<OrbitReading> orbit, Func<NodeStartResult> node = null)
         {
             switch (args.Goal)
             {
@@ -41,10 +43,16 @@ namespace KspBridge.Mod.Modules.Warp
                     return At(ut + args.Value);
                 case WarpGoal.Ut:
                     return At(args.Value);
+                case WarpGoal.Node:
+                    return ToNode(args, node());
                 default:
                     return ToPoint(args, ut, orbit());
             }
         }
+
+        /// <summary>The burn start − lead_s, or the start check's failure as it is.</summary>
+        private static WarpTarget ToNode(WarpArgs args, NodeStartResult start)
+            => start.Failure != null ? Fail(start.Failure) : At(start.StartUt - args.Lead);
 
         private static WarpTarget ToPoint(WarpArgs args, double ut, OrbitReading orbit)
         {

@@ -29,6 +29,11 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             WarpArgs pe = Parse("{\"to\":\"periapsis\"}");
             Assert.AreEqual(WarpGoal.Periapsis, pe.Goal);
             Assert.AreEqual(0.0, pe.Lead);
+
+            WarpArgs node = Parse("{\"to\":\"node\",\"lead_s\":60}");
+            Assert.AreEqual(WarpGoal.Node, node.Goal);
+            Assert.AreEqual(60.0, node.Lead);
+            Assert.AreEqual(0.0, Parse("{\"to\":\"node\"}").Lead);
         }
 
         [TestMethod]
@@ -54,7 +59,7 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         [DataRow("{\"ut\":\"1\"}")]
         [DataRow("{\"to\":1}")]
         [DataRow("{\"to\":\"Apoapsis\"}")]
-        [DataRow("{\"to\":\"node\"}")]
+        [DataRow("{\"to\":\"maneuver\"}")]
         [DataRow("{\"to\":\"apoapsis\",\"lead_s\":-1}")]
         [DataRow("{\"to\":\"apoapsis\",\"lead_s\":\"1\"}")]
         [DataRow("{\"seconds\":1,\"lead_s\":1}")]

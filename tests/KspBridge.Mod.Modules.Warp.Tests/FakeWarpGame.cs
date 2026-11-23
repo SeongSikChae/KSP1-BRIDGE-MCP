@@ -1,3 +1,4 @@
+using KspBridge.Mod.Modules.Maneuver;
 using KspBridge.Mod.Modules.Warp;
 using System;
 using System.Collections.Generic;
@@ -80,6 +81,11 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         };
 
         public OrbitReading ReadOrbit() => Orbit;
+
+        /// <summary>The node start the maneuver module would give; a failure without a node.</summary>
+        public NodeStartResult Node { get; set; } = new NodeStartResult { Failure = "there is no maneuver node; make one with create_node" };
+
+        public NodeStartResult ReadNode() => Node;
 
         public double? SoiSeconds(double ut) => SoiUt.HasValue ? SoiUt.Value - ut : (double?)null;
 

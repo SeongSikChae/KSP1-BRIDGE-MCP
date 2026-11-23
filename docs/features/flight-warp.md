@@ -2,7 +2,7 @@
 
 파일: src/KspBridge.Mod.Modules.Warp/KspBridge.Mod.Modules.Warp.csproj, src/KspBridge.Mod.Modules.Warp/WarpModule.cs, src/KspBridge.Mod.Modules.Warp/WarpArgs.cs, src/KspBridge.Mod.Modules.Warp/WarpTarget.cs, src/KspBridge.Mod.Modules.Warp/WarpRule.cs, src/KspBridge.Mod.Modules.Warp/IWarpGame.cs, src/KspBridge.Mod.Modules.Warp/WarpSession.cs, src/KspBridge.Mod.Modules.Warp/GameWarp.cs, src/KspBridge.Mod.Modules.Warp/WarpStep.cs, src/KspBridge.Server.Modules.Warp/KspBridge.Server.Modules.Warp.csproj, src/KspBridge.Server.Modules.Warp/WarpModule.cs, tests/KspBridge.Mod.Modules.Warp.Tests/KspBridge.Mod.Modules.Warp.Tests.csproj, tests/KspBridge.Mod.Modules.Warp.Tests/FakeWarpGame.cs, tests/KspBridge.Mod.Modules.Warp.Tests/WarpArgsTests.cs, tests/KspBridge.Mod.Modules.Warp.Tests/WarpTargetTests.cs, tests/KspBridge.Mod.Modules.Warp.Tests/WarpRuleTests.cs, tests/KspBridge.Mod.Modules.Warp.Tests/WarpSessionTests.cs, ReadMe.md
 
-목표 시점까지 게임의 시간 가속으로 가서 1배로 정확히 멈추는 단계 종류 `warp`. 별도 MCP 도구는 없고 Planner가 `submit_plan`의 단계로 쓴다. 지금 가속 상태는 `get_flight`의 `time_warp`(docs/features/flight-observation.md R2)에 나온다. 상태 조건으로 멈추기, 기동 노드 목표, 다른 단계의 자동 가속, 비행 장면 밖의 가속, 영향권 전환 시점을 목표로 하기, 레일이 가능한 구간에서 물리 가속을 고르는 것, 사람의 조작을 감지해 멈추는 것은 하지 않는다. 괄호 안 D번호는 docs/specs/시간-가속/decisions.md의 결정이다.
+목표 시점까지 게임의 시간 가속으로 가서 1배로 정확히 멈추는 단계 종류 `warp`. 별도 MCP 도구는 없고 Planner가 `submit_plan`의 단계로 쓴다. 지금 가속 상태는 `get_flight`의 `time_warp`(docs/features/flight-observation.md R2)에 나온다. 상태 조건으로 멈추기, 다른 단계의 자동 가속, 비행 장면 밖의 가속, 영향권 전환 시점을 목표로 하기, 레일이 가능한 구간에서 물리 가속을 고르는 것, 사람의 조작을 감지해 멈추는 것은 하지 않는다. 괄호 안 D번호는 docs/specs/시간-가속/decisions.md의 결정이고, "기동-노드 D번호"는 docs/specs/기동-노드/decisions.md의 결정이다. 기동 노드 목표의 노드 읽기와 연소 시작 시각은 docs/features/flight-maneuver.md의 것을 쓴다.
 
 ## 용어
 
@@ -18,9 +18,9 @@
 ## 요구(완료 조건)
 
 - R1. 시간 가속이 Mod 모듈과 MCP 서버 모듈 쌍(`warp`)으로 더해지고 핫리로드로 반영된다. 단계 종류 `warp`가 `list_step_types`에 나오고, 설명에 인자(이름·범위·기본값), 레일이 막힌 구간의 처리, 완료·실패 조건이 들어간다.
-- R2. `warp`는 목표로 `params.seconds`(단계가 시작된 UT부터의 게임 시간 s, 0보다 큼), `params.ut`(게임 시각 s), `params.to`(`apoapsis` 또는 `periapsis`) 가운데 하나를 받는다. `to`는 `params.lead_s`(몇 초 전, 0 이상, 생략하면 0)와 함께 쓸 수 있고 `lead_s`는 `to`와 함께만 받는다(D001). 선택 인자 `params.max_rate`(1 이상의 수)를 주면 그 값을 넘지 않는 가장 높은 배율 단까지만 레일 가속을 쓰고, 생략하면 제한이 없다. 선택 인자 `params.physics_rate`(2 이상 4 이하의 정수)는 레일이 막힌 구간에서 쓸 물리 가속의 상한이며, 생략하면 물리 가속을 쓰지 않는다(D002). 목표가 없거나 둘 이상이거나, 종류·범위가 맞지 않거나, 모르는 `to`나 모르는 인자이면 계획 제출이 `bad_request`이다.
-- R3. 목표 UT는 단계가 시작된 물리 프레임에 한 번 정하고 그 뒤 바꾸지 않는다. `to`의 목표 UT는 그때의 활성 기체 궤도로 정한 다음 Ap·Pe의 UT에서 `lead_s`를 뺀 값이다. 도중에 추력이나 항력으로 궤도가 바뀌어도 따라가지 않고, Ap·Pe에 닿기 전에 다른 천체의 영향권으로 들어가는지는 보지 않는다.
-- R4. 단계가 시작될 때 활성 기체가 없거나, `to`를 쓰는데 활성 기체가 착지·착수·발사 전 상태이거나, `apoapsis`인데 Ap가 없거나 영향권 밖이거나(이심률 1 이상, 또는 Ap의 반지름이 영향권 반지름 이상), `periapsis`인데 열린 궤도에서 이미 Pe를 지났으면 단계가 실패해 계획이 `step_failed`로 끝난다. 이때도 배율은 R7대로 1이 된다(D007).
+- R2. `warp`는 목표로 `params.seconds`(단계가 시작된 UT부터의 게임 시간 s, 0보다 큼), `params.ut`(게임 시각 s), `params.to`(`apoapsis`·`periapsis`·`node`) 가운데 하나를 받는다. `to`는 `params.lead_s`(몇 초 전, 0 이상, 생략하면 0)와 함께 쓸 수 있고 `lead_s`는 `to`와 함께만 받는다(D001). 선택 인자 `params.max_rate`(1 이상의 수)를 주면 그 값을 넘지 않는 가장 높은 배율 단까지만 레일 가속을 쓰고, 생략하면 제한이 없다. 선택 인자 `params.physics_rate`(2 이상 4 이하의 정수)는 레일이 막힌 구간에서 쓸 물리 가속의 상한이며, 생략하면 물리 가속을 쓰지 않는다(D002). 목표가 없거나 둘 이상이거나, 종류·범위가 맞지 않거나, 모르는 `to`나 모르는 인자이면 계획 제출이 `bad_request`이다.
+- R3. 목표 UT는 단계가 시작된 물리 프레임에 한 번 정하고 그 뒤 바꾸지 않는다. `to`의 목표 UT는 그때의 활성 기체 궤도로 정한 다음 Ap·Pe의 UT에서 `lead_s`를 뺀 값이고, `node`의 목표 UT는 그때의 맨 앞 노드의 연소 시작 시각(docs/features/flight-maneuver.md 용어)에서 `lead_s`를 뺀 값이다(기동-노드 D005). 도중에 추력이나 항력으로 궤도가 바뀌어도 따라가지 않고, Ap·Pe에 닿기 전에 다른 천체의 영향권으로 들어가는지는 보지 않는다.
+- R4. 단계가 시작될 때 활성 기체가 없거나, `to`를 쓰는데 활성 기체가 착지·착수·발사 전 상태이거나, `apoapsis`인데 Ap가 없거나 영향권 밖이거나(이심률 1 이상, 또는 Ap의 반지름이 영향권 반지름 이상), `periapsis`인데 열린 궤도에서 이미 Pe를 지났거나, `node`인데 노드 사용 가능이 아니거나 노드가 없거나 지금 UT가 맨 앞 노드의 UT 이상이거나 맨 앞 노드의 노드 뒤 궤도가 없거나 예상 연소 시간을 낼 수 없으면(docs/features/flight-maneuver.md 용어, 기동-노드 D009·D014) 단계가 실패해 계획이 `step_failed`로 끝난다. 이때도 배율은 R7대로 1이 된다(D007).
 - R5. 단계는 레일 상한과 `max_rate` 안에서 남은 시간에 맞춰 레일 배율을 올리고 내린다. 게임이나 사람이 배율을 바꿔도 다시 맞춘다(D003). 게임의 자동 가속이 켜져 있으면 끄고 이어받는다. 레일이 막힌 구간에서는 1배로 진행하고, `physics_rate`가 있으면 그 값 이하의 물리 배율을 쓴다(게임 설정 `GameParameters.Flight.CanTimeWarpLow`가 막으면 1배). 레일이 다시 가능해지면 스스로 레일 가속으로 돌아간다. 단계가 시작된 뒤 25 물리 프레임 동안은, 이미 레일 위가 아니면 레일 배율을 올리지 않는다(게임이 가속을 최근 20프레임의 평균으로 보아 방금 켠 추력이 아직 드러나지 않으므로. D017). 영향권 전환이 다가오면 게임이 내리기 전에 단계가 먼저 즉시 내린다(D011).
 - R6. 단계는 배율이 1이고 활성 기체가 레일 위가 아닌 상태에서 UT가 목표 UT 이상인 첫 물리 프레임에 완료된다. 배율은 목표 UT 전에 1로 내려 가속 때문에 목표를 지나치지 않는다. 시작할 때 목표 UT가 이미 지났으면 실패하지 않고 같은 조건으로 바로 완료된다(사람이 켜 둔 가속이 있으면 1배로 내린 뒤).
 - R7. 단계가 실행되는 동안(시작할 때 실패한 경우 포함) 계획이 어떤 사유로 끝나도 배율을 1로 되돌린다. 게임이 일시정지 중이면 멈춘 상태를 지킨다(D012). `warp`가 실행 중이 아닐 때는 배율을 바꾸지 않는다. `timeout_s`는 다른 단계와 같이 게임 시간이다.
@@ -46,5 +46,6 @@
 | 날짜 | 작업 | 바꾼 요구 | 변경 폴더 |
 |---|---|---|---|
 | 2026-11-22 | 시간-가속 | R1~R11 추가(기준 spec 처음 만듦) | docs/specs/시간-가속/ |
+| 2026-11-23 | 기동-노드 | R2·R3·R4 바꿈(`to` `node` 목표와 그 실패) | docs/specs/기동-노드/ |
 
 표에 없는 이전 변경: 기록 없음

@@ -115,7 +115,10 @@ namespace KspBridge.Server.Modules.Core
                      "(target_ut, ut, error_s, max_rails_rate, max_physics_rate, real_s, blocked) and warp_released (reason, rate: the " +
                      "plan ended while warping and the rate went to 1), from ascend and circularize ascend_completed (apoapsis_m, " +
                      "periapsis_m, inclination_deg, altitude_m, max_q_kpa, max_aoa_deg, stages), circularize_completed (apoapsis_m, " +
-                     "periapsis_m, eccentricity, inclination_deg, remaining_dv_mps, burn_start_ut, ut, stages) and stage_activated with " +
+                     "periapsis_m, eccentricity, inclination_deg, remaining_dv_mps, burn_start_ut, ut, stages), from execute_node " +
+                     "node_executed (node_ut, node_dv_mps, burn_time_s, burn_start_ut, ut, stages, remaining_dv_mps and its " +
+                     "prograde/normal/radial parts, planned and actual apoapsis_m, periapsis_m, inclination_deg, actual eccentricity) " +
+                     "and stage_activated with " +
                      "reason boosters_out or no_running_engine for automatic staging, and parts_lost (count and " +
                      "parts: name, kind exploded/broke_off, cause crash, collision, crash_splashdown, overheat, over_g, over_pressure " +
                      "or null) whenever the vessel loses parts while a plan runs), oldest first. " +

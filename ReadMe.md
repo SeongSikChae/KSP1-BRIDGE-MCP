@@ -125,6 +125,7 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 | `check_ship` | check | 발사 전 조립 점검: 지정 천체 기준 스테이지별 질량·Δv·TWR·연소 시간, 무게중심 어긋남, 구조 경고 8종 |
 | `measure_start`, `measure_stop` | measure | 검증용 계측 시작·끝: 계측 중 물리 프레임마다 활성 기체의 값(조종 상태·입력, 질량·추력, 자세·각속도, 스테이지, 고도·속도)을 모음 |
 | `get_measurement` | measure | 실행 중이거나 가장 최근에 끝난 계측의 항목별 요약(경과 시간 범위 지정 가능)과 표본 목록 |
+| `create_node`, `get_nodes`, `delete_node` | maneuver | 활성 기체의 기동 노드 생성(시각과 Δv 성분, 또는 Ap·Pe·원궤도 목표)·조회(UT 순, 노드 뒤 궤도·예상 연소 시간)·삭제 |
 
 `get_plan`의 실행 중 계획(`current`)에는 진행 값이 붙는다. 계획 경과 시간(`elapsed_s`), 단계 경과 시간(`step_elapsed_s`), timeout까지 남은 시간(`step_timeout_remaining_s`), 단계가 보고한 목표까지 남은 양(`step_progress`, 예: `wait`의 `target_s`·`remaining_s`)이다. 단계가 아직 시작되지 않았으면 단계 값은 `null`이다. 같은 계획 요약을 돌려주는 `submit_plan`·`submit_wait` 응답에도 같은 값이 붙는다.
 
@@ -144,7 +145,7 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 { "type": "wait_until", "params": { "all": [ { "value": "apoapsis_m", "op": ">=", "to": 80000 } ] }, "timeout_s": 300 }
 ```
 
-시간 가속 단계는 `warp`이다. `params.seconds`(단계 시작부터 게임 시간), `params.ut`(게임 시각), `params.to`(`apoapsis`·`periapsis`, 몇 초 전은 `lead_s`) 가운데 하나를 목표로 받아, 게임이 허용하는 만큼 레일 가속으로 가고 목표 전에 1배로 내려 완료한다. 대기권·추력 중처럼 레일 가속이 막힌 구간은 1배로 진행하며, `physics_rate`(2~4)를 적었을 때만 그 구간에서 물리 가속을 쓴다. 레일 배율의 상한은 `max_rate`이다. 실행되는 동안 배율은 단계가 정하고, 계획이 어떻게 끝나도 1배로 돌아온다. 레일 위에서는 스로틀이 0으로 보이고 단계가 완료될 때 되돌아온다.
+시간 가속 단계는 `warp`이다. `params.seconds`(단계 시작부터 게임 시간), `params.ut`(게임 시각), `params.to`(`apoapsis`·`periapsis`·`node`, 몇 초 전은 `lead_s`. `node`는 맨 앞 기동 노드의 연소 시작 시각) 가운데 하나를 목표로 받아, 게임이 허용하는 만큼 레일 가속으로 가고 목표 전에 1배로 내려 완료한다. 대기권·추력 중처럼 레일 가속이 막힌 구간은 1배로 진행하며, `physics_rate`(2~4)를 적었을 때만 그 구간에서 물리 가속을 쓴다. 레일 배율의 상한은 `max_rate`이다. 실행되는 동안 배율은 단계가 정하고, 계획이 어떻게 끝나도 1배로 돌아온다. 레일 위에서는 스로틀이 0으로 보이고 단계가 완료될 때 되돌아온다.
 
 ```json
 { "type": "warp", "params": { "to": "apoapsis", "lead_s": 30 } }
@@ -168,6 +169,26 @@ claude mcp add --transport http kspbridge http://127.0.0.1:65531/mcp
 - `abort_on.no_thrust`와 함께 쓰지 않는다. 단이 다 탄 프레임에 자동 스테이징보다 먼저 계획이 끝난다.
 - 대기 안에서 동압이 1 kPa 이상이거나 엔진이 추력을 내는 동안 기수가 목표에서 30°를 넘게 3초 벗어나면(조종 상실), 추력이 필요한데 쓸 엔진이 없으면(엔진 소진), 또는 자동 스테이징으로 작동한 스테이지의 부품이 하나도 작동하지 않으면 단계가 실패하고 스로틀이 0이 된다.
 - 완료되면 이벤트 `ascend_completed`·`circularize_completed`에 궤도와 동압 최대 등이 남고, 자세는 궤도 프로그레이드로 이어진다.
+
+궤도를 바꾸는 연소는 기동 노드로 한다. `create_node`로 노드를 만들고(계획이 실행 중이 아닐 때), 계획에서 `warp`(`to` `node`) → `execute_node`로 실행한다. 노드가 여럿이면 이 둘을 되풀이한다. 호만 전이(100 km → 300 km 원궤도)는 노드 둘로 만든다.
+
+```text
+create_node { "at": "periapsis", "goal": { "apoapsis_m": 300000 } }
+create_node { "at": "apoapsis", "goal": { "circular": true } }
+```
+
+```json
+{ "steps": [
+  { "type": "warp", "params": { "to": "node", "lead_s": 60 } },
+  { "type": "execute_node" },
+  { "type": "warp", "params": { "to": "node", "lead_s": 60 } },
+  { "type": "execute_node" } ] }
+```
+
+- 노드 시각은 `ut`·`in_s`·`at`(`apoapsis`·`periapsis`) 가운데 하나이고, 마지막 노드보다 뒤여야 한다. Δv는 성분(`prograde_mps`·`normal_mps`·`radial_mps`)이나 `goal`(`apoapsis_m`·`periapsis_m`은 진행 성분만, `circular`)로 준다. 목표는 게임이 계산한 노드 뒤 궤도에서 1 m 안으로 맞춘다.
+- `execute_node`는 연소의 가운데가 노드 시각에 오도록 시작해(예상 연소 시간의 절반 전), 남은 Δv 방향으로 연소하고 `tolerance_mps`(기본 0.5) 이하가 되면 끝내며 노드를 지운다. 판정·자동 스테이징은 `circularize`와 같다. 실행 정확도는 이벤트 `node_executed`에 남는다.
+- 노드 사용은 경력 모드에서 추적소(궤도 예측)와 관제 센터(비행 계획) 등급이 필요하다. 모자라면 도구가 `not_ready`와 시설 이름을 돌려준다.
+- `abort_on.no_thrust`와 함께 쓰지 않는다(위와 같은 이유).
 
 계획은 이상이 생기면 스스로 끝난다. `abort_on`은 계획 전체에 하나 둔다(예: `{ "steps": [...], "abort_on": { "no_thrust": true } }`).
 

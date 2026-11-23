@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace KspBridge.Mod.Modules.Ascent
 {
     /// <summary>One engine module as the staging rule sees it (spec terms).</summary>
-    internal sealed class EngineInfo
+    public sealed class EngineInfo
     {
         /// <summary>A running engine: ModuleEngines.isOperational (ignited and not flamed out).</summary>
         public bool Operational;
@@ -29,7 +29,7 @@ namespace KspBridge.Mod.Modules.Ascent
     }
 
     /// <summary>One stage of the game's delta-v calculator.</summary>
-    internal struct StageBurn
+    public struct StageBurn
     {
         public int Stage;
         public double StartMass;
@@ -39,7 +39,7 @@ namespace KspBridge.Mod.Modules.Ascent
     }
 
     /// <summary>The values of the active vessel the ascent rules read on one physics frame. World vectors in one frame.</summary>
-    internal sealed class AscentReading
+    public sealed class AscentReading
     {
         public double UT;
         public double Altitude;

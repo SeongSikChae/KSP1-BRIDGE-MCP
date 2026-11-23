@@ -11,6 +11,9 @@ namespace KspBridge.Mod.Modules.Warp
         Ut,
         Apoapsis,
         Periapsis,
+
+        /// <summary>The first maneuver node's burn start (docs/specs/기동-노드 D005).</summary>
+        Node,
     }
 
     /// <summary>Checked parameters of a warp step. Bad input is bad_request, so it rejects the plan at submit time.</summary>
@@ -30,7 +33,7 @@ namespace KspBridge.Mod.Modules.Warp
         /// <summary>Seconds from the start (Seconds) or the UT (Ut).</summary>
         public double Value;
 
-        /// <summary>Seconds before the apoapsis or periapsis.</summary>
+        /// <summary>Seconds before the apoapsis, the periapsis or the node's burn start.</summary>
         public double Lead;
 
         /// <summary>Highest rails rate; null when the game's highest is fine.</summary>
@@ -84,8 +87,10 @@ namespace KspBridge.Mod.Modules.Warp
                     return WarpGoal.Apoapsis;
                 case "periapsis":
                     return WarpGoal.Periapsis;
+                case "node":
+                    return WarpGoal.Node;
                 default:
-                    throw BridgeException.BadRequest("'to' must be apoapsis or periapsis (got '" + to + "')");
+                    throw BridgeException.BadRequest("'to' must be apoapsis, periapsis or node (got '" + to + "')");
             }
         }
 

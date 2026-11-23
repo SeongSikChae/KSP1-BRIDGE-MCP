@@ -1,4 +1,5 @@
 using KspBridge.Mod.Modules.Flight;
+using KspBridge.Mod.Modules.Maneuver;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -47,6 +48,8 @@ namespace KspBridge.Mod.Modules.Warp
                 OnRails = Vessel != null && Vessel.packed,
             };
         }
+
+        public NodeStartResult ReadNode() => NodeReader.FirstNodeStart(Vessel);
 
         public OrbitReading ReadOrbit()
         {

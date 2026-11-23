@@ -8,7 +8,7 @@ namespace KspBridge.Mod.Modules.Ascent
     /// Carries out the staging rule's decision (spec C6): at most once per second of game time, again on the next frame when the
     /// game refuses, and a failure when the stage activated no part. Records stage_activated with the reason.
     /// </summary>
-    internal sealed class AutoStager
+    public sealed class AutoStager
     {
         public const double SpacingS = 1;
 

@@ -32,6 +32,9 @@
     <ProjectReference Include="..\..\src\KspBridge.Mod.Core\KspBridge.Mod.Core.csproj" />
     <ProjectReference Include="..\..\src\KspBridge.Mod.Loader\KspBridge.Mod.Loader.csproj" />
     <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Flight\KspBridge.Mod.Modules.Flight.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Control\KspBridge.Mod.Modules.Control.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Ascent\KspBridge.Mod.Modules.Ascent.csproj" />
+    <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Maneuver\KspBridge.Mod.Modules.Maneuver.csproj" />
     <ProjectReference Include="..\..\src\KspBridge.Mod.Modules.Warp\KspBridge.Mod.Modules.Warp.csproj" />
   </ItemGroup>
 

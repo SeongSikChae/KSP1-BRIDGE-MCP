@@ -4,7 +4,7 @@ using System.Globalization;
 namespace KspBridge.Mod.Modules.Ascent
 {
     /// <summary>The heading toward an inclination (spec C3, C7, D007). Angles in degrees, headings clockwise from north.</summary>
-    internal static class LaunchAzimuth
+    public static class LaunchAzimuth
     {
         /// <summary>How far an inclination may be below the latitude (or above 180° − latitude) and still be flown (spec C7).</summary>
         public const double LatitudeSlackDeg = 0.5;

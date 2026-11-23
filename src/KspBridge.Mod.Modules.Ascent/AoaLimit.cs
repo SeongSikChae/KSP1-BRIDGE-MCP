@@ -4,7 +4,7 @@ using System;
 namespace KspBridge.Mod.Modules.Ascent
 {
     /// <summary>Directions in the surface frame, and the angle of attack limit of spec C3.</summary>
-    internal static class AoaLimit
+    public static class AoaLimit
     {
         /// <summary>At or below this dynamic pressure (kPa) there is no limit, and above it the limit widens as 10 ÷ q.</summary>
         public const double FreeQKpa = 1;

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace KspBridge.Mod.Modules.Ascent
 {
-    internal enum StageReason
+    public enum StageReason
     {
         None,
 
@@ -14,7 +14,7 @@ namespace KspBridge.Mod.Modules.Ascent
     }
 
     /// <summary>When the next stage is activated automatically and when the engines are exhausted (spec C6, C7, D001, D008, D015).</summary>
-    internal static class StageRule
+    public static class StageRule
     {
         public const string BoostersOutName = "boosters_out";
         public const string NoRunningEngineName = "no_running_engine";

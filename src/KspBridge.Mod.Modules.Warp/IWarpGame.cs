@@ -1,3 +1,4 @@
+using KspBridge.Mod.Modules.Maneuver;
 using System.Collections.Generic;
 
 namespace KspBridge.Mod.Modules.Warp
@@ -48,6 +49,9 @@ namespace KspBridge.Mod.Modules.Warp
         WarpReading Read();
 
         OrbitReading ReadOrbit();
+
+        /// <summary>The first maneuver node's start checks and burn start (maneuver module, D014).</summary>
+        NodeStartResult ReadNode();
 
         /// <summary>Game seconds to the coming change of the sphere of influence; null when the game does not slow down for one.</summary>
         double? SoiSeconds(double ut);

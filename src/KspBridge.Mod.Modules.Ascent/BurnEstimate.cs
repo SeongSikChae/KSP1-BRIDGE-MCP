@@ -7,7 +7,7 @@ namespace KspBridge.Mod.Modules.Ascent
     /// How long a delta-v takes, to center a burn on the apoapsis. From the game's delta-v calculator stages, highest first, with the
     /// rocket equation inside a stage (constant mass flow); otherwise from the running engines' acceleration.
     /// </summary>
-    internal static class BurnEstimate
+    public static class BurnEstimate
     {
         /// <summary>Seconds, or null when it cannot be estimated (no stage data and no running engine).</summary>
         public static double? Seconds(double dv, IReadOnlyList<StageBurn> stages, double accel)
