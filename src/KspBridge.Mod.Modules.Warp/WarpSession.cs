@@ -29,15 +29,21 @@ namespace KspBridge.Mod.Modules.Warp
         private readonly IWarpGame game;
         private readonly WarpArgs args;
         private readonly List<string> blocked = new List<string>();
+        private readonly OrbitCheck check = new OrbitCheck();
         private double startThrottle;
         private double startReal;
         private bool arrived;
         private int frames;
+        private readonly Action lateUpdate;
+
+        /// <summary>The rails rate index decided in a physics frame and not set yet; set in the next LateUpdate (D01_08).</summary>
+        private int? pending;
 
         public WarpSession(IWarpGame game, WarpArgs args)
         {
             this.game = game;
             this.args = args;
+            lateUpdate = OnLateUpdate;
         }
 
         public double TargetUt { get; private set; }
@@ -55,6 +61,9 @@ namespace KspBridge.Mod.Modules.Warp
         /// <summary>Why rails warp is not possible now; null when it is.</summary>
         public string BlockedNow { get; private set; }
 
+        /// <summary>The orbit check of the step (R01).</summary>
+        public OrbitCheck Check => check;
+
         public double RealSeconds => game.RealTime - startReal;
 
         public double Remaining(double ut) => Math.Max(0, TargetUt - ut);
@@ -68,6 +77,7 @@ namespace KspBridge.Mod.Modules.Warp
                 return;
             }
             startThrottle = game.Throttle;
+            check.Begin(game.ReadCheck(ut));
             WarpTarget target = WarpTarget.From(args, ut, game.ReadOrbit, game.ReadNode);
             TargetUt = target.Ut;
             Failure = target.Failure;
@@ -83,6 +93,8 @@ namespace KspBridge.Mod.Modules.Warp
 
             game.CancelAutoWarp();
             WarpReading now = game.Read();
+            CheckReading reading = game.ReadCheck(ut);
+            check.Observe(reading);
             if (now.Rails)
                 MaxRailsRate = Math.Max(MaxRailsRate, now.Rate);
             else
@@ -90,9 +102,16 @@ namespace KspBridge.Mod.Modules.Warp
 
             if (ut >= TargetUt && !now.Warping && !now.OnRails)
             {
+                Drop();
                 if (game.Throttle != startThrottle)
                     game.SetThrottle(startThrottle);
                 arrived = true;
+                string changed = check.Complete(reading);
+                if (changed != null)
+                {
+                    Failure = changed;
+                    return WarpProgress.Failed;
+                }
                 return WarpProgress.Arrived;
             }
             frames++;
@@ -103,6 +122,7 @@ namespace KspBridge.Mod.Modules.Warp
         /// <summary>The step ended; returns the rate that was released when it was above 1.</summary>
         public double? Stop()
         {
+            Drop();
             if (arrived || !game.Available)
                 return null;
             game.CancelAutoWarp();
@@ -142,7 +162,12 @@ namespace KspBridge.Mod.Modules.Warp
             int index = rails
                 ? waits ? 0 : Math.Min(wanted, limit)
                 : game.PhysicsAllowed ? WarpRule.PhysicsWanted(remaining, game.PhysicsRates, args.PhysicsRate) : 0;
-            Apply(WarpRule.Decide(now, rails, index, rails ? game.RailsRates : game.PhysicsRates), now);
+            WarpCommand command = WarpRule.Decide(now, rails, index, rails ? game.RailsRates : game.PhysicsRates);
+            // A rate waiting for the LateUpdate is kept only while the rule still wants one raised from 0 (D01_08); anything else,
+            // no command included, drops it and is followed in this physics frame.
+            if (!(command.Change && command.AtLateUpdate))
+                Drop();
+            Apply(command, now);
         }
 
         private void Apply(WarpCommand command, WarpReading now)
@@ -155,7 +180,42 @@ namespace KspBridge.Mod.Modules.Warp
                     game.SetRate(0, instant: true);
                 game.SetMode(command.Rails);
             }
+            if (command.AtLateUpdate)
+            {
+                // D01_08: the rate is set in a later LateUpdate, not in this physics frame, so the game itself puts every vessel on
+                // rails in the LateUpdate that sees it and no physics frame advances UT with a vessel still in the physics.
+                if (!pending.HasValue)
+                    game.AddLateUpdate(lateUpdate);
+                pending = command.Index;
+                return;
+            }
             game.SetRate(command.Index, command.Instant);
+        }
+
+        /// <summary>The game's LateUpdate before OrbitPhysicsManager (D01_08).</summary>
+        private void OnLateUpdate()
+        {
+            if (!pending.HasValue)
+            {
+                game.RemoveLateUpdate(lateUpdate);
+                return;
+            }
+            // While the game overrides the orbits (a contract or mission makes a vessel) it puts no vessel on rails, so a rate set now
+            // would run vessels in the physics at a rails rate. Ask again in the next render frame.
+            if (game.OverrideOrbit)
+                return;
+            int index = pending.Value;
+            pending = null;
+            game.RemoveLateUpdate(lateUpdate);
+            game.SetRate(index, instant: true);
+        }
+
+        private void Drop()
+        {
+            if (!pending.HasValue)
+                return;
+            pending = null;
+            game.RemoveLateUpdate(lateUpdate);
         }
     }
 }

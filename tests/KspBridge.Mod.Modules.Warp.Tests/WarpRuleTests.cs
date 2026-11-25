@@ -69,11 +69,12 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         private static WarpReading Now(bool rails, int index, double rate, bool settled = true)
             => new WarpReading { Rails = rails, Index = index, Rate = rate, Settled = settled };
 
-        private static void Is(WarpCommand c, int index, bool instant, bool switchMode = false, bool rails = false)
+        private static void Is(WarpCommand c, int index, bool instant, bool switchMode = false, bool rails = false, bool atLateUpdate = false)
         {
             Assert.IsTrue(c.Change);
             Assert.AreEqual(index, c.Index);
             Assert.AreEqual(instant, c.Instant);
+            Assert.AreEqual(atLateUpdate, c.AtLateUpdate);
             Assert.AreEqual(switchMode, c.SwitchMode);
             if (switchMode)
                 Assert.AreEqual(rails, c.Rails);
@@ -98,6 +99,29 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         }
 
         [TestMethod]
+        public void Decide_RailsFromZero_AtLateUpdate()
+        {
+            Is(WarpRule.Decide(Now(true, 0, 1), true, 4, Rails), 4, instant: false, atLateUpdate: true);
+            Is(WarpRule.Decide(Now(true, 0, 1), true, 1, Rails), 1, instant: false, atLateUpdate: true);
+        }
+
+        [TestMethod]
+        public void Decide_RailsFromIndexZero_WhileTheGameLowersTheRate_AtLateUpdate()
+        {
+            // Index 0 with the rate still above the wanted rate: the way down must not take it.
+            Is(WarpRule.Decide(Now(true, 0, 37, settled: false), true, 1, Rails), 1, instant: false, atLateUpdate: true);
+            Is(WarpRule.Decide(Now(true, 0, 1000, settled: false), true, 2, Rails), 2, instant: false, atLateUpdate: true);
+        }
+
+        [TestMethod]
+        public void Decide_RailsFromAboveZero_OrDown_NotAtLateUpdate()
+        {
+            Is(WarpRule.Decide(Now(true, 1, 5), true, 4, Rails), 4, instant: false);
+            Is(WarpRule.Decide(Now(true, 6, 10000), true, 4, Rails), 4, instant: true);
+            Is(WarpRule.Decide(Now(true, 5, 1000), true, 0, Rails), 0, instant: true);
+        }
+
+        [TestMethod]
         public void Decide_WhileTheGameChangesTheRate()
         {
             Assert.IsFalse(WarpRule.Decide(Now(true, 2, 7, settled: false), true, 4, Rails).Change, "not raised again");
@@ -110,7 +134,7 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         {
             Is(WarpRule.Decide(Now(true, 0, 1), false, 3, Physics), 3, instant: false, switchMode: true, rails: false);
             Is(WarpRule.Decide(Now(true, 5, 1000), false, 2, Physics), 2, instant: false, switchMode: true, rails: false);
-            Is(WarpRule.Decide(Now(false, 3, 4), true, 7, Rails), 7, instant: false, switchMode: true, rails: true);
+            Is(WarpRule.Decide(Now(false, 3, 4), true, 7, Rails), 7, instant: false, switchMode: true, rails: true, atLateUpdate: true);
         }
     }
 }

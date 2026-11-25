@@ -29,8 +29,8 @@ namespace KspBridge.Mod.Modules.Warp
                "corrected (abort_plan to stop). Gives no control input; a held attitude rests on rails and goes on afterwards. The " +
                "throttle reads 0 on rails and is put back when the step completes. When the plan ends otherwise the rate goes to 1 " +
                "(event warp_released) and the throttle may stay 0. Event warp_completed: target_ut, ut, error_s, max_rails_rate, " +
-               "max_physics_rate, real_s, blocked (why rails warp was not possible on the way). step_progress: target_ut, remaining_s, " +
-               "time_warp, blocked. timeout_s is game time, so it also runs faster. Fails the plan (step_failed) when there is no " +
+               "max_physics_rate, real_s, blocked (why rails warp was not possible on the way), orbit_start and orbit_end (ut, apoapsis_m, periapsis_m, eccentricity, semi_major_axis_m of the active vessel at the first and the last physics frame), orbit_check (kept, or not_judged) and orbit_not_judged (the reasons, in the order they came: thrust, rcs, atmosphere, parts_lost, soi_change, landed). The orbit is judged only when none of these held at any physics frame of the step; it is kept when apoapsis and periapsis each differ by at most 10 m between start and end (an open orbit has no apoapsis: two open orbits compare periapsis only, one open orbit is a change). step_progress: target_ut, remaining_s, " +
+               "time_warp, blocked. timeout_s is game time, so it also runs faster. Fails the plan (step_failed) when the orbit was judged and changed by more than 10 m (no warp_completed then), when there is no " +
                "active vessel, or params.to is used while landed, splashed or on the pad, for the apoapsis of an open orbit or one " +
                "outside the sphere of influence, or for a periapsis an open orbit has passed; for to node also when maneuver nodes are " +
                "not usable, there is no node, the first node's time has passed, the game has no orbit after it, or the burn time " +
@@ -78,6 +78,10 @@ namespace KspBridge.Mod.Modules.Warp
                             ["max_physics_rate"] = session.MaxPhysicsRate,
                             ["real_s"] = session.RealSeconds,
                             ["blocked"] = session.Blocked.Cast<object>().ToList(),
+                            ["orbit_start"] = session.Check.StartOrbit.ToEvent(),
+                            ["orbit_end"] = session.Check.EndOrbit.ToEvent(),
+                            ["orbit_check"] = session.Check.Judged ? "kept" : "not_judged",
+                            ["orbit_not_judged"] = session.Check.Reasons.Cast<object>().ToList(),
                         });
                         return StepResult.Done;
                     default:

@@ -16,6 +16,12 @@ namespace KspBridge.Mod.Modules.Warp
         /// <summary>Rails (otherwise physics); only meaningful with <see cref="SwitchMode"/>.</summary>
         public bool Rails;
 
+        /// <summary>
+        /// A rails rate raised from index 0: not set in this physics frame but remembered, and set (instant) in a later render
+        /// frame's LateUpdate before the game puts vessels on rails (D01_08).
+        /// </summary>
+        public bool AtLateUpdate;
+
         public int Index;
         public bool Instant;
     }
@@ -88,8 +94,13 @@ namespace KspBridge.Mod.Modules.Warp
                     ? new WarpCommand { Change = true, Index = 0, Instant = true }
                     : WarpCommand.None;
             }
+            // A rails rate index raised from 0 is set in a render frame's LateUpdate, in effect at once, so the game puts every vessel
+            // on rails in that same LateUpdate and the next physics frame finds them all on rails (D01_08). It goes by the rate index
+            // only, whether the vessel is on rails or the game is still lowering the rate, and is decided before the way down.
             if (now.Rails != rails)
-                return new WarpCommand { Change = true, SwitchMode = true, Rails = rails, Index = index };
+                return new WarpCommand { Change = true, SwitchMode = true, Rails = rails, Index = index, AtLateUpdate = rails };
+            if (rails && now.Index == 0)
+                return new WarpCommand { Change = true, Index = index, AtLateUpdate = true };
             if (now.Index > index || now.Rate > rates[index])
                 return new WarpCommand { Change = true, Index = index, Instant = true };
             if (now.Index < index && now.Settled)

@@ -65,6 +65,22 @@ namespace KspBridge.Mod.Modules.Warp
             };
         }
 
+        public CheckReading ReadCheck(double ut)
+        {
+            // The values get_flight gives, read with the same FlightSnapshot (R01 C01-E1).
+            FlightData d = FlightSnapshot.TakeBasic(Vessel);
+            return new CheckReading
+            {
+                Orbit = OrbitRecord.From(ut, d.ApA, d.PeA, d.Eccentricity, d.SemiMajorAxis),
+                Thrust = d.Thrust,
+                Rcs = d.Rcs,
+                AboveAtmosphere = !d.BodyInfo.AtmosphereTop.HasValue || d.Altitude > d.BodyInfo.AtmosphereTop.Value,
+                PartCount = Vessel.parts.Count,
+                Body = d.Body,
+                Landed = Vessel.LandedOrSplashed || Vessel.situation == Vessel.Situations.PRELAUNCH,
+            };
+        }
+
         public double? SoiSeconds(double ut)
         {
             // The conditions of the game's own limit (the end of getMaxOnRailsRateIdx).
@@ -83,6 +99,16 @@ namespace KspBridge.Mod.Modules.Warp
             reason = ReasonName((ClearToSaveStatus)arguments[2]);
             return limit;
         }
+
+        public bool OverrideOrbit => FlightGlobals.overrideOrbit;
+
+        // FashionablyLate runs in script order 7, before OrbitPhysicsManager (12), so the game puts every vessel on rails in the same
+        // LateUpdate as the rate it sees (D01_08 premises 3, 5).
+        public void AddLateUpdate(Action action)
+            => TimingManager.LateUpdateAdd(TimingManager.TimingStage.FashionablyLate, new TimingManager.UpdateAction(action));
+
+        public void RemoveLateUpdate(Action action)
+            => TimingManager.LateUpdateRemove(TimingManager.TimingStage.FashionablyLate, new TimingManager.UpdateAction(action));
 
         public void SetRate(int index, bool instant)
         {

@@ -177,8 +177,8 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             Run(() => game.Rate == 50);
 
             game.PlayerSets(0);
-            Run(() => game.Rate == 1);
-            Run(() => game.Rate == 50);
+            Frames(100);
+            Assert.AreEqual(50.0, game.Rate, "lowered by the player, then raised again from 0 at once");
 
             game.PlayerSets(7);
             Frames(200);
@@ -563,6 +563,401 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             Begin(Seconds(1));
             Assert.AreEqual(1.0, session.Remaining(game.Ut), 1e-9);
             Assert.AreEqual(0.0, session.Remaining(game.Ut + 100));
+        }
+
+        // --- Orbit check (R01) ---
+
+        private void RunChanging(Action change)
+        {
+            Begin(Seconds(600));
+            change();
+            RunToEnd();
+        }
+
+        [TestMethod]
+        public void Orbit_Kept_WhenNothingChanged()
+        {
+            RunChanging(() => { });
+            ArrivedPrecisely();
+            Assert.IsTrue(session.Check.Judged);
+            Assert.AreEqual(0, session.Check.Reasons.Count);
+            Assert.AreEqual(2863334.0, session.Check.StartOrbit.ApoapsisM.Value);
+            Assert.AreEqual(2863334.0, session.Check.EndOrbit.ApoapsisM.Value);
+            Assert.AreEqual(game.Ut, session.Check.EndOrbit.Ut);
+        }
+
+        [TestMethod]
+        public void Orbit_StartUt_IsTheUtOfTheStartFrame()
+        {
+            double before = game.Ut;
+            Begin(Seconds(600));
+            Assert.AreEqual(before + FakeWarpGame.Frame, session.Check.StartOrbit.Ut, 1e-9);
+        }
+
+        [TestMethod]
+        [DataRow(10.0, true)]
+        [DataRow(-10.0, true)]
+        [DataRow(11.0, false)]
+        [DataRow(-11.0, false)]
+        public void Orbit_Apoapsis_IsKeptWithinTenMeters(double change, bool kept)
+        {
+            RunChanging(() => game.ApoapsisM += change);
+            Assert.AreEqual(kept ? WarpProgress.Arrived : WarpProgress.Failed, progress);
+        }
+
+        [TestMethod]
+        [DataRow(10.0, true)]
+        [DataRow(-10.0, true)]
+        [DataRow(11.0, false)]
+        [DataRow(-11.0, false)]
+        public void Orbit_Periapsis_IsKeptWithinTenMeters(double change, bool kept)
+        {
+            RunChanging(() => game.PeriapsisM += change);
+            Assert.AreEqual(kept ? WarpProgress.Arrived : WarpProgress.Failed, progress);
+        }
+
+        [TestMethod]
+        public void Orbit_Changed_FailsWithTheMessageOfTheContract()
+        {
+            RunChanging(() => game.ApoapsisM += 11);
+            Assert.AreEqual(WarpProgress.Failed, progress);
+            Assert.AreEqual(
+                "the orbit changed during warp without thrust: apoapsis 2863334.0 → 2863345.0 m, periapsis 2863334.0 → 2863334.0 m (limit 10 m)",
+                session.Failure);
+            Assert.AreEqual(1.0, game.Rate);
+            Assert.IsFalse(game.OnRails);
+        }
+
+        [TestMethod]
+        public void Orbit_Changed_RoundsToOneDecimal()
+        {
+            game.PeriapsisM = 2863288.14;
+            Begin(Seconds(600));
+            game.PeriapsisM = 2863300.06;
+            RunToEnd();
+            StringAssert.Contains(session.Failure, "periapsis 2863288.1 → 2863300.1 m (limit 10 m)");
+        }
+
+        [TestMethod]
+        public void Orbit_BothOpen_ComparesPeriapsisOnly()
+        {
+            game.Eccentricity = 1.5;
+            game.SemiMajorAxisM = -5e6;
+            RunChanging(() => game.ApoapsisM += 500);
+            ArrivedPrecisely();
+            Assert.IsNull(session.Check.StartOrbit.ApoapsisM);
+            Assert.IsNull(session.Check.EndOrbit.ApoapsisM);
+        }
+
+        [TestMethod]
+        public void Orbit_BothOpen_PeriapsisChangeFails_WithApoapsisNone()
+        {
+            game.Eccentricity = 1.5;
+            RunChanging(() => game.PeriapsisM += 11);
+            Assert.AreEqual(WarpProgress.Failed, progress);
+            StringAssert.Contains(session.Failure, "apoapsis none → none m");
+        }
+
+        [TestMethod]
+        public void Orbit_OneOpen_IsAChange()
+        {
+            RunChanging(() => game.Eccentricity = 1.2);
+            Assert.AreEqual(WarpProgress.Failed, progress);
+            StringAssert.Contains(session.Failure, "apoapsis 2863334.0 → none m");
+        }
+
+        [TestMethod]
+        [DataRow("thrust")]
+        [DataRow("rcs")]
+        [DataRow("atmosphere")]
+        [DataRow("parts_lost")]
+        [DataRow("soi_change")]
+        [DataRow("landed")]
+        public void Orbit_NotJudged_WhenAConditionBreaksForOneFrame_EvenWithAChange(string reason)
+        {
+            Begin(Seconds(600));
+            Frames(50);
+            Set(game, reason, broken: true);
+            Frame();
+            Set(game, reason, broken: false);
+            game.ApoapsisM += 500;
+            RunToEnd();
+            Assert.AreEqual(WarpProgress.Arrived, progress);
+            CollectionAssert.AreEqual(new[] { reason }, session.Check.Reasons.ToArray());
+            Assert.IsFalse(session.Check.Judged);
+        }
+
+        private static void Set(FakeWarpGame g, string reason, bool broken)
+        {
+            switch (reason)
+            {
+                case "thrust": g.Thrust = broken ? 5 : 0; break;
+                case "rcs": g.RcsOn = broken; break;
+                case "atmosphere": g.AboveAtmosphere = !broken; break;
+                case "parts_lost": g.PartCount = broken ? 11 : 12; break;
+                case "soi_change": g.BodyName = broken ? "Mun" : "Kerbin"; break;
+                case "landed": g.Landed = broken; break;
+                default: throw new ArgumentException(reason);
+            }
+        }
+
+        [TestMethod]
+        public void Orbit_NotJudged_ByTheStartFrame()
+        {
+            game.Thrust = 3;
+            Begin(Seconds(600));
+            game.Thrust = 0;
+            RunToEnd();
+            CollectionAssert.AreEqual(new[] { "thrust" }, session.Check.Reasons.ToArray());
+        }
+
+        [TestMethod]
+        public void Orbit_NotJudged_ByTheLastFrame()
+        {
+            Begin(Seconds(600));
+            Run(() => session.Remaining(game.Ut) < 0.5);
+            game.Landed = true;
+            game.ApoapsisM += 500;
+            RunToEnd();
+            Assert.AreEqual(WarpProgress.Arrived, progress);
+            CollectionAssert.AreEqual(new[] { "landed" }, session.Check.Reasons.ToArray());
+        }
+
+        [TestMethod]
+        public void Orbit_Reasons_AreListedOnceInTheOrderTheyBroke()
+        {
+            Begin(Seconds(600));
+            Frames(30);
+            game.RcsOn = true;
+            Frames(5);
+            game.Thrust = 2;
+            Frames(5);
+            game.RcsOn = false;
+            Frames(5);
+            game.RcsOn = true;
+            game.Landed = true;
+            RunToEnd();
+            CollectionAssert.AreEqual(new[] { "rcs", "thrust", "landed" }, session.Check.Reasons.ToArray());
+        }
+
+        [TestMethod]
+        public void Orbit_NotJudged_ByAFrameOnRails()
+        {
+            Begin(Seconds(600));
+            Run(() => game.OnRails);
+            game.Thrust = 1;
+            Frame();
+            Assert.IsTrue(game.OnRails);
+            game.Thrust = 0;
+            RunToEnd();
+            CollectionAssert.AreEqual(new[] { "thrust" }, session.Check.Reasons.ToArray());
+        }
+
+        // --- Rails entry (D01_08) ---
+
+        /// <summary>The rails rate index of the single SetRate(instant) call the callback made; fails when there is not one.</summary>
+        private int AppliedIndex()
+        {
+            string[] set = game.Calls
+                .Where(c => c.StartsWith("SetRate:", StringComparison.Ordinal) && c.EndsWith(":True", StringComparison.Ordinal))
+                .ToArray();
+            Assert.AreEqual(1, set.Length);
+            return int.Parse(set[0].Split(':')[1]);
+        }
+
+        /// <summary>Runs physics frames until the step has a rate waiting for the LateUpdate; render frames do not run by themselves.</summary>
+        private void BeginWaiting(WarpArgs args)
+        {
+            game.AutoLateUpdate = false;
+            Begin(args);
+            Run(() => game.LateHooked > 0);
+        }
+
+        [TestMethod]
+        public void RailsEntry_FromRateOne_PhysicsFrameOnlyHooksTheCallback_CallbackSetsTheRateAtOnce()
+        {
+            BeginWaiting(Seconds(600));
+            Assert.AreEqual(0, game.SetRateCalls);
+            Assert.AreEqual(0, game.Index);
+            Assert.AreEqual(1, game.LateHooked);
+            game.RunLateUpdate();
+            Assert.IsTrue(game.Index > 0);
+            Assert.AreEqual(game.Index, AppliedIndex());
+            Assert.AreEqual(1, game.SetRateCalls);
+            Assert.AreEqual(0, game.LateHooked);
+            Assert.AreEqual(1, game.InstantRaiseCalls);
+        }
+
+        [TestMethod]
+        public void RailsEntry_MorePhysicsFramesBeforeTheCallback_StillNoSetRate_OneCallback()
+        {
+            BeginWaiting(Seconds(600));
+            Frames(3);
+            Assert.AreEqual(0, game.SetRateCalls);
+            Assert.AreEqual(1, game.LateHooked);
+            Assert.AreEqual(1, game.LateAdds);
+            game.RunLateUpdate();
+            Assert.AreEqual(1, game.SetRateCalls);
+            Assert.AreEqual(0, game.LateHooked);
+        }
+
+        [TestMethod]
+        public void RailsEntry_WhileOrbitsAreOverridden_TheCallbackWaits_ThenApplies()
+        {
+            BeginWaiting(Seconds(600));
+            game.OverrideOrbit = true;
+            game.RunLateUpdate();
+            game.RunLateUpdate();
+            Assert.AreEqual(0, game.SetRateCalls);
+            Assert.AreEqual(1, game.LateHooked);
+            game.OverrideOrbit = false;
+            game.RunLateUpdate();
+            Assert.AreEqual(1, game.SetRateCalls);
+            Assert.AreEqual(0, game.LateHooked);
+        }
+
+        [TestMethod]
+        public void RailsEntry_StepStopsWhileWaiting_CallbackIsRemoved_NoSetRateAfter()
+        {
+            BeginWaiting(Seconds(600));
+            Assert.IsNull(session.Stop());
+            Assert.AreEqual(0, game.LateHooked);
+            game.RunLateUpdate();
+            Assert.AreEqual(0, game.SetRateCalls);
+        }
+
+        [TestMethod]
+        public void RailsEntry_RailsBlockedWhileWaiting_PendingIsDropped_ModeChangesInThatFrame()
+        {
+            BeginWaiting(Seconds(300, physics: 4));
+            game.BlockReason = "under_acceleration";
+            Frame();
+            Assert.AreEqual(0, game.LateHooked);
+            Assert.IsFalse(game.RailsMode);
+            Assert.IsTrue(game.Calls.Contains("SetMode:False"));
+            game.RunLateUpdate();
+            Assert.IsFalse(game.Calls.Any(c => c.EndsWith(":True", StringComparison.Ordinal)), "no rails rate set");
+        }
+
+        [TestMethod]
+        public void RailsEntry_WantedRateBecomesZeroWhileWaiting_PendingIsDropped()
+        {
+            BeginWaiting(Seconds(600));
+            game.Ut = session.TargetUt - 1;
+            Frame();
+            Assert.AreEqual(0, game.LateHooked);
+            game.RunLateUpdate();
+            Assert.AreEqual(0, game.SetRateCalls);
+        }
+
+        [TestMethod]
+        public void RailsEntry_WantedRateChangesWhileWaiting_OnlyTheIndexChanges_OneCallback()
+        {
+            BeginWaiting(Seconds(1e6));
+            game.Ut = session.TargetUt - 1000;
+            Frame();
+            Assert.AreEqual(1, game.LateHooked);
+            Assert.AreEqual(1, game.LateAdds);
+            Assert.AreEqual(0, game.SetRateCalls);
+            game.RunLateUpdate();
+            Assert.AreEqual(5, AppliedIndex());
+        }
+
+        [TestMethod]
+        public void RailsEntry_FromPhysicsMode_ModeChangesInThatFrame_RateComesInTheCallback()
+        {
+            game.RailsMode = false;
+            game.Index = 1;
+            game.Rate = 2;
+            game.TargetRate = 2;
+            BeginWaiting(Seconds(600));
+            Assert.AreEqual(game.Calls.Count - 1, game.Calls.IndexOf("SetMode:True"), "no rate set after the mode change");
+            Assert.IsTrue(game.RailsMode);
+            game.RunLateUpdate();
+            Assert.AreEqual("SetRate:" + game.Index + ":True", game.Calls[game.Calls.Count - 1]);
+            Assert.IsTrue(game.Index > 0);
+        }
+
+        [TestMethod]
+        public void RailsEntry_LoweredFromAboveZero_NoCallback_ChangesInThatFrame()
+        {
+            BeginWaiting(Seconds(1e6));
+            game.RunLateUpdate();
+            Assert.AreEqual(1, game.LateAdds);
+            Frames(5);
+            game.Ut = session.TargetUt - 2100; // this frame advances UT by 2000 at rate 100000
+            Frame();
+            Assert.AreEqual(1, game.LateAdds);
+            Assert.AreEqual("SetRate:4:True", game.Calls[game.Calls.Count - 1]);
+            Assert.AreEqual(4, game.Index);
+        }
+
+        [TestMethod]
+        public void RailsEntry_RaiseFromIndexAboveZero_NoCallback_ThroughTheGame()
+        {
+            game.OnRails = true;
+            game.Index = 1;
+            game.Rate = 5;
+            game.TargetRate = 5;
+            Begin(Seconds(1e6));
+            Assert.AreEqual(0, game.LateAdds);
+            Assert.AreEqual("SetRate:7:False", game.Calls[0]);
+        }
+
+        [TestMethod]
+        public void RailsEntry_VesselAlreadyOnRailsAtIndexZero_AlsoWaitsForTheCallback()
+        {
+            game.OnRails = true;
+            game.AutoLateUpdate = false;
+            Begin(Seconds(600));
+            Assert.AreEqual(0, game.SetRateCalls);
+            Assert.AreEqual(1, game.LateHooked);
+            game.RunLateUpdate();
+            Assert.AreEqual(game.Index, AppliedIndex());
+        }
+
+        [TestMethod]
+        public void RailsEntry_IndexZeroWhileTheGameStillLowersTheRate_WaitsForTheCallback()
+        {
+            game.OnRails = true;
+            game.BridgeFirst = true;
+            game.AutoLateUpdate = false;
+            game.Rate = 37;
+            Begin(Seconds(600));
+            Assert.AreEqual(0, game.Index);
+            Assert.AreEqual(0, game.SetRateCalls);
+            Assert.AreEqual(1, game.LateHooked);
+        }
+
+        [TestMethod]
+        public void RailsEntry_NoPhysicsFrameAdvancesUt_WithTheVesselOffRails()
+        {
+            foreach (bool bridgeFirst in new[] { false, true })
+            {
+                FakeWarpGame g = new FakeWarpGame { BridgeFirst = bridgeFirst };
+                WarpSession s = new WarpSession(g, Seconds(1e6));
+                WarpProgress p = WarpProgress.Running;
+                g.Step(() =>
+                {
+                    s.Start(g.Ut);
+                    p = s.Tick(g.Ut);
+                });
+                for (int i = 0; i < 200000 && p == WarpProgress.Running; i++)
+                    g.Step(() => p = s.Tick(g.Ut));
+                Assert.AreEqual(WarpProgress.Arrived, p);
+                Assert.AreEqual(0.0, g.UtInPhysicsAboveRate1);
+                Assert.AreEqual(0, g.LateHooked);
+            }
+        }
+
+        [TestMethod]
+        public void PhysicsWarp_RaiseFromZero_NoCallback_SetsTheRateInThatFrame()
+        {
+            game.BlockReason = "under_acceleration";
+            Begin(Seconds(300, physics: 4));
+            Run(() => game.Rate == 4);
+            Assert.AreEqual(0, game.LateAdds);
+            Assert.IsTrue(game.Calls.Contains("SetRate:3:False"));
         }
     }
 }

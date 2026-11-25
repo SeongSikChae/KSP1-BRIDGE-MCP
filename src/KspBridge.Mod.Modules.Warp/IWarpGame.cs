@@ -1,4 +1,5 @@
 using KspBridge.Mod.Modules.Maneuver;
+using System;
 using System.Collections.Generic;
 
 namespace KspBridge.Mod.Modules.Warp
@@ -50,6 +51,9 @@ namespace KspBridge.Mod.Modules.Warp
 
         OrbitReading ReadOrbit();
 
+        /// <summary>What the orbit check reads in this physics frame (<paramref name="ut"/> is the frame's UT).</summary>
+        CheckReading ReadCheck(double ut);
+
         /// <summary>The first maneuver node's start checks and burn start (maneuver module, D014).</summary>
         NodeStartResult ReadNode();
 
@@ -58,6 +62,14 @@ namespace KspBridge.Mod.Modules.Warp
 
         /// <summary>Highest rails rate index up to <paramref name="index"/> the game allows now; the reason says why 0.</summary>
         int RailsLimit(int index, out string reason);
+
+        /// <summary><c>FlightGlobals.overrideOrbit</c>: while true the game puts no vessel on rails (D01_08).</summary>
+        bool OverrideOrbit { get; }
+
+        /// <summary>Hooks <paramref name="action"/> to the game's <c>LateUpdate</c>, in a stage before <c>OrbitPhysicsManager</c> (D01_08).</summary>
+        void AddLateUpdate(Action action);
+
+        void RemoveLateUpdate(Action action);
 
         void SetRate(int index, bool instant);
 

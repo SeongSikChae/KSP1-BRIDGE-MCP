@@ -49,6 +49,30 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         public bool AutoWarp;
         public int SetRateCalls;
         public int RaiseCalls;
+
+        /// <summary>Raises of the rate index with the rate in effect at once (instant).</summary>
+        public int InstantRaiseCalls;
+
+        /// <summary>FlightGlobals.overrideOrbit.</summary>
+        public bool OverrideOrbit { get; set; }
+
+        /// <summary>Every physics frame ends with a render frame that runs the LateUpdate callbacks (set false to run them by hand).</summary>
+        public bool AutoLateUpdate = true;
+
+        /// <summary>Callbacks hooked to the LateUpdate stage before OrbitPhysicsManager.</summary>
+        public Action LateCallbacks;
+
+        public int LateAdds;
+        public int LateRemoves;
+
+        /// <summary>Callbacks hooked now.</summary>
+        public int LateHooked => LateCallbacks == null ? 0 : LateCallbacks.GetInvocationList().Length;
+
+        /// <summary>The game calls the step made, in order: "SetMode:rails", "SetRate:index:instant".</summary>
+        public readonly List<string> Calls = new List<string>();
+
+        /// <summary>UT (s) that passed in physics frames while the rate was above 1 and the vessel was not on rails.</summary>
+        public double UtInPhysicsAboveRate1;
         public bool ThrowOnLimit;
 
         /// <summary>Rate with which the sphere of influence was entered.</summary>
@@ -73,6 +97,29 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         public OrbitReading Orbit { get; set; } = new OrbitReading
         {
             Eccentricity = 0.02, ApoapsisRadius = 720000, SphereOfInfluence = 84159286, TimeToApoapsis = 900, TimeToPeriapsis = 1800,
+        };
+
+        /// <summary>What ReadCheck gives (R01): the orbit, thrust, RCS, altitude, parts, body and ground contact.</summary>
+        public double ApoapsisM = 2863334.0;
+        public double PeriapsisM = 2863334.0;
+        public double Eccentricity = 1e-9;
+        public double SemiMajorAxisM = 3463334.0;
+        public double Thrust;
+        public bool RcsOn;
+        public bool AboveAtmosphere = true;
+        public int PartCount = 12;
+        public string BodyName = "Kerbin";
+        public bool Landed;
+
+        public CheckReading ReadCheck(double ut) => new CheckReading
+        {
+            Orbit = OrbitRecord.From(ut, ApoapsisM, PeriapsisM, Eccentricity, SemiMajorAxisM),
+            Thrust = Thrust,
+            Rcs = RcsOn,
+            AboveAtmosphere = AboveAtmosphere,
+            PartCount = PartCount,
+            Body = BodyName,
+            Landed = Landed,
         };
 
         public WarpReading Read() => new WarpReading
@@ -114,16 +161,40 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             return limit;
         }
 
+        public void AddLateUpdate(Action action)
+        {
+            LateAdds++;
+            LateCallbacks += action;
+        }
+
+        public void RemoveLateUpdate(Action action)
+        {
+            LateRemoves++;
+            LateCallbacks -= action;
+        }
+
+        /// <summary>The render frame's LateUpdate callbacks, which run before the game's own LateUpdate.</summary>
+        public void RunLateUpdate() => LateCallbacks?.Invoke();
+
         public void SetRate(int index, bool instant)
         {
+            Calls.Add("SetRate:" + index + ":" + instant);
             SetRateCalls++;
             int before = Index;
             Change(index, instant, instantIfLower: false, force: true);
             if (Index > before)
+            {
                 RaiseCalls++;
+                if (instant)
+                    InstantRaiseCalls++;
+            }
         }
 
-        public void SetMode(bool rails) => RailsMode = rails;
+        public void SetMode(bool rails)
+        {
+            Calls.Add("SetMode:" + rails);
+            RailsMode = rails;
+        }
 
         public void CancelAutoWarp() => AutoWarp = false;
 
@@ -142,6 +213,8 @@ namespace KspBridge.Mod.Modules.Warp.Tests
         public void Step(Action bridge)
         {
             RealTime += Frame;
+            if (Rate > 1 && !OnRails)
+                UtInPhysicsAboveRate1 += Frame * Rate;
             Ut += Frame * Rate;
             if (SoiUt.HasValue && Ut >= SoiUt.Value)
             {
@@ -153,6 +226,8 @@ namespace KspBridge.Mod.Modules.Warp.Tests
             GameFixedUpdate();
             if (!BridgeFirst)
                 bridge();
+            if (AutoLateUpdate)
+                RunLateUpdate();
             LateUpdate();
         }
 
